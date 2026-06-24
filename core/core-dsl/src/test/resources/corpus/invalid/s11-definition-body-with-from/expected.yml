@@ -1,0 +1,4 @@
+rule: forbidden-field
+adr: "ADR-0016 §5 (X19)"
+path: from
+note: "from: on a kind: transform definition body; wiring is pipeline-side only"

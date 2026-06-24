@@ -1,0 +1,40 @@
+{
+  "id": "ali1688",
+  "name": "Alibaba 1688",
+  "displayName": "Alibaba 1688",
+  "icon": "icon/alibaba.png",
+  "group": "saas",
+  "modes": [
+    "api"
+  ],
+  "discovery": "catalog",
+  "sink": {
+    "capable": false,
+    "writeSemantics": []
+  },
+  "pushOut": false,
+  "config": [
+    {
+      "name": "code",
+      "type": "string",
+      "label": {
+        "en_US": "Authorize"
+      },
+      "required": true,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    }
+  ],
+  "provenance": {
+    "connectorRepoSha": "b4151f21",
+    "specPath": "connectors-javascript/ali1688-connector/src/main/resources/spec.json",
+    "specContentHash": "366e2bdf1f69dafa",
+    "pdkApiVersion": null,
+    "requiredLevel": null,
+    "modeSource": {
+      "api": "declared"
+    }
+  }
+}

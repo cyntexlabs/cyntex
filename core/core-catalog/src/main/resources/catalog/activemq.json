@@ -1,0 +1,79 @@
+{
+  "id": "activemq",
+  "name": "ActiveMQ",
+  "displayName": "Apache ActiveMQ",
+  "icon": "icons/activemq.png",
+  "group": "mq",
+  "modes": [
+    "stream"
+  ],
+  "discovery": "catalog",
+  "sink": {
+    "capable": true,
+    "writeSemantics": [
+      "upsert",
+      "append"
+    ]
+  },
+  "pushOut": true,
+  "config": [
+    {
+      "name": "mqQueueString",
+      "type": "string",
+      "label": {
+        "en_US": "Queue name"
+      },
+      "required": false,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    },
+    {
+      "name": "brokerURL",
+      "type": "string",
+      "label": {
+        "en_US": "MQ connection string"
+      },
+      "required": true,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    },
+    {
+      "name": "mqUsername",
+      "type": "string",
+      "label": {
+        "en_US": "Account"
+      },
+      "required": false,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    },
+    {
+      "name": "mqPassword",
+      "type": "string",
+      "label": {
+        "en_US": "Password"
+      },
+      "required": false,
+      "default": null,
+      "secret": true,
+      "options": [],
+      "visibleWhen": null
+    }
+  ],
+  "provenance": {
+    "connectorRepoSha": "b4151f21",
+    "specPath": "connectors/activemq-connector/src/main/resources/spec_activemq.json",
+    "specContentHash": "2f0df1b6e8c84329",
+    "pdkApiVersion": null,
+    "requiredLevel": null,
+    "modeSource": {
+      "stream": "declared"
+    }
+  }
+}

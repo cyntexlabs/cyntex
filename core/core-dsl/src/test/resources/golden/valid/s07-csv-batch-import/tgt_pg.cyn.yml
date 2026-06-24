@@ -1,0 +1,9 @@
+version: cyntex/v1
+kind: source
+id: tgt_pg
+connector: postgres
+config:
+  database: dw
+  host: 10.30.0.6
+  password: Pg_2026
+  username: writer

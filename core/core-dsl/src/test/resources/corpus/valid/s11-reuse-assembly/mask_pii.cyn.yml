@@ -1,0 +1,7 @@
+# ADR-0016 §14.11 — reusable definition bodies + pure-reference assembly (X19).
+# Definition body = pure logic, from: is forbidden (wiring belongs to the pipeline).
+version: cyntex/v1
+kind: transform
+id: mask_pii
+type: map
+fields: { ssn: false, phone: false }

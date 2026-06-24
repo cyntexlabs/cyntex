@@ -1,0 +1,14 @@
+# map computed value = CEL row expression ("=..." marker, §12).
+version: cyntex/v1
+kind: pipeline
+id: csv2pg
+source: csv_in
+transforms:
+  - id: norm
+    from: [legacy_customers]
+    type: map
+    fields: { customer_id: $cust_no, joined_at: "=timestamp(after.join_date)" }
+serve:
+  from: norm
+  sync:
+    - { id: pg, source: tgt_pg, write_mode: append }

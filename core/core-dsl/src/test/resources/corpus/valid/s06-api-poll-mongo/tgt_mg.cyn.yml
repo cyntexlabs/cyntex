@@ -1,0 +1,6 @@
+# Write-target connection (pure connection supplier, X18).
+version: cyntex/v1
+kind: source
+id: tgt_mg
+connector: mongodb
+config: { uri: "mongodb://10.30.0.11:27017/ods" }

@@ -1,0 +1,6 @@
+# Write-target connection (pure connection supplier, X18).
+version: cyntex/v1
+kind: source
+id: tgt_pg
+connector: postgres
+config: { host: 10.30.0.6, database: dw, username: writer, password: Pg_2026 }

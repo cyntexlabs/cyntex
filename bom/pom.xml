@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  The single dependencyManagement for the whole repo.
+  - Submodules never declare dependency versions; new dependencies are registered here first.
+  - Independently publishable so external consumers can align versions against it.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>io.cyntex</groupId>
+    <artifactId>cyntex</artifactId>
+    <version>${revision}</version>
+  </parent>
+
+  <artifactId>bom</artifactId>
+  <packaging>pom</packaging>
+  <name>Cyntex :: BOM</name>
+
+  <properties>
+    <jackson.version>2.18.2</jackson.version>
+    <snakeyaml.version>2.4</snakeyaml.version>
+    <cel.version>0.10.1</cel.version>
+    <!-- CLI facade libraries (surface ring): the command framework and the REPL line reader.
+         Both are self-contained (picocli has no transitive deps; jline aggregates its own
+         modules at one version) and are allowlisted to the cli module only (rule R6). -->
+    <picocli.version>4.7.7</picocli.version>
+    <jline.version>3.26.3</jline.version>
+    <junit.version>5.11.4</junit.version>
+    <assertj.version>3.26.3</assertj.version>
+    <archunit.version>1.3.0</archunit.version>
+  </properties>
+
+  <dependencyManagement>
+    <dependencies>
+      <dependency>
+        <groupId>com.fasterxml.jackson</groupId>
+        <artifactId>jackson-bom</artifactId>
+        <version>${jackson.version}</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+      <dependency>
+        <groupId>org.junit</groupId>
+        <artifactId>junit-bom</artifactId>
+        <version>${junit.version}</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+      <dependency>
+        <groupId>org.assertj</groupId>
+        <artifactId>assertj-bom</artifactId>
+        <version>${assertj.version}</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+      <dependency>
+        <groupId>org.yaml</groupId>
+        <artifactId>snakeyaml</artifactId>
+        <version>${snakeyaml.version}</version>
+      </dependency>
+      <!-- CEL (Common Expression Language): the §12 ② row-expression layer. Used by core-dsl
+           to compile + type-check filter / computed expressions at validate time (never to
+           evaluate). The single 'cel' aggregate artifact pulls its own transitive closure
+           (guava / protobuf / antlr4 / re2j); those are allowlisted in core-dsl's enforcer. -->
+      <dependency>
+        <groupId>dev.cel</groupId>
+        <artifactId>cel</artifactId>
+        <version>${cel.version}</version>
+      </dependency>
+      <!-- Convergence pin for the cel closure: cel depends on error_prone_annotations 2.38.0
+           directly while its transitive guava depends on 2.36.0. Pin the higher version so
+           enforcer's dependencyConvergence stays green (annotations only, no runtime behavior). -->
+      <dependency>
+        <groupId>com.google.errorprone</groupId>
+        <artifactId>error_prone_annotations</artifactId>
+        <version>2.38.0</version>
+      </dependency>
+      <dependency>
+        <groupId>com.tngtech.archunit</groupId>
+        <artifactId>archunit-junit5</artifactId>
+        <version>${archunit.version}</version>
+      </dependency>
+      <!-- CLI framework + REPL line reader; allowlisted to the cli module only (R6). -->
+      <dependency>
+        <groupId>info.picocli</groupId>
+        <artifactId>picocli</artifactId>
+        <version>${picocli.version}</version>
+      </dependency>
+      <!-- picocli's annotation processor: at compile time it emits the native-image reflection
+           config for the command tree, so the native binary needs no hand-written reflect config.
+           Used only as a compiler annotationProcessorPath in cli (not a runtime dependency); managed
+           here so that path can omit the version and stay pinned to the picocli version above. -->
+      <dependency>
+        <groupId>info.picocli</groupId>
+        <artifactId>picocli-codegen</artifactId>
+        <version>${picocli.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>org.jline</groupId>
+        <artifactId>jline</artifactId>
+        <version>${jline.version}</version>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
+
+  <build>
+    <plugins>
+      <!-- Publishing shape: keep dependencyManagement, drop the parent (independently consumable) -->
+      <plugin>
+        <groupId>org.codehaus.mojo</groupId>
+        <artifactId>flatten-maven-plugin</artifactId>
+        <configuration>
+          <flattenMode>bom</flattenMode>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+</project>

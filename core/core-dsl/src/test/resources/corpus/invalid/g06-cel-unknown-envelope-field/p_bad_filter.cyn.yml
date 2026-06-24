@@ -1,0 +1,12 @@
+# Invalid: the filter predicate references 'afterr', a typo of the 'after' envelope field.
+# CEL type-checking against the §6 envelope (op/ts/src/before/after/schema) rejects the
+# undeclared reference at validate time — the static-validation payoff of §12.
+version: cyntex/v1
+kind: pipeline
+id: p_bad_filter
+source: src_a
+transforms:
+  - id: f
+    from: [orders]
+    type: filter
+    expr: "afterr.region == 'US'"

@@ -1,0 +1,91 @@
+{
+  "id": "yashandb",
+  "name": "YashanDB",
+  "displayName": "YashanDB",
+  "icon": "icons/yashandb.png",
+  "group": "database",
+  "modes": [
+    "snapshot"
+  ],
+  "discovery": "catalog",
+  "sink": {
+    "capable": true,
+    "writeSemantics": [
+      "upsert",
+      "append"
+    ]
+  },
+  "pushOut": false,
+  "config": [
+    {
+      "name": "host",
+      "type": "string",
+      "label": {
+        "en_US": "Host"
+      },
+      "required": true,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    },
+    {
+      "name": "port",
+      "type": "string",
+      "label": {
+        "en_US": "Port"
+      },
+      "required": true,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    },
+    {
+      "name": "schema",
+      "type": "string",
+      "label": {
+        "en_US": "schema"
+      },
+      "required": true,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    },
+    {
+      "name": "user",
+      "type": "string",
+      "label": {
+        "en_US": "username"
+      },
+      "required": true,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    },
+    {
+      "name": "password",
+      "type": "string",
+      "label": {
+        "en_US": "password"
+      },
+      "required": true,
+      "default": null,
+      "secret": true,
+      "options": [],
+      "visibleWhen": null
+    }
+  ],
+  "provenance": {
+    "connectorRepoSha": "b4151f21",
+    "specPath": "connectors/yashandb-connector/src/main/resources/yashandb-spec.json",
+    "specContentHash": "7b7f70292f61d504",
+    "pdkApiVersion": null,
+    "requiredLevel": null,
+    "modeSource": {
+      "snapshot": "declared"
+    }
+  }
+}

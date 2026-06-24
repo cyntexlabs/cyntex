@@ -1,0 +1,4 @@
+rule: composition
+adr: "ADR-0016 §1 (X17)"
+path: ""
+note: "pipeline lacks both view and serve; minimal composition = source + view/serve"

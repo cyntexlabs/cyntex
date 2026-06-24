@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>io.cyntex</groupId>
+    <artifactId>core</artifactId>
+    <version>${revision}</version>
+  </parent>
+
+  <artifactId>core-dsl</artifactId>
+  <name>Cyntex :: Core :: DSL</name>
+  <description>YAML parse / validate / CEL checking for .cyn.yml artifacts; carries the ADR-0016 §14 corpus</description>
+
+  <dependencies>
+    <!-- compile scope: the error-code contract (CyntexException / CyntexErrorCode) — DslError
+         is the dsl domain's first consumer (ADR-0024) -->
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>core-common</artifactId>
+      <version>${revision}</version>
+    </dependency>
+
+    <!-- compile scope: the parse layer (B3) produces core-model resource objects -->
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>core-model</artifactId>
+      <version>${revision}</version>
+    </dependency>
+
+    <!-- compile scope: the capability-matrix validation layer (C3) consults the connector-derived
+         catalog schema for mode × connector legality and config field type / enum checks. Both are
+         core-ring modules, so this is an intra-ring dependency (no third-party surface added). -->
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>core-catalog</artifactId>
+      <version>${revision}</version>
+    </dependency>
+
+    <!-- snakeyaml at compile scope: the parse layer (B3) reads .cyn.yml. The core-ring
+         allowlist grant for it lives in this module's enforcer override below (R1). -->
+    <dependency>
+      <groupId>org.yaml</groupId>
+      <artifactId>snakeyaml</artifactId>
+    </dependency>
+
+    <!-- cel-java at compile scope: the validate layer (B4) compiles + type-checks §12 CEL
+         expressions. It drags a transitive closure (guava / protobuf / antlr4 / re2j and their
+         own deps); the whole closure is allowlisted to core-dsl ONLY in the enforcer below (R1). -->
+    <dependency>
+      <groupId>dev.cel</groupId>
+      <artifactId>cel</artifactId>
+    </dependency>
+
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.assertj</groupId>
+      <artifactId>assertj-core</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <!-- Core-ring allowlist grant (R1): snakeyaml and cel-java (with its full transitive
+           closure) are permitted at compile scope in core-dsl ONLY. Appends to the parent core
+           ring's enforce-core-ring-whitelist rule (core/pom.xml); every other core module still
+           bans them. The cel closure is named artifact-by-artifact on purpose: a cel upgrade that
+           drags in a new transitive dependency trips this gate and forces a conscious re-review
+           rather than silently widening the core ring's third-party surface. -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-enforcer-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>enforce-core-ring-whitelist</id>
+            <configuration>
+              <rules>
+                <bannedDependencies>
+                  <includes combine.children="append">
+                    <include>org.yaml:snakeyaml</include>
+                    <!-- cel-java aggregate -->
+                    <include>dev.cel:cel</include>
+                    <!-- guava + its companions -->
+                    <include>com.google.guava:guava</include>
+                    <include>com.google.guava:failureaccess</include>
+                    <include>com.google.guava:listenablefuture</include>
+                    <include>com.google.j2objc:j2objc-annotations</include>
+                    <!-- protobuf (cel encodes ASTs as protobuf) -->
+                    <include>com.google.protobuf:protobuf-java</include>
+                    <include>com.google.protobuf:protobuf-javalite</include>
+                    <!-- regex + parser runtimes -->
+                    <include>com.google.re2j:re2j</include>
+                    <include>org.antlr:antlr4-runtime</include>
+                    <!-- annotation-only deps (no runtime behavior) -->
+                    <include>com.google.auto.value:auto-value-annotations</include>
+                    <include>com.google.code.findbugs:annotations</include>
+                    <include>com.google.code.findbugs:jsr305</include>
+                    <include>net.jcip:jcip-annotations</include>
+                    <include>com.google.errorprone:error_prone_annotations</include>
+                    <include>org.jspecify:jspecify</include>
+                    <!-- date/time backport used by cel timestamp/duration -->
+                    <include>org.threeten:threeten-extra</include>
+                  </includes>
+                </bannedDependencies>
+              </rules>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
+</project>

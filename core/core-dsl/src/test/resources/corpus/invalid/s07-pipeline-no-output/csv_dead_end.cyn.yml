@@ -1,0 +1,11 @@
+# Invalid: no view and no serve — minimal pipeline composition is source + at least one
+# of view / serve; a pipeline without an output surface is illegal (X17).
+version: cyntex/v1
+kind: pipeline
+id: csv_dead_end
+source: csv_in
+transforms:
+  - id: norm
+    from: [legacy_customers]
+    type: map
+    fields: { customer_id: $cust_no }

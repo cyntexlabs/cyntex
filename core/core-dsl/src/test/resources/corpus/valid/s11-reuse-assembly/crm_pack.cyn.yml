@@ -1,0 +1,11 @@
+# Pure-reference assembly: string step / block = use sugar (reference + natural-order
+# wiring); first transforms step must write from: (X19).
+version: cyntex/v1
+kind: pipeline
+id: crm_pack
+source: src_crm
+transforms:
+  - { type: filter, from: [customers], expr: "op != 'd'" }
+  - mask_pii
+view:  v_cust
+serve: std_api

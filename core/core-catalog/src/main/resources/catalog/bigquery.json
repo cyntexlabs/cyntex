@@ -1,0 +1,51 @@
+{
+  "id": "bigquery",
+  "name": "BigQuery",
+  "displayName": "BigQuery",
+  "icon": "icons/bigquery.png",
+  "group": "other",
+  "modes": [],
+  "discovery": "catalog",
+  "sink": {
+    "capable": true,
+    "writeSemantics": [
+      "upsert",
+      "append"
+    ]
+  },
+  "pushOut": false,
+  "config": [
+    {
+      "name": "serviceAccount",
+      "type": "string",
+      "label": {
+        "en_US": "Service Account(JSON)"
+      },
+      "required": true,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    },
+    {
+      "name": "tableSet",
+      "type": "string",
+      "label": {
+        "en_US": "Table Set ID"
+      },
+      "required": true,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    }
+  ],
+  "provenance": {
+    "connectorRepoSha": "b4151f21",
+    "specPath": "connectors/bigquery-connector/src/main/resources/spec-v2.json",
+    "specContentHash": "2702e1194211127b",
+    "pdkApiVersion": null,
+    "requiredLevel": null,
+    "modeSource": {}
+  }
+}

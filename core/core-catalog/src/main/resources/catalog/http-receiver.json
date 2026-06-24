@@ -1,0 +1,117 @@
+{
+  "id": "http-receiver",
+  "name": "Http Receiver",
+  "displayName": "HTTP Receiver",
+  "icon": "icons/http.png",
+  "group": "saas",
+  "modes": [
+    "snapshot"
+  ],
+  "discovery": "catalog",
+  "sink": {
+    "capable": false,
+    "writeSemantics": []
+  },
+  "pushOut": false,
+  "config": [
+    {
+      "name": "tableName",
+      "type": "string",
+      "label": {
+        "en_US": "Table Name"
+      },
+      "required": true,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    },
+    {
+      "name": "hookText",
+      "type": "string",
+      "label": {
+        "en_US": "Service URL"
+      },
+      "required": false,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    },
+    {
+      "name": "hookURLSuffix",
+      "type": "string",
+      "label": {
+        "en_US": "Server URL Addr"
+      },
+      "required": false,
+      "default": "",
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    },
+    {
+      "name": "expireSeconds",
+      "type": "string",
+      "label": {
+        "en_US": "Token expiration time"
+      },
+      "required": true,
+      "default": "3600",
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    },
+    {
+      "name": "supplierConfig",
+      "type": "array",
+      "label": {
+        "en_US": "Supplier List"
+      },
+      "required": false,
+      "default": "[]",
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    },
+    {
+      "name": "handleType",
+      "type": "boolean",
+      "label": {
+        "en_US": "Enable data processing scripts"
+      },
+      "required": true,
+      "default": "false",
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    },
+    {
+      "name": "eventScript",
+      "type": "string",
+      "label": {
+        "en_US": "Data processing script"
+      },
+      "required": false,
+      "default": "\n\n\t//${node_return_type}\n\t//return {\n\t//\t\"opType\": \"i\", ${node_event_type}\n\t//\t\"after\": { }, ${node_event_data}\n\t//}\n\treturn {\n\t\t\"opType\": \"i\", \n\t\t\"after\": eventData\n\t};",
+      "secret": false,
+      "options": [],
+      "visibleWhen": {
+        "controllingField": "handleType",
+        "equalsAnyOf": [
+          "true"
+        ]
+      }
+    }
+  ],
+  "provenance": {
+    "connectorRepoSha": "b4151f21",
+    "specPath": "connectors/http-receiver-connector/src/main/resources/spec.json",
+    "specContentHash": "fce4d294ca13c405",
+    "pdkApiVersion": null,
+    "requiredLevel": null,
+    "modeSource": {
+      "snapshot": "derived"
+    }
+  }
+}

@@ -1,0 +1,15 @@
+version: cyntex/v1
+kind: pipeline
+id: orders_eu
+source: src_orders
+transforms:
+  - id: eu_only
+    type: filter
+    from: [orders]
+    expr: "after.region == 'EU'"
+serve:
+  id: serve
+  from: eu_only
+  sync:
+    - id: eu_db
+      source: tgt_eu_my

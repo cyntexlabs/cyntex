@@ -1,0 +1,6 @@
+version: cyntex/v1
+kind: serve
+id: std_api
+query:
+  - type: rest
+  - type: mcp

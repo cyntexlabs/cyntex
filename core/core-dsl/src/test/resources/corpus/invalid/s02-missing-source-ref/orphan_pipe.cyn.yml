@@ -1,0 +1,10 @@
+# Invalid: references src_missing which is absent from this batch (closure = the batch
+# in offline validate, ADR-0021 §3 projection).
+version: cyntex/v1
+kind: pipeline
+id: orphan_pipe
+source: src_missing
+serve:
+  from: /.*/
+  sync:
+    - { id: out, source: tgt_pg, write_mode: upsert }

@@ -1,0 +1,9 @@
+version: cyntex/v1
+kind: source
+id: csv_in
+connector: csv
+config:
+  header: true
+  path: /data/in/*.csv
+mode: file
+tables: [legacy_customers]

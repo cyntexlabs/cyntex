@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  catalog-assembler — the PDK-free assembly segment of the connector catalog pipeline.
+
+  It walks a pinned tapdata-connectors checkout (offline, no classloading), parses each
+  connector's canonical spec.json into a neutral tree, drives the core-catalog normalizer and
+  merge rules (merging the capability bitmap that catalog-derive produces with the spec data and
+  any declared cyntex.modes), and emits the deterministic, byte-locked catalog snapshot the
+  runtime loads, plus an ingest report. Zero PDK and zero third-party: spec parsing reuses
+  core-catalog's hand-rolled JSON reader and output uses a hand-rolled deterministic writer.
+
+  A reactor module (built by the default build) but NOT a ring: it is a build tool, like
+  arch-tests. Its heavy tests (walking the checkout, regenerating + byte-locking) skip when the
+  connectors checkout is absent, so the default no-checkout build stays green.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>io.cyntex</groupId>
+    <artifactId>cyntex</artifactId>
+    <version>${revision}</version>
+    <relativePath>../../pom.xml</relativePath>
+  </parent>
+
+  <artifactId>catalog-assembler</artifactId>
+  <name>Cyntex :: Tools :: Catalog Assembler</name>
+  <description>Build tool that assembles the bundled connector catalog from a tapdata-connectors
+    checkout: walks connectors, normalizes spec.json via core-catalog, merges the derived capability
+    bitmap and declared modes, and emits the deterministic byte-locked catalog snapshot plus an
+    ingest report. PDK-free; not a ring module.</description>
+
+  <dependencyManagement>
+    <dependencies>
+      <dependency>
+        <groupId>io.cyntex</groupId>
+        <artifactId>bom</artifactId>
+        <version>${revision}</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
+
+  <dependencies>
+    <!-- The catalog consumption surface: row model, normalizer, merge rules, and the hand-rolled
+         JSON reader this tool reuses to parse spec.json (so it ships no JSON library). -->
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>core-catalog</artifactId>
+      <version>${revision}</version>
+    </dependency>
+
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.assertj</groupId>
+      <artifactId>assertj-core</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+</project>

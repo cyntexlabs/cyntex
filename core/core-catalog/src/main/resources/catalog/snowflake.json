@@ -1,0 +1,315 @@
+{
+  "id": "snowflake",
+  "name": "Snowflake",
+  "displayName": "Snowflake",
+  "icon": "icons/snowflake.png",
+  "group": "database",
+  "modes": [
+    "snapshot"
+  ],
+  "discovery": "catalog",
+  "sink": {
+    "capable": true,
+    "writeSemantics": [
+      "upsert",
+      "append"
+    ]
+  },
+  "pushOut": false,
+  "config": [
+    {
+      "name": "account",
+      "type": "string",
+      "label": {
+        "en_US": "Account"
+      },
+      "required": true,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    },
+    {
+      "name": "user",
+      "type": "string",
+      "label": {
+        "en_US": "User"
+      },
+      "required": true,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    },
+    {
+      "name": "authMethod",
+      "type": "string",
+      "label": {
+        "en_US": "Authentication Method"
+      },
+      "required": false,
+      "default": "password",
+      "secret": false,
+      "options": [
+        {
+          "value": "password",
+          "label": {
+            "en_US": "Password"
+          }
+        },
+        {
+          "value": "pat",
+          "label": {
+            "en_US": "PAT Token"
+          }
+        },
+        {
+          "value": "keyPair",
+          "label": {
+            "en_US": "Key Pair"
+          }
+        }
+      ],
+      "visibleWhen": null
+    },
+    {
+      "name": "password",
+      "type": "string",
+      "label": {
+        "en_US": "Password"
+      },
+      "required": false,
+      "default": null,
+      "secret": true,
+      "options": [],
+      "visibleWhen": null
+    },
+    {
+      "name": "patToken",
+      "type": "string",
+      "label": {
+        "en_US": "PAT Token"
+      },
+      "required": false,
+      "default": null,
+      "secret": true,
+      "options": [],
+      "visibleWhen": null
+    },
+    {
+      "name": "privateKey",
+      "type": "string",
+      "label": {
+        "en_US": "Private Key"
+      },
+      "required": false,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    },
+    {
+      "name": "privateKeyPassword",
+      "type": "string",
+      "label": {
+        "en_US": "Private Key Password"
+      },
+      "required": false,
+      "default": null,
+      "secret": true,
+      "options": [],
+      "visibleWhen": null
+    },
+    {
+      "name": "warehouse",
+      "type": "string",
+      "label": {
+        "en_US": "Warehouse"
+      },
+      "required": true,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    },
+    {
+      "name": "database",
+      "type": "string",
+      "label": {
+        "en_US": "Database"
+      },
+      "required": true,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    },
+    {
+      "name": "schema",
+      "type": "string",
+      "label": {
+        "en_US": "Schema"
+      },
+      "required": true,
+      "default": "PUBLIC",
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    },
+    {
+      "name": "role",
+      "type": "string",
+      "label": {
+        "en_US": "Role"
+      },
+      "required": false,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    },
+    {
+      "name": "timezone",
+      "type": "string",
+      "label": {
+        "en_US": "Timezone"
+      },
+      "required": false,
+      "default": "+00:00",
+      "secret": false,
+      "options": [
+        {
+          "value": "-11:00",
+          "label": {
+            "en_US": "UTC -11"
+          }
+        },
+        {
+          "value": "-10:00",
+          "label": {
+            "en_US": "UTC -10"
+          }
+        },
+        {
+          "value": "-09:00",
+          "label": {
+            "en_US": "UTC -09"
+          }
+        },
+        {
+          "value": "-08:00",
+          "label": {
+            "en_US": "UTC -08"
+          }
+        },
+        {
+          "value": "-07:00",
+          "label": {
+            "en_US": "UTC -07"
+          }
+        },
+        {
+          "value": "-06:00",
+          "label": {
+            "en_US": "UTC -06"
+          }
+        },
+        {
+          "value": "-05:00",
+          "label": {
+            "en_US": "UTC -05"
+          }
+        },
+        {
+          "value": "-04:00",
+          "label": {
+            "en_US": "UTC -04"
+          }
+        },
+        {
+          "value": "-03:00",
+          "label": {
+            "en_US": "UTC -03"
+          }
+        },
+        {
+          "value": "-02:00",
+          "label": {
+            "en_US": "UTC -02"
+          }
+        },
+        {
+          "value": "-01:00",
+          "label": {
+            "en_US": "UTC -01"
+          }
+        },
+        {
+          "value": "+00:00",
+          "label": {
+            "en_US": "UTC"
+          }
+        },
+        {
+          "value": "+01:00",
+          "label": {
+            "en_US": "UTC +01"
+          }
+        },
+        {
+          "value": "+02:00",
+          "label": {
+            "en_US": "UTC +02"
+          }
+        },
+        {
+          "value": "+03:00",
+          "label": {
+            "en_US": "UTC +03"
+          }
+        },
+        {
+          "value": "+04:00",
+          "label": {
+            "en_US": "UTC +04"
+          }
+        },
+        {
+          "value": "+05:00",
+          "label": {
+            "en_US": "UTC +05"
+          }
+        },
+        {
+          "value": "+06:00",
+          "label": {
+            "en_US": "UTC +06"
+          }
+        },
+        {
+          "value": "+07:00",
+          "label": {
+            "en_US": "UTC +07"
+          }
+        },
+        {
+          "value": "+08:00",
+          "label": {
+            "en_US": "UTC +08"
+          }
+        }
+      ],
+      "visibleWhen": null
+    }
+  ],
+  "provenance": {
+    "connectorRepoSha": "b4151f21",
+    "specPath": "connectors/snowflake-connector/src/main/resources/spec_snowflake.json",
+    "specContentHash": "8a444f27dfaf1390",
+    "pdkApiVersion": null,
+    "requiredLevel": null,
+    "modeSource": {
+      "snapshot": "derived"
+    }
+  }
+}

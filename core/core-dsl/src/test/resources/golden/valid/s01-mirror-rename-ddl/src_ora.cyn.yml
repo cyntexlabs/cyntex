@@ -1,0 +1,15 @@
+version: cyntex/v1
+kind: source
+id: src_ora
+connector: oracle
+config:
+  host: 10.20.0.15
+  password: Ora_2026
+  port: 1521
+  service_name: ORCL
+  username: cdc_user
+mode: cdc
+tables: [ORDERS, ORDER_ITEMS, CUSTOMERS]
+options:
+  include_ddl: true
+  snapshot_mode: initial

@@ -1,0 +1,8 @@
+# CLI smoke fixture (invalid): 'mod' is a typo of 'mode' — strict unknown-field rejection.
+version: cyntex/v1
+kind: source
+id: src_typo
+connector: mysql
+config: { host: 10.0.0.1, username: u, password: p }
+mod: cdc
+tables: [ orders ]

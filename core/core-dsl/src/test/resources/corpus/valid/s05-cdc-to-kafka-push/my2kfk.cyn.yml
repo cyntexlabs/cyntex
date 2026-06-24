@@ -1,0 +1,11 @@
+# push = event stream egress (no table-model write); element = {id?, source, topic?, format?,
+# options?}, no type field — connector category is derived from the referenced source (X11).
+version: cyntex/v1
+kind: pipeline
+id: my2kfk
+source: src_my
+serve:
+  from: orders
+  push:
+    - source: tgt_kfk
+      topic: orders_events

@@ -1,0 +1,6 @@
+# CLI smoke fixture: a write-target MySQL connection (pure connection supplier).
+version: cyntex/v1
+kind: source
+id: tgt_my
+connector: mysql
+config: { host: 10.30.0.5, username: writer, password: My_2026 }

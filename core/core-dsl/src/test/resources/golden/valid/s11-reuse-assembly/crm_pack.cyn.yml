@@ -1,0 +1,17 @@
+version: cyntex/v1
+kind: pipeline
+id: crm_pack
+source: src_crm
+transforms:
+  - id: filter_1
+    type: filter
+    from: [customers]
+    expr: "op != 'd'"
+  - use: mask_pii
+    from: [filter_1]
+view:
+  use: v_cust
+  from: mask_pii
+serve:
+  use: std_api
+  from: v_cust

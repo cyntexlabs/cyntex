@@ -1,0 +1,12 @@
+# Invalid: the computed value '=after.region +' is not a well-formed CEL expression (a
+# trailing binary operator with no right operand). Compilation at validate time rejects the
+# malformed expression before it could ever reach the engine (§12).
+version: cyntex/v1
+kind: pipeline
+id: p_bad_map
+source: src_a
+transforms:
+  - id: m
+    from: [orders]
+    type: map
+    fields: { tag: "=after.region +" }

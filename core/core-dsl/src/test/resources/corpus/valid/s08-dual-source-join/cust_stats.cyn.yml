@@ -1,0 +1,19 @@
+# Multi-source = id list (X13/X17); join aliases = SQL table names; bare table names are
+# unambiguous across the two sources (X11). Minimal composition: source + view (no serve).
+version: cyntex/v1
+kind: pipeline
+id: cust_stats
+source: [ src_crm, src_erp ]
+transforms:
+  - id: cust_orders
+    type: join
+    from: { c: customers, o: orders }
+    engine: duckdb
+    sql: |
+      SELECT c.id AS customer_id, count(*) AS order_cnt, sum(o.amount) AS total
+      FROM c JOIN o ON o.customer_id = c.id GROUP BY c.id
+view:
+  id: cust_stats
+  from: cust_orders
+  primary_key: customer_id
+  storage: { warm: { collection: cust_stats } }

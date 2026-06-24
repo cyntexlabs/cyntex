@@ -1,0 +1,255 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  cli — the surface ring: Cyntex's offline CLI product front-end.
+
+  Dual-mode: bare `cyntex` opens an offline REPL; one-shot subcommands share the same verb
+  table for scripting / AI. Offline verbs are a whitelist (validate / new / explain); server
+  verbs are registered too but report "requires a connection" rather than going missing.
+
+  Ring rule R6: the CLI talks to services over HTTP only, so it carries no compile dependency
+  on any ring other than core. Its dependency surface is allowlisted (bannedDependencies, the
+  coarse twin of the arch-tests R6 rule): only the named core-ring modules plus picocli (command
+  framework) and jline (REPL line reader) are permitted. The core-ring artifacts are listed one
+  by one rather than via an io.cyntex:* wildcard, so a future non-core ring (control / runtime)
+  added here fails the build instead of being waved through by group id. Anything else fails the
+  build; widen the allowlist only by amending the recorded decision, never silently.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>io.cyntex</groupId>
+    <artifactId>cyntex</artifactId>
+    <version>${revision}</version>
+  </parent>
+
+  <artifactId>cli</artifactId>
+  <name>Cyntex :: CLI</name>
+  <description>Offline CLI product front-end: dual-mode REPL + one-shot verbs (validate / new /
+    explain), native-image packaged. Depends only on the core ring (rule R6).</description>
+
+  <properties>
+    <mainClass>io.cyntex.cli.Cli</mainClass>
+  </properties>
+
+  <dependencyManagement>
+    <dependencies>
+      <dependency>
+        <groupId>io.cyntex</groupId>
+        <artifactId>bom</artifactId>
+        <version>${revision}</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
+
+  <dependencies>
+    <!-- The offline DSL link: workspace load = parse + validate (structure / reference / capability). -->
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>core-dsl</artifactId>
+      <version>${revision}</version>
+    </dependency>
+    <!-- The same-source grammar JSON Schema that backs explain / completion. -->
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>core-schema</artifactId>
+      <version>${revision}</version>
+    </dependency>
+    <!-- The bundled connector catalog: the wizard reads it to offer connectors / modes / config. -->
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>core-catalog</artifactId>
+      <version>${revision}</version>
+    </dependency>
+    <!-- The error-code contract: severity drives exit codes; CyntexException is the rendered carrier. -->
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>core-common</artifactId>
+      <version>${revision}</version>
+    </dependency>
+
+    <!-- Surface-ring facade libraries (R6 allowlist). -->
+    <dependency>
+      <groupId>info.picocli</groupId>
+      <artifactId>picocli</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.jline</groupId>
+      <artifactId>jline</artifactId>
+    </dependency>
+
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.assertj</groupId>
+      <artifactId>assertj-core</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <!-- picocli's annotation processor emits the native-image reflection config for the command
+           tree at compile time, so the native binary needs no hand-written reflect config. It runs
+           on every build (harmless on the JVM); the generated config lands under
+           META-INF/native-image/io.cyntex/cli and is picked up automatically by the native build.
+           picocli-codegen is an annotationProcessorPath, not a project dependency, so it is outside
+           the R6 dependency allowlist below; its version is inherited from the BOM. -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <configuration>
+          <annotationProcessorPaths>
+            <path>
+              <groupId>info.picocli</groupId>
+              <artifactId>picocli-codegen</artifactId>
+            </path>
+          </annotationProcessorPaths>
+          <compilerArgs>
+            <arg>-Aproject=io.cyntex/cli</arg>
+          </compilerArgs>
+        </configuration>
+      </plugin>
+
+      <!-- R6 coarse gate: only io.cyntex modules + picocli + jline on the compile/runtime surface.
+           The fine-grained twin is the arch-tests R6 ArchUnit rule. -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-enforcer-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>enforce-cli-ring-whitelist</id>
+            <goals>
+              <goal>enforce</goal>
+            </goals>
+            <configuration>
+              <rules>
+                <bannedDependencies>
+                  <!-- Direct dependencies only: the CLI adds no third-party beyond picocli / jline.
+                       The DSL link's own libraries (snakeyaml, cel, jackson-annotations) arrive
+                       transitively through the core ring, which governs that surface under R1 — they
+                       are not the CLI's to re-allowlist. This gate covers direct deps; the arch-tests
+                       R6 rule covers the package edges the CLI's bytecode actually references. A
+                       non-core ring cannot reach the CLI transitively either, because R1 keeps the
+                       core ring free of any non-core dependency. -->
+                  <searchTransitive>false</searchTransitive>
+                  <excludes>
+                    <exclude>*</exclude>
+                  </excludes>
+                  <includes>
+                    <!-- the core ring, named one by one (no io.cyntex:* wildcard, so a future
+                         control / runtime ring added here is a conscious, build-failing change) -->
+                    <include>io.cyntex:core-common</include>
+                    <include>io.cyntex:core-model</include>
+                    <include>io.cyntex:core-dsl</include>
+                    <include>io.cyntex:core-schema</include>
+                    <include>io.cyntex:core-catalog</include>
+                    <include>info.picocli:picocli</include>
+                    <!-- jline aggregates its own modules under one version -->
+                    <include>org.jline:*</include>
+                    <!-- test scope never ships -->
+                    <include>*:*:*:*:test</include>
+                  </includes>
+                  <message>
+Dependency outside the cli surface-ring allowlist (rule R6). Only io.cyntex modules, picocli and
+jline are allowed; the CLI must reach services over HTTP, never via a compile dependency on
+control / runtime modules. Amend the recorded allowlist decision before adding an exception.
+                  </message>
+                </bannedDependencies>
+              </rules>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+
+      <!-- Runnable thin jar for manual verification (the native image is the production shape, D5):
+           java -jar cli/target/cli-<ver>.jar -> the dependencies sit in target/lib next to it. -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-jar-plugin</artifactId>
+        <configuration>
+          <archive>
+            <manifest>
+              <mainClass>${mainClass}</mainClass>
+              <addClasspath>true</addClasspath>
+              <classpathPrefix>lib/</classpathPrefix>
+            </manifest>
+          </archive>
+        </configuration>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-dependency-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>copy-runtime-deps</id>
+            <phase>package</phase>
+            <goals>
+              <goal>copy-dependencies</goal>
+            </goals>
+            <configuration>
+              <outputDirectory>${project.build.directory}/lib</outputDirectory>
+              <includeScope>runtime</includeScope>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
+
+  <profiles>
+    <!--
+      The production shape: a GraalVM native-image binary `cyntex`. Off by default (the JVM jar
+      builds without GraalVM); activate with `-Pnative` on a machine with GraalVM for JDK 21.
+
+      The bundled resources read at runtime via getResourceAsStream are not reachable in a native
+      image unless declared: the connector catalog (/catalog/*.json), the grammar JSON Schema
+      (/schema/*.json) and the message catalog (/messages/*.yml). They are declared here as
+      IncludeResources globs. Reflection config for the picocli command tree comes from the
+      picocli-codegen processor (see the compiler plugin above); JLine / CEL / snakeyaml config
+      comes from the GraalVM reachability-metadata repository.
+    -->
+    <profile>
+      <id>native</id>
+      <build>
+        <plugins>
+          <plugin>
+            <groupId>org.graalvm.buildtools</groupId>
+            <artifactId>native-maven-plugin</artifactId>
+            <extensions>true</extensions>
+            <executions>
+              <execution>
+                <id>build-native</id>
+                <phase>package</phase>
+                <goals>
+                  <goal>compile-no-fork</goal>
+                </goals>
+              </execution>
+            </executions>
+            <configuration>
+              <imageName>cyntex</imageName>
+              <mainClass>${mainClass}</mainClass>
+              <buildArgs>
+                <buildArg>--no-fallback</buildArg>
+                <!-- bundled resources read via getResourceAsStream, declared so the image keeps them -->
+                <buildArg>-H:IncludeResources=catalog/.*\.json</buildArg>
+                <buildArg>-H:IncludeResources=schema/.*\.json</buildArg>
+                <buildArg>-H:IncludeResources=messages/.*\.yml</buildArg>
+              </buildArgs>
+              <metadataRepository>
+                <enabled>true</enabled>
+              </metadataRepository>
+            </configuration>
+          </plugin>
+        </plugins>
+      </build>
+    </profile>
+  </profiles>
+</project>

@@ -1,0 +1,107 @@
+{
+  "id": "azure-cosmosdb",
+  "name": "Azure CosmosDB",
+  "displayName": "Azure Cosmos DB",
+  "icon": "icons/azure-cosmosdb.png",
+  "group": "database",
+  "modes": [
+    "snapshot"
+  ],
+  "discovery": "catalog",
+  "sink": {
+    "capable": false,
+    "writeSemantics": []
+  },
+  "pushOut": false,
+  "config": [
+    {
+      "name": "host",
+      "type": "string",
+      "label": {
+        "en_US": "account host"
+      },
+      "required": true,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    },
+    {
+      "name": "accountKey",
+      "type": "string",
+      "label": {
+        "en_US": "account key"
+      },
+      "required": true,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    },
+    {
+      "name": "databaseName",
+      "type": "string",
+      "label": {
+        "en_US": "DatabaseName"
+      },
+      "required": true,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    },
+    {
+      "name": "consistencyLevel",
+      "type": "string",
+      "label": {
+        "en_US": "consistencyLevel"
+      },
+      "required": true,
+      "default": "Session",
+      "secret": false,
+      "options": [
+        {
+          "value": "Strong",
+          "label": {
+            "en_US": "STRONG"
+          }
+        },
+        {
+          "value": "BoundedStaleness",
+          "label": {
+            "en_US": "BOUNDED_STALENESS"
+          }
+        },
+        {
+          "value": "Session",
+          "label": {
+            "en_US": "SESSION"
+          }
+        },
+        {
+          "value": "Eventual",
+          "label": {
+            "en_US": "EVENTUAL"
+          }
+        },
+        {
+          "value": "ConsistentPrefix",
+          "label": {
+            "en_US": "CONSISTENT_PREFIX"
+          }
+        }
+      ],
+      "visibleWhen": null
+    }
+  ],
+  "provenance": {
+    "connectorRepoSha": "b4151f21",
+    "specPath": "connectors/azure-cosmosdb-connector/src/main/resources/azure-cosmosdb-spec.json",
+    "specContentHash": "d27aaf7f1c60eb60",
+    "pdkApiVersion": null,
+    "requiredLevel": null,
+    "modeSource": {
+      "snapshot": "derived"
+    }
+  }
+}

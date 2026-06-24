@@ -1,0 +1,12 @@
+# Invalid: settings.schedule is legal only when every referenced source mode is bounded
+# (snapshot / file / api); a continuous task has no "re-run" concept (X7).
+version: cyntex/v1
+kind: pipeline
+id: orders_nightly
+source: src_orders
+settings: { schedule: "0 2 * * *" }
+transforms:
+  - { id: us_only, from: [orders], type: filter, expr: "after.region == 'US'" }
+serve:
+  from: us_only
+  sync: [ { id: us_db, source: tgt_us_my, write_mode: upsert } ]

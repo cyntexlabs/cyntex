@@ -1,0 +1,76 @@
+{
+  "id": "feishu-bitable",
+  "name": "Feishu-Bitable",
+  "displayName": "Lark Bitable",
+  "icon": "icon/bitable.png",
+  "group": "saas",
+  "modes": [
+    "api"
+  ],
+  "discovery": "catalog",
+  "sink": {
+    "capable": false,
+    "writeSemantics": []
+  },
+  "pushOut": false,
+  "config": [
+    {
+      "name": "app_id",
+      "type": "string",
+      "label": {
+        "en_US": "App ID"
+      },
+      "required": true,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    },
+    {
+      "name": "app_secret",
+      "type": "string",
+      "label": {
+        "en_US": "App Secret"
+      },
+      "required": true,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    },
+    {
+      "name": "app_token",
+      "type": "string",
+      "label": {
+        "en_US": "App Token"
+      },
+      "required": true,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    },
+    {
+      "name": "table_id",
+      "type": "string",
+      "label": {
+        "en_US": "Table ID"
+      },
+      "required": true,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    }
+  ],
+  "provenance": {
+    "connectorRepoSha": "b4151f21",
+    "specPath": "connectors-javascript/lark-bitable-connector/src/main/resources/spec.json",
+    "specContentHash": "a228ed53c25e27fd",
+    "pdkApiVersion": null,
+    "requiredLevel": null,
+    "modeSource": {
+      "api": "declared"
+    }
+  }
+}

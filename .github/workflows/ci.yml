@@ -1,0 +1,36 @@
+# Minimal CI: the merge-blocking build gate.
+#   mvn verify — compile + unit tests + enforcer rules + ArchUnit ring rules
+# Docs frontmatter validation (gen-index --check) lives with the docs in the
+# separate private repo and is not run here. The zero-agent-footprint gate is a
+# separate workflow (no-agent-footprint.yml).
+# Deliberately excluded for now: native-image build (pinned to local darwin-arm64 until D5),
+# connector catalog, e2e.
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - "ws/**"
+  pull_request:
+    branches:
+      - main
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          # Root pom pins the toolchain by version only (21, no vendor);
+          # setup-java registers the installed JDK in ~/.m2/toolchains.xml.
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+      - name: Build and test
+        run: mvn -B verify

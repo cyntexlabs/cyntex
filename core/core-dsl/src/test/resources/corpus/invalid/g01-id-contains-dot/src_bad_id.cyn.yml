@@ -1,0 +1,9 @@
+# Invalid: id must not contain '.' — it is the reserved separator for stream addressing
+# (<id>.<table>) and qualified private instance identifiers (§2).
+version: cyntex/v1
+kind: source
+id: src.orders
+connector: mysql
+config: { host: 10.0.0.1, username: u, password: p }
+mode: cdc
+tables: [ orders ]

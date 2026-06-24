@@ -1,0 +1,7 @@
+version: cyntex/v1
+kind: source
+id: src_orders
+connector: postgres
+config: { host: 10.10.0.9, database: shop, username: cdc_user, password: Ord_2026 }
+mode: cdc
+tables: [ orders ]

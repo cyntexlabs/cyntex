@@ -1,0 +1,160 @@
+{
+  "id": "dummy",
+  "name": "Dummy",
+  "displayName": "Dummy",
+  "icon": "icons/dummy.png",
+  "group": "database",
+  "modes": [
+    "cdc",
+    "snapshot"
+  ],
+  "discovery": "catalog",
+  "sink": {
+    "capable": true,
+    "writeSemantics": [
+      "upsert",
+      "append"
+    ]
+  },
+  "pushOut": false,
+  "config": [
+    {
+      "name": "initial_totals",
+      "type": "number",
+      "label": {
+        "en_US": "Initial data amount"
+      },
+      "required": true,
+      "default": "1",
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    },
+    {
+      "name": "incremental_interval",
+      "type": "number",
+      "label": {
+        "en_US": "Incremental interval (ms)"
+      },
+      "required": true,
+      "default": "1000",
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    },
+    {
+      "name": "incremental_interval_totals",
+      "type": "number",
+      "label": {
+        "en_US": "Incremental Interval Upper Limits"
+      },
+      "required": true,
+      "default": "1",
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    },
+    {
+      "name": "incremental_types",
+      "type": "array",
+      "label": {
+        "en_US": "incremental event types"
+      },
+      "required": false,
+      "default": "[1]",
+      "secret": false,
+      "options": [
+        {
+          "value": "1",
+          "label": {
+            "en_US": "Insert"
+          }
+        },
+        {
+          "value": "2",
+          "label": {
+            "en_US": "Update"
+          }
+        },
+        {
+          "value": "3",
+          "label": {
+            "en_US": "Delete"
+          }
+        }
+      ],
+      "visibleWhen": null
+    },
+    {
+      "name": "write_interval",
+      "type": "number",
+      "label": {
+        "en_US": "Write Interval (ms)"
+      },
+      "required": true,
+      "default": "1000",
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    },
+    {
+      "name": "write_interval_totals",
+      "type": "number",
+      "label": {
+        "en_US": "Write Interval Upper Limit"
+      },
+      "required": true,
+      "default": "0",
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    },
+    {
+      "name": "write_log",
+      "type": "boolean",
+      "label": {
+        "en_US": "Print write log"
+      },
+      "required": true,
+      "default": "false",
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    },
+    {
+      "name": "table_name",
+      "type": "string",
+      "label": {
+        "en_US": "Table Name"
+      },
+      "required": true,
+      "default": "dummy_test",
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    },
+    {
+      "name": "table_fields",
+      "type": "array",
+      "label": {
+        "en_US": "Field Definitions"
+      },
+      "required": true,
+      "default": "[{\"type\":\"uuid\",\"pri\":true,\"name\":\"id\"},{\"type\":\"rstring\",\"pri\":false,\"name\":\"title\"},{\"type\":\"now\",\"pri\":false,\"name\":\"created\"}]",
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    }
+  ],
+  "provenance": {
+    "connectorRepoSha": "b4151f21",
+    "specPath": "connectors/dummy-connector/src/main/resources/spec.json",
+    "specContentHash": "96bac364eb37303d",
+    "pdkApiVersion": null,
+    "requiredLevel": null,
+    "modeSource": {
+      "cdc": "derived",
+      "snapshot": "derived"
+    }
+  }
+}

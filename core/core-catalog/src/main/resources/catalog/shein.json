@@ -1,0 +1,52 @@
+{
+  "id": "shein",
+  "name": "Shein",
+  "displayName": "Shein",
+  "icon": "icon/shein.png",
+  "group": "saas",
+  "modes": [
+    "api"
+  ],
+  "discovery": "catalog",
+  "sink": {
+    "capable": false,
+    "writeSemantics": []
+  },
+  "pushOut": false,
+  "config": [
+    {
+      "name": "openKeyId",
+      "type": "string",
+      "label": {
+        "en_US": "Open Key ID"
+      },
+      "required": true,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    },
+    {
+      "name": "secretKey",
+      "type": "string",
+      "label": {
+        "en_US": "Secret Key"
+      },
+      "required": true,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    }
+  ],
+  "provenance": {
+    "connectorRepoSha": "b4151f21",
+    "specPath": "connectors-javascript/shein-connector/src/main/resources/spec.json",
+    "specContentHash": "047a88eca2d0c3b3",
+    "pdkApiVersion": null,
+    "requiredLevel": null,
+    "modeSource": {
+      "api": "declared"
+    }
+  }
+}

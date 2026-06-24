@@ -1,0 +1,481 @@
+{
+  "id": "csv",
+  "name": "CSV",
+  "displayName": "CSV",
+  "icon": "icons/csv.png",
+  "group": "file",
+  "modes": [
+    "cdc",
+    "snapshot"
+  ],
+  "discovery": "none",
+  "sink": {
+    "capable": true,
+    "writeSemantics": [
+      "upsert",
+      "append"
+    ]
+  },
+  "pushOut": false,
+  "config": [
+    {
+      "name": "protocol",
+      "type": "string",
+      "label": {
+        "en_US": "File Protocol"
+      },
+      "required": false,
+      "default": "local",
+      "secret": false,
+      "options": [
+        {
+          "value": "local",
+          "label": {
+            "en_US": "LOCAL"
+          }
+        },
+        {
+          "value": "ftp",
+          "label": {
+            "en_US": "FTP"
+          }
+        },
+        {
+          "value": "sftp",
+          "label": {
+            "en_US": "SFTP"
+          }
+        },
+        {
+          "value": "smb",
+          "label": {
+            "en_US": "SMB"
+          }
+        },
+        {
+          "value": "s3fs",
+          "label": {
+            "en_US": "S3FS"
+          }
+        },
+        {
+          "value": "oss",
+          "label": {
+            "en_US": "OSS"
+          }
+        }
+      ],
+      "visibleWhen": null
+    },
+    {
+      "name": "encoding",
+      "type": "string",
+      "label": {
+        "en_US": "Charset"
+      },
+      "required": false,
+      "default": "UTF-8",
+      "secret": false,
+      "options": [
+        {
+          "value": "UTF-8",
+          "label": {
+            "en_US": "UTF-8"
+          }
+        },
+        {
+          "value": "UTF-16",
+          "label": {
+            "en_US": "UTF-16"
+          }
+        },
+        {
+          "value": "GBK",
+          "label": {
+            "en_US": "GBK"
+          }
+        },
+        {
+          "value": "ASCII",
+          "label": {
+            "en_US": "ASCII"
+          }
+        }
+      ],
+      "visibleWhen": {
+        "controllingField": "protocol",
+        "equalsAnyOf": [
+          "ftp",
+          "sftp"
+        ]
+      }
+    },
+    {
+      "name": "ftpHost",
+      "type": "string",
+      "label": {
+        "en_US": "Host"
+      },
+      "required": true,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": {
+        "controllingField": "protocol",
+        "equalsAnyOf": [
+          "ftp"
+        ]
+      }
+    },
+    {
+      "name": "ftpPort",
+      "type": "string",
+      "label": {
+        "en_US": "Port"
+      },
+      "required": true,
+      "default": "21",
+      "secret": false,
+      "options": [],
+      "visibleWhen": {
+        "controllingField": "protocol",
+        "equalsAnyOf": [
+          "ftp"
+        ]
+      }
+    },
+    {
+      "name": "ftpUsername",
+      "type": "string",
+      "label": {
+        "en_US": "Username"
+      },
+      "required": false,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": {
+        "controllingField": "protocol",
+        "equalsAnyOf": [
+          "ftp"
+        ]
+      }
+    },
+    {
+      "name": "ftpPassword",
+      "type": "string",
+      "label": {
+        "en_US": "Password"
+      },
+      "required": false,
+      "default": null,
+      "secret": true,
+      "options": [],
+      "visibleWhen": {
+        "controllingField": "protocol",
+        "equalsAnyOf": [
+          "ftp"
+        ]
+      }
+    },
+    {
+      "name": "ftpPassiveMode",
+      "type": "boolean",
+      "label": {
+        "en_US": "Passive Mode"
+      },
+      "required": false,
+      "default": "true",
+      "secret": false,
+      "options": [],
+      "visibleWhen": {
+        "controllingField": "protocol",
+        "equalsAnyOf": [
+          "ftp"
+        ]
+      }
+    },
+    {
+      "name": "ftpConnectTimeout",
+      "type": "string",
+      "label": {
+        "en_US": "Connect Timeout(second)"
+      },
+      "required": true,
+      "default": "60",
+      "secret": false,
+      "options": [],
+      "visibleWhen": {
+        "controllingField": "protocol",
+        "equalsAnyOf": [
+          "ftp"
+        ]
+      }
+    },
+    {
+      "name": "ftpDataTimeout",
+      "type": "string",
+      "label": {
+        "en_US": "Data Timeout(second)"
+      },
+      "required": true,
+      "default": "0",
+      "secret": false,
+      "options": [],
+      "visibleWhen": {
+        "controllingField": "protocol",
+        "equalsAnyOf": [
+          "ftp"
+        ]
+      }
+    },
+    {
+      "name": "sftpHost",
+      "type": "string",
+      "label": {
+        "en_US": "Host"
+      },
+      "required": true,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": {
+        "controllingField": "protocol",
+        "equalsAnyOf": [
+          "sftp"
+        ]
+      }
+    },
+    {
+      "name": "sftpPort",
+      "type": "string",
+      "label": {
+        "en_US": "Port"
+      },
+      "required": true,
+      "default": "22",
+      "secret": false,
+      "options": [],
+      "visibleWhen": {
+        "controllingField": "protocol",
+        "equalsAnyOf": [
+          "sftp"
+        ]
+      }
+    },
+    {
+      "name": "sftpUsername",
+      "type": "string",
+      "label": {
+        "en_US": "Username"
+      },
+      "required": true,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": {
+        "controllingField": "protocol",
+        "equalsAnyOf": [
+          "sftp"
+        ]
+      }
+    },
+    {
+      "name": "sftpPassword",
+      "type": "string",
+      "label": {
+        "en_US": "Password"
+      },
+      "required": true,
+      "default": null,
+      "secret": true,
+      "options": [],
+      "visibleWhen": {
+        "controllingField": "protocol",
+        "equalsAnyOf": [
+          "sftp"
+        ]
+      }
+    },
+    {
+      "name": "smbHost",
+      "type": "string",
+      "label": {
+        "en_US": "Host"
+      },
+      "required": true,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": {
+        "controllingField": "protocol",
+        "equalsAnyOf": [
+          "smb"
+        ]
+      }
+    },
+    {
+      "name": "smbUsername",
+      "type": "string",
+      "label": {
+        "en_US": "Username"
+      },
+      "required": false,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": {
+        "controllingField": "protocol",
+        "equalsAnyOf": [
+          "smb"
+        ]
+      }
+    },
+    {
+      "name": "smbPassword",
+      "type": "string",
+      "label": {
+        "en_US": "Password"
+      },
+      "required": false,
+      "default": null,
+      "secret": true,
+      "options": [],
+      "visibleWhen": {
+        "controllingField": "protocol",
+        "equalsAnyOf": [
+          "smb"
+        ]
+      }
+    },
+    {
+      "name": "smbShareDir",
+      "type": "string",
+      "label": {
+        "en_US": "Shared Dir"
+      },
+      "required": true,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": {
+        "controllingField": "protocol",
+        "equalsAnyOf": [
+          "smb"
+        ]
+      }
+    },
+    {
+      "name": "accessKey",
+      "type": "string",
+      "label": {
+        "en_US": "Access-Key"
+      },
+      "required": true,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": {
+        "controllingField": "protocol",
+        "equalsAnyOf": [
+          "oss",
+          "s3fs"
+        ]
+      }
+    },
+    {
+      "name": "secretKey",
+      "type": "string",
+      "label": {
+        "en_US": "Secret-Key"
+      },
+      "required": true,
+      "default": null,
+      "secret": true,
+      "options": [],
+      "visibleWhen": {
+        "controllingField": "protocol",
+        "equalsAnyOf": [
+          "oss",
+          "s3fs"
+        ]
+      }
+    },
+    {
+      "name": "endpoint",
+      "type": "string",
+      "label": {
+        "en_US": "Endpoint"
+      },
+      "required": true,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": {
+        "controllingField": "protocol",
+        "equalsAnyOf": [
+          "oss",
+          "s3fs"
+        ]
+      }
+    },
+    {
+      "name": "region",
+      "type": "string",
+      "label": {
+        "en_US": "Region"
+      },
+      "required": false,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": {
+        "controllingField": "protocol",
+        "equalsAnyOf": [
+          "s3fs"
+        ]
+      }
+    },
+    {
+      "name": "bucket",
+      "type": "string",
+      "label": {
+        "en_US": "Bucket"
+      },
+      "required": true,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": {
+        "controllingField": "protocol",
+        "equalsAnyOf": [
+          "oss",
+          "s3fs"
+        ]
+      }
+    },
+    {
+      "name": "filePathString",
+      "type": "string",
+      "label": {
+        "en_US": "File Path"
+      },
+      "required": false,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    }
+  ],
+  "provenance": {
+    "connectorRepoSha": "b4151f21",
+    "specPath": "connectors/csv-connector/src/main/resources/spec_csv.json",
+    "specContentHash": "2d54f4dff9d9a686",
+    "pdkApiVersion": null,
+    "requiredLevel": null,
+    "modeSource": {
+      "cdc": "derived",
+      "snapshot": "derived"
+    }
+  }
+}

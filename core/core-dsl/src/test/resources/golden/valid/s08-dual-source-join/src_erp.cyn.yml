@@ -1,0 +1,11 @@
+version: cyntex/v1
+kind: source
+id: src_erp
+connector: postgres
+config:
+  database: erp
+  host: 10.10.0.8
+  password: Erp_2026
+  username: cdc_user
+mode: cdc
+tables: [orders]

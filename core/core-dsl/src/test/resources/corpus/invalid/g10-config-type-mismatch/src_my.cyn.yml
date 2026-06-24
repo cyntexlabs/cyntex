@@ -1,0 +1,7 @@
+version: cyntex/v1
+kind: source
+id: src_my
+connector: mysql
+config: { deploymentMode: master-slave, masterSlaveAddress: "10.0.0.1:3306", username: u, password: p }
+mode: snapshot
+tables: [ orders ]

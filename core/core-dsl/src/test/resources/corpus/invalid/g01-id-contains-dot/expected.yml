@@ -1,0 +1,4 @@
+rule: illegal-value
+adr: "ADR-0016 §2"
+path: id
+note: "'src.orders' contains '.', the reserved addressing separator"

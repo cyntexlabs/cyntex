@@ -1,0 +1,16 @@
+version: cyntex/v1
+kind: source
+id: src_gh
+connector: quickapi
+config:
+  base_url: https://api.github.com
+  token: ghp_a1b2c3d4
+mode: api
+tables:
+  - name: issues
+    pk: [id]
+  - name: pulls
+    pk: [id]
+options:
+  cursor: updated_at
+  poll_interval: 5m

@@ -1,0 +1,103 @@
+{
+  "id": "coding",
+  "name": "Coding",
+  "displayName": "Coding",
+  "icon": "icons/coding.png",
+  "group": "saas",
+  "modes": [
+    "cdc",
+    "snapshot"
+  ],
+  "discovery": "catalog",
+  "sink": {
+    "capable": false,
+    "writeSemantics": []
+  },
+  "pushOut": false,
+  "config": [
+    {
+      "name": "teamName",
+      "type": "string",
+      "label": {
+        "en_US": "Team name"
+      },
+      "required": true,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    },
+    {
+      "name": "code",
+      "type": "string",
+      "label": {
+        "en_US": "Authorize"
+      },
+      "required": true,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    },
+    {
+      "name": "projectName",
+      "type": "string",
+      "label": {
+        "en_US": "Project name"
+      },
+      "required": true,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    },
+    {
+      "name": "streamReadType",
+      "type": "string",
+      "label": {
+        "en_US": "Incremental mode"
+      },
+      "required": false,
+      "default": "Polling",
+      "secret": false,
+      "options": [
+        {
+          "value": "WebHook",
+          "label": {
+            "en_US": "Webhook"
+          }
+        },
+        {
+          "value": "Polling",
+          "label": {
+            "en_US": "Polling Read"
+          }
+        }
+      ],
+      "visibleWhen": null
+    },
+    {
+      "name": "hookText",
+      "type": "string",
+      "label": {
+        "en_US": " "
+      },
+      "required": false,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    }
+  ],
+  "provenance": {
+    "connectorRepoSha": "b4151f21",
+    "specPath": "connectors/coding-connector/src/main/resources/spec-oauth.json",
+    "specContentHash": "b629e73ee4e7b8d0",
+    "pdkApiVersion": null,
+    "requiredLevel": null,
+    "modeSource": {
+      "cdc": "derived",
+      "snapshot": "derived"
+    }
+  }
+}

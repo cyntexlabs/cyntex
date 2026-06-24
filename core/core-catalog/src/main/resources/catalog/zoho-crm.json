@@ -1,0 +1,40 @@
+{
+  "id": "zoho-crm",
+  "name": "Zoho-CRM",
+  "displayName": "Zoho CRM",
+  "icon": "icon/zoho.png",
+  "group": "saas",
+  "modes": [
+    "api"
+  ],
+  "discovery": "catalog",
+  "sink": {
+    "capable": false,
+    "writeSemantics": []
+  },
+  "pushOut": false,
+  "config": [
+    {
+      "name": "code",
+      "type": "string",
+      "label": {
+        "en_US": "Authorize"
+      },
+      "required": true,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    }
+  ],
+  "provenance": {
+    "connectorRepoSha": "b4151f21",
+    "specPath": "connectors-javascript/zoho-crm-connector/src/main/resources/spec.json",
+    "specContentHash": "9a519b44f78f373b",
+    "pdkApiVersion": null,
+    "requiredLevel": null,
+    "modeSource": {
+      "api": "declared"
+    }
+  }
+}

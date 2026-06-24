@@ -1,0 +1,10 @@
+# Invalid: srs block is only legal for mode: cdc — SRS derives solely from
+# "unbounded + keyed change semantics" (§4).
+version: cyntex/v1
+kind: source
+id: src_kfk_srs
+connector: kafka
+config: { brokers: "k1:9092", group_id: cyntex_orders }
+mode: stream
+tables: [ orders_topic ]
+srs: { retention: 7d }

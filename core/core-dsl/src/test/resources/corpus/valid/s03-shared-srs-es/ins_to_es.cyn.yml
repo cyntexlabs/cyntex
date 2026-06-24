@@ -1,0 +1,15 @@
+# Second pipeline over the same src_ins: no duplicate redo-log mining (SRS merge is engine
+# semantics, zero new grammar). Literal table name = frozen link (X9).
+version: cyntex/v1
+kind: pipeline
+id: ins_to_es
+source: src_ins
+transforms:
+  - id: open_only
+    from: [POLICIES]
+    type: filter
+    expr: "after.STATUS != 'CLOSED'"
+serve:
+  from: open_only
+  sync:
+    - { id: es, source: tgt_es, write_mode: upsert }

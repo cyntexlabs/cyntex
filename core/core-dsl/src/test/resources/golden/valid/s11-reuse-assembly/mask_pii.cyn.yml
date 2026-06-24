@@ -1,0 +1,7 @@
+version: cyntex/v1
+kind: transform
+id: mask_pii
+type: map
+fields:
+  ssn: false
+  phone: false

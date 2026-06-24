@@ -1,0 +1,48 @@
+{
+  "id": "ai-chat",
+  "name": "AIChat",
+  "displayName": "AI Chat",
+  "icon": "icon/chat.png",
+  "group": "saas",
+  "modes": [],
+  "discovery": "catalog",
+  "sink": {
+    "capable": false,
+    "writeSemantics": []
+  },
+  "pushOut": false,
+  "config": [
+    {
+      "name": "url",
+      "type": "string",
+      "label": {
+        "en_US": "URL Base"
+      },
+      "required": true,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    },
+    {
+      "name": "token",
+      "type": "string",
+      "label": {
+        "en_US": "Token"
+      },
+      "required": true,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    }
+  ],
+  "provenance": {
+    "connectorRepoSha": "b4151f21",
+    "specPath": "connectors-javascript/ai-chat-connector/src/main/resources/spec.json",
+    "specContentHash": "37a78d68d9dc0c15",
+    "pdkApiVersion": null,
+    "requiredLevel": null,
+    "modeSource": {}
+  }
+}

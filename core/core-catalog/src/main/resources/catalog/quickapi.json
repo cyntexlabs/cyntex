@@ -1,0 +1,81 @@
+{
+  "id": "quickapi",
+  "name": "QuickAPI",
+  "displayName": "QuickAPI",
+  "icon": "icons/quickapi.png",
+  "group": "saas",
+  "modes": [
+    "snapshot"
+  ],
+  "discovery": "catalog",
+  "sink": {
+    "capable": false,
+    "writeSemantics": []
+  },
+  "pushOut": false,
+  "config": [
+    {
+      "name": "jsonTxt",
+      "type": "string",
+      "label": {
+        "en_US": "Postman Collection in JSON"
+      },
+      "required": true,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    },
+    {
+      "name": "expireStatus",
+      "type": "string",
+      "label": {
+        "en_US": "Expiration Status Desc"
+      },
+      "required": false,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    },
+    {
+      "name": "tokenParams",
+      "type": "string",
+      "label": {
+        "en_US": "Token parameter specification"
+      },
+      "required": false,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    },
+    {
+      "name": "schemaTxt",
+      "type": "string",
+      "label": {
+        "en_US": "Table Schema"
+      },
+      "required": false,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": {
+        "controllingField": "autoLoadSchema",
+        "equalsAnyOf": [
+          "false"
+        ]
+      }
+    }
+  ],
+  "provenance": {
+    "connectorRepoSha": "b4151f21",
+    "specPath": "connectors/quickapi-connector/src/main/resources/spec.json",
+    "specContentHash": "88a4cce7065308ba",
+    "pdkApiVersion": null,
+    "requiredLevel": null,
+    "modeSource": {
+      "snapshot": "derived"
+    }
+  }
+}

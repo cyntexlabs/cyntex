@@ -1,0 +1,484 @@
+{
+  "id": "kafka_avro",
+  "name": "Kafka-Avro",
+  "displayName": "Confluent Avro",
+  "icon": "icons/kafka_avro.png",
+  "group": "mq",
+  "modes": [],
+  "discovery": "catalog",
+  "sink": {
+    "capable": false,
+    "writeSemantics": []
+  },
+  "pushOut": true,
+  "config": [
+    {
+      "name": "clusterURI",
+      "type": "string",
+      "label": {
+        "en_US": "Connection address"
+      },
+      "required": true,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    },
+    {
+      "name": "schemaRegisterUrl",
+      "type": "string",
+      "label": {
+        "en_US": "Schema Registry Url"
+      },
+      "required": true,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    },
+    {
+      "name": "attunity",
+      "type": "boolean",
+      "label": {
+        "en_US": "Attunity compatibility"
+      },
+      "required": false,
+      "default": "false",
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    },
+    {
+      "name": "attunityRecordName",
+      "type": "string",
+      "label": {
+        "en_US": "Attunity Record Name"
+      },
+      "required": true,
+      "default": "DataRecord",
+      "secret": false,
+      "options": [],
+      "visibleWhen": {
+        "controllingField": "attunity",
+        "equalsAnyOf": [
+          "true"
+        ]
+      }
+    },
+    {
+      "name": "attunityDataName",
+      "type": "string",
+      "label": {
+        "en_US": "Attunity Data Name"
+      },
+      "required": true,
+      "default": "data",
+      "secret": false,
+      "options": [],
+      "visibleWhen": {
+        "controllingField": "attunity",
+        "equalsAnyOf": [
+          "true"
+        ]
+      }
+    },
+    {
+      "name": "attunityBeforeDataName",
+      "type": "string",
+      "label": {
+        "en_US": "Attunity Before Data Name"
+      },
+      "required": true,
+      "default": "beforeData",
+      "secret": false,
+      "options": [],
+      "visibleWhen": {
+        "controllingField": "attunity",
+        "equalsAnyOf": [
+          "true"
+        ]
+      }
+    },
+    {
+      "name": "attunityHeadersName",
+      "type": "string",
+      "label": {
+        "en_US": "Attunity Headers Name"
+      },
+      "required": true,
+      "default": "headers",
+      "secret": false,
+      "options": [],
+      "visibleWhen": {
+        "controllingField": "attunity",
+        "equalsAnyOf": [
+          "true"
+        ]
+      }
+    },
+    {
+      "name": "attunityKeyName",
+      "type": "string",
+      "label": {
+        "en_US": "Attunity Key Name"
+      },
+      "required": true,
+      "default": "keyRecord",
+      "secret": false,
+      "options": [],
+      "visibleWhen": {
+        "controllingField": "attunity",
+        "equalsAnyOf": [
+          "true"
+        ]
+      }
+    },
+    {
+      "name": "basicAuth",
+      "type": "boolean",
+      "label": {
+        "en_US": "Basic Auth"
+      },
+      "required": false,
+      "default": "false",
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    },
+    {
+      "name": "authCredentialsSource",
+      "type": "string",
+      "label": {
+        "en_US": "Auth Credentials Source"
+      },
+      "required": false,
+      "default": "USER_INFO",
+      "secret": false,
+      "options": [
+        {
+          "value": "USER_INFO",
+          "label": {
+            "en_US": "USER_INFO"
+          }
+        },
+        {
+          "value": "SASL_INHERIT",
+          "label": {
+            "en_US": "SASL_INHERIT"
+          }
+        }
+      ],
+      "visibleWhen": {
+        "controllingField": "basicAuth",
+        "equalsAnyOf": [
+          "true"
+        ]
+      }
+    },
+    {
+      "name": "authUserName",
+      "type": "string",
+      "label": {
+        "en_US": "Auth UserName"
+      },
+      "required": true,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": {
+        "controllingField": "basicAuth",
+        "equalsAnyOf": [
+          "true"
+        ]
+      }
+    },
+    {
+      "name": "authPassword",
+      "type": "string",
+      "label": {
+        "en_US": "Auth Password"
+      },
+      "required": true,
+      "default": null,
+      "secret": true,
+      "options": [],
+      "visibleWhen": {
+        "controllingField": "basicAuth",
+        "equalsAnyOf": [
+          "true"
+        ]
+      }
+    },
+    {
+      "name": "useSasl",
+      "type": "boolean",
+      "label": {
+        "en_US": "Enable SASL"
+      },
+      "required": false,
+      "default": "false",
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    },
+    {
+      "name": "saslMechanism",
+      "type": "string",
+      "label": {
+        "en_US": "Mechanism"
+      },
+      "required": false,
+      "default": "PLAIN",
+      "secret": false,
+      "options": [
+        {
+          "value": "PLAIN",
+          "label": {
+            "en_US": "PLAIN"
+          }
+        },
+        {
+          "value": "SCRAM-SHA-256",
+          "label": {
+            "en_US": "SCRAM-SHA-256"
+          }
+        },
+        {
+          "value": "SCRAM-SHA-512",
+          "label": {
+            "en_US": "SCRAM-SHA-512"
+          }
+        }
+      ],
+      "visibleWhen": null
+    },
+    {
+      "name": "saslUsername",
+      "type": "string",
+      "label": {
+        "en_US": "Username"
+      },
+      "required": false,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    },
+    {
+      "name": "saslPassword",
+      "type": "string",
+      "label": {
+        "en_US": "Password"
+      },
+      "required": false,
+      "default": null,
+      "secret": true,
+      "options": [],
+      "visibleWhen": null
+    },
+    {
+      "name": "krb5",
+      "type": "boolean",
+      "label": {
+        "en_US": "kerberos authentication"
+      },
+      "required": false,
+      "default": "false",
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    },
+    {
+      "name": "krb5Keytab",
+      "type": "string",
+      "label": {
+        "en_US": "Key representation file"
+      },
+      "required": true,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": {
+        "controllingField": "krb5",
+        "equalsAnyOf": [
+          "true"
+        ]
+      }
+    },
+    {
+      "name": "krb5Conf",
+      "type": "string",
+      "label": {
+        "en_US": "Configuration file"
+      },
+      "required": true,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": {
+        "controllingField": "krb5",
+        "equalsAnyOf": [
+          "true"
+        ]
+      }
+    },
+    {
+      "name": "krb5Principal",
+      "type": "string",
+      "label": {
+        "en_US": "Body Configuration"
+      },
+      "required": true,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": {
+        "controllingField": "krb5",
+        "equalsAnyOf": [
+          "true"
+        ]
+      }
+    },
+    {
+      "name": "krb5ServiceName",
+      "type": "string",
+      "label": {
+        "en_US": "Service name"
+      },
+      "required": true,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": {
+        "controllingField": "krb5",
+        "equalsAnyOf": [
+          "true"
+        ]
+      }
+    },
+    {
+      "name": "batchMaxDelay",
+      "type": "string",
+      "label": {
+        "en_US": "Consumption timeout (ms)"
+      },
+      "required": true,
+      "default": "2000",
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    },
+    {
+      "name": "clientId",
+      "type": "string",
+      "label": {
+        "en_US": "Client number"
+      },
+      "required": false,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    },
+    {
+      "name": "acksType",
+      "type": "string",
+      "label": {
+        "en_US": "ACK confirmation mechanism"
+      },
+      "required": false,
+      "default": "-1",
+      "secret": false,
+      "options": [
+        {
+          "value": "0",
+          "label": {
+            "en_US": "No confirmation"
+          }
+        },
+        {
+          "value": "1",
+          "label": {
+            "en_US": "Write only Master partition"
+          }
+        },
+        {
+          "value": "-1",
+          "label": {
+            "en_US": "Write most ISR partition"
+          }
+        },
+        {
+          "value": "all",
+          "label": {
+            "en_US": "Write all ISR partitions"
+          }
+        }
+      ],
+      "visibleWhen": null
+    },
+    {
+      "name": "compressionType",
+      "type": "string",
+      "label": {
+        "en_US": "Compression type"
+      },
+      "required": false,
+      "default": "lz4",
+      "secret": false,
+      "options": [
+        {
+          "value": "disable",
+          "label": {
+            "en_US": "No compression"
+          }
+        },
+        {
+          "value": "gzip",
+          "label": {
+            "en_US": "gzip"
+          }
+        },
+        {
+          "value": "snappy",
+          "label": {
+            "en_US": "snappy"
+          }
+        },
+        {
+          "value": "lz4",
+          "label": {
+            "en_US": "lz4"
+          }
+        },
+        {
+          "value": "zstd",
+          "label": {
+            "en_US": "zstd"
+          }
+        }
+      ],
+      "visibleWhen": null
+    },
+    {
+      "name": "extParams",
+      "type": "array",
+      "label": {
+        "en_US": "Extended configuration"
+      },
+      "required": false,
+      "default": "[]",
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    }
+  ],
+  "provenance": {
+    "connectorRepoSha": "b4151f21",
+    "specPath": "connectors/kafka-avro-connector/src/main/resources/spec_kafka_avro.json",
+    "specContentHash": "54141fb7215fa3f4",
+    "pdkApiVersion": null,
+    "requiredLevel": null,
+    "modeSource": {}
+  }
+}

@@ -1,0 +1,5 @@
+version: cyntex/v1
+kind: source
+id: tgt_dw
+connector: postgres
+config: { host: 10.30.0.7, database: dw, username: writer, password: Dw_2026 }

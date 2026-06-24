@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Core ring aggregate parent.
+  Ring rule R1: the core ring depends on no other ring and carries zero framework
+  dependencies. Third-party dependencies are allowlisted (bannedDependencies; anything
+  outside the list fails the build):
+    - jackson-annotations: annotations only, no runtime behavior (all core modules)
+    - YAML parser / cel-java: core-dsl only (granted in core-dsl's own pom)
+  Adding an exception means amending the recorded allowlist decision first;
+  never introduce one silently.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>io.cyntex</groupId>
+    <artifactId>cyntex</artifactId>
+    <version>${revision}</version>
+  </parent>
+
+  <artifactId>core</artifactId>
+  <packaging>pom</packaging>
+  <name>Cyntex :: Core Ring</name>
+
+  <modules>
+    <!-- core-common is the most foundational core module (error-code contract); build it first -->
+    <module>core-common</module>
+    <module>core-model</module>
+    <module>core-dsl</module>
+    <module>core-schema</module>
+    <module>core-catalog</module>
+  </modules>
+
+  <dependencyManagement>
+    <dependencies>
+      <dependency>
+        <groupId>io.cyntex</groupId>
+        <artifactId>bom</artifactId>
+        <version>${revision}</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-enforcer-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>enforce-core-ring-whitelist</id>
+            <goals>
+              <goal>enforce</goal>
+            </goals>
+            <configuration>
+              <rules>
+                <bannedDependencies>
+                  <excludes>
+                    <exclude>*</exclude>
+                  </excludes>
+                  <includes>
+                    <include>io.cyntex:*</include>
+                    <include>com.fasterxml.jackson.core:jackson-annotations</include>
+                    <!-- test scope never ships; production imports are guarded by the arch-tests R1 rule -->
+                    <include>*:*:*:*:test</include>
+                  </includes>
+                  <message>
+Dependency outside the core-ring allowlist (rule R1). Only io.cyntex core modules and
+jackson-annotations (compile) are allowed; the YAML parser and cel-java are granted to
+core-dsl only. Amend the recorded allowlist decision before adding an exception;
+never introduce one silently.
+                  </message>
+                </bannedDependencies>
+              </rules>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
+</project>

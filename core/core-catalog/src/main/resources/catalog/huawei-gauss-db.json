@@ -1,0 +1,335 @@
+{
+  "id": "huawei-gauss-db",
+  "name": "HuaWei'Cloud GaussDB",
+  "displayName": "Huawei Cloud GaussDB",
+  "icon": "icons/gauss.png",
+  "group": "database",
+  "modes": [
+    "cdc",
+    "snapshot"
+  ],
+  "discovery": "catalog",
+  "sink": {
+    "capable": true,
+    "writeSemantics": [
+      "upsert",
+      "append"
+    ]
+  },
+  "pushOut": false,
+  "config": [
+    {
+      "name": "host",
+      "type": "string",
+      "label": {
+        "en_US": "Host"
+      },
+      "required": true,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    },
+    {
+      "name": "port",
+      "type": "string",
+      "label": {
+        "en_US": "Port"
+      },
+      "required": true,
+      "default": "8000",
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    },
+    {
+      "name": "database",
+      "type": "string",
+      "label": {
+        "en_US": "Database"
+      },
+      "required": true,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    },
+    {
+      "name": "schema",
+      "type": "string",
+      "label": {
+        "en_US": "Schema"
+      },
+      "required": true,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    },
+    {
+      "name": "extParams",
+      "type": "string",
+      "label": {
+        "en_US": "JDBC Connection params"
+      },
+      "required": false,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    },
+    {
+      "name": "user",
+      "type": "string",
+      "label": {
+        "en_US": "User"
+      },
+      "required": false,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    },
+    {
+      "name": "password",
+      "type": "string",
+      "label": {
+        "en_US": "Password"
+      },
+      "required": false,
+      "default": null,
+      "secret": true,
+      "options": [],
+      "visibleWhen": null
+    },
+    {
+      "name": "haHost",
+      "type": "string",
+      "label": {
+        "en_US": "Logic replicate IP"
+      },
+      "required": false,
+      "default": "",
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    },
+    {
+      "name": "haPort",
+      "type": "string",
+      "label": {
+        "en_US": "Logic replicate Port"
+      },
+      "required": false,
+      "default": "8001",
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    },
+    {
+      "name": "logPluginName",
+      "type": "string",
+      "label": {
+        "en_US": "Log plugin"
+      },
+      "required": true,
+      "default": "mppdb_decoding",
+      "secret": false,
+      "options": [
+        {
+          "value": "mppdb_decoding",
+          "label": {
+            "en_US": "mppdb_decoding"
+          }
+        }
+      ],
+      "visibleWhen": null
+    },
+    {
+      "name": "timezone",
+      "type": "string",
+      "label": {
+        "en_US": "Timezone"
+      },
+      "required": false,
+      "default": "",
+      "secret": false,
+      "options": [
+        {
+          "value": "",
+          "label": {
+            "en_US": ""
+          }
+        },
+        {
+          "value": "-11:00",
+          "label": {
+            "en_US": "UTC -11"
+          }
+        },
+        {
+          "value": "-10:00",
+          "label": {
+            "en_US": "UTC -10"
+          }
+        },
+        {
+          "value": "-09:00",
+          "label": {
+            "en_US": "UTC -09"
+          }
+        },
+        {
+          "value": "-08:00",
+          "label": {
+            "en_US": "UTC -08"
+          }
+        },
+        {
+          "value": "-07:00",
+          "label": {
+            "en_US": "UTC -07"
+          }
+        },
+        {
+          "value": "-06:00",
+          "label": {
+            "en_US": "UTC -06"
+          }
+        },
+        {
+          "value": "-05:00",
+          "label": {
+            "en_US": "UTC -05"
+          }
+        },
+        {
+          "value": "-04:00",
+          "label": {
+            "en_US": "UTC -04"
+          }
+        },
+        {
+          "value": "-03:00",
+          "label": {
+            "en_US": "UTC -03"
+          }
+        },
+        {
+          "value": "-02:00",
+          "label": {
+            "en_US": "UTC -02"
+          }
+        },
+        {
+          "value": "-01:00",
+          "label": {
+            "en_US": "UTC -01"
+          }
+        },
+        {
+          "value": "+00:00",
+          "label": {
+            "en_US": "UTC"
+          }
+        },
+        {
+          "value": "+01:00",
+          "label": {
+            "en_US": "UTC +01"
+          }
+        },
+        {
+          "value": "+02:00",
+          "label": {
+            "en_US": "UTC +02"
+          }
+        },
+        {
+          "value": "+03:00",
+          "label": {
+            "en_US": "UTC +03"
+          }
+        },
+        {
+          "value": "+04:00",
+          "label": {
+            "en_US": "UTC +04"
+          }
+        },
+        {
+          "value": "+05:00",
+          "label": {
+            "en_US": "UTC +05"
+          }
+        },
+        {
+          "value": "+06:00",
+          "label": {
+            "en_US": "UTC +06"
+          }
+        },
+        {
+          "value": "+07:00",
+          "label": {
+            "en_US": "UTC +07"
+          }
+        },
+        {
+          "value": "+08:00",
+          "label": {
+            "en_US": "UTC +08"
+          }
+        },
+        {
+          "value": "+09:00",
+          "label": {
+            "en_US": "UTC +09"
+          }
+        },
+        {
+          "value": "+10:00",
+          "label": {
+            "en_US": "UTC +10"
+          }
+        },
+        {
+          "value": "+11:00",
+          "label": {
+            "en_US": "UTC +11"
+          }
+        },
+        {
+          "value": "+12:00",
+          "label": {
+            "en_US": "UTC +12"
+          }
+        },
+        {
+          "value": "+13:00",
+          "label": {
+            "en_US": "UTC +13"
+          }
+        },
+        {
+          "value": "+14:00",
+          "label": {
+            "en_US": "UTC +14"
+          }
+        }
+      ],
+      "visibleWhen": null
+    }
+  ],
+  "provenance": {
+    "connectorRepoSha": "b4151f21",
+    "specPath": "connectors/huawei-cloud-gaussdb-connector/src/main/resources/spec_gauss_db.json",
+    "specContentHash": "a903d9505e76785d",
+    "pdkApiVersion": null,
+    "requiredLevel": null,
+    "modeSource": {
+      "cdc": "derived",
+      "snapshot": "derived"
+    }
+  }
+}

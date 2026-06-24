@@ -1,0 +1,12 @@
+# Invalid: start_from applies to mode: stream (consume position) and to
+# mode: cdc + snapshot_mode: never (mining start) only; any other combination
+# is meaningless (X10, §11.5 strict-rejection spirit).
+version: cyntex/v1
+kind: source
+id: src_gh_sf
+connector: quickapi
+config: { base_url: "https://api.github.com", token: ghp_a1b2c3d4 }
+mode: api
+tables:
+  - { name: issues, pk: [id] }
+options: { poll_interval: 5m, cursor: updated_at, start_from: earliest }

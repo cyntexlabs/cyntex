@@ -1,0 +1,14 @@
+# Invalid: two transforms steps in one pipeline both declare id 'norm'. Pipeline-internal ids
+# share one namespace — the runtime <pipeline_id>.<id> address — and must be unique
+# (2026-06-15 decision; F8 uniqueness extended inward from the workspace top level).
+version: cyntex/v1
+kind: pipeline
+id: p_dup
+source: src_a
+transforms:
+  - { id: norm, from: [orders], type: filter, expr: "op != 'd'" }
+  - { id: norm, from: [orders], type: map, fields: { region: $area } }
+serve:
+  from: orders
+  sync:
+    - { id: out, source: src_a }

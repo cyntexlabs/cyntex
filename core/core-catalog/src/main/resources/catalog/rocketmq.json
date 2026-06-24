@@ -1,0 +1,103 @@
+{
+  "id": "rocketmq",
+  "name": "RocketMQ",
+  "displayName": "Apache RocketMQ",
+  "icon": "icons/rocketmq.png",
+  "group": "mq",
+  "modes": [
+    "stream"
+  ],
+  "discovery": "catalog",
+  "sink": {
+    "capable": true,
+    "writeSemantics": [
+      "upsert",
+      "append"
+    ]
+  },
+  "pushOut": true,
+  "config": [
+    {
+      "name": "mqTopicString",
+      "type": "string",
+      "label": {
+        "en_US": "topic name"
+      },
+      "required": false,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    },
+    {
+      "name": "mqHost",
+      "type": "string",
+      "label": {
+        "en_US": "MQ address"
+      },
+      "required": true,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    },
+    {
+      "name": "mqPort",
+      "type": "string",
+      "label": {
+        "en_US": "MQ port"
+      },
+      "required": true,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    },
+    {
+      "name": "mqUsername",
+      "type": "string",
+      "label": {
+        "en_US": "Account"
+      },
+      "required": false,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    },
+    {
+      "name": "mqPassword",
+      "type": "string",
+      "label": {
+        "en_US": "Password"
+      },
+      "required": false,
+      "default": null,
+      "secret": true,
+      "options": [],
+      "visibleWhen": null
+    },
+    {
+      "name": "useTLS",
+      "type": "boolean",
+      "label": {
+        "en_US": "Use TLS/SSL Connection"
+      },
+      "required": false,
+      "default": "false",
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    }
+  ],
+  "provenance": {
+    "connectorRepoSha": "b4151f21",
+    "specPath": "connectors/rocketmq-connector/src/main/resources/spec_rocketmq.json",
+    "specContentHash": "12147cd47bab28b2",
+    "pdkApiVersion": null,
+    "requiredLevel": null,
+    "modeSource": {
+      "stream": "declared"
+    }
+  }
+}

@@ -1,0 +1,18 @@
+version: cyntex/v1
+kind: pipeline
+id: csv2pg
+source: csv_in
+transforms:
+  - id: norm
+    type: map
+    from: [legacy_customers]
+    fields:
+      customer_id: $cust_no
+      joined_at: "=timestamp(after.join_date)"
+serve:
+  id: serve
+  from: norm
+  sync:
+    - id: pg
+      source: tgt_pg
+      write_mode: append

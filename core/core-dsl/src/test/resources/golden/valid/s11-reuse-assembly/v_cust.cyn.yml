@@ -1,0 +1,7 @@
+version: cyntex/v1
+kind: view
+id: v_cust
+primary_key: customer_id
+storage:
+  warm:
+    collection: cust

@@ -1,0 +1,855 @@
+{
+  "properties": {
+    "name": "CSV",
+    "realName": "CSV",
+    "icon": "icons/csv.png",
+    "doc": "${doc}",
+    "id": "csv",
+    "tags": [
+      "File",
+      "schema-free"
+    ]
+  },
+  "configOptions": {
+    "connection": {
+      "type": "object",
+      "properties": {
+        "protocol": {
+          "type": "string",
+          "title": "${protocol}",
+          "x-decorator": "FormItem",
+          "x-component": "Select",
+          "x-index": 10,
+          "default": "local",
+          "enum": [
+            {
+              "label": "LOCAL",
+              "value": "local"
+            },
+            {
+              "label": "FTP",
+              "value": "ftp"
+            },
+            {
+              "label": "SFTP",
+              "value": "sftp"
+            },
+            {
+              "label": "SMB",
+              "value": "smb"
+            },
+            {
+              "label": "S3FS",
+              "value": "s3fs"
+            },
+            {
+              "label": "OSS",
+              "value": "oss"
+            }
+          ],
+          "x-reactions": [
+            {
+              "target": "encoding",
+              "fulfill": {
+                "state": {
+                  "visible": "{{$self.value==='ftp' || $self.value==='sftp'}}"
+                }
+              }
+            },
+            {
+              "target": "*(ftpHost,ftpPort,ftpUsername,ftpPassword,ftpPassiveMode,ftpConnectTimeout,ftpDataTimeout)",
+              "fulfill": {
+                "state": {
+                  "visible": "{{$self.value==='ftp'}}"
+                }
+              }
+            },
+            {
+              "target": "*(sftpHost,sftpPort,sftpUsername,sftpPassword)",
+              "fulfill": {
+                "state": {
+                  "visible": "{{$self.value==='sftp'}}"
+                }
+              }
+            },
+            {
+              "target": "*(smbHost,smbUsername,smbPassword,smbShareDir)",
+              "fulfill": {
+                "state": {
+                  "visible": "{{$self.value==='smb'}}"
+                }
+              }
+            },
+            {
+              "target": "*(region)",
+              "fulfill": {
+                "state": {
+                  "visible": "{{$self.value==='s3fs'}}"
+                }
+              }
+            },
+            {
+              "target": "*(accessKey,secretKey,endpoint,bucket)",
+              "fulfill": {
+                "state": {
+                  "visible": "{{$self.value==='oss' || $self.value==='s3fs'}}"
+                }
+              }
+            }
+          ]
+        },
+        "encoding": {
+          "type": "string",
+          "title": "${encoding}",
+          "x-decorator": "FormItem",
+          "x-component": "Select",
+          "x-index": 20,
+          "default": "UTF-8",
+          "enum": [
+            {
+              "label": "UTF-8",
+              "value": "UTF-8"
+            },
+            {
+              "label": "UTF-16",
+              "value": "UTF-16"
+            },
+            {
+              "label": "GBK",
+              "value": "GBK"
+            },
+            {
+              "label": "ASCII",
+              "value": "ASCII"
+            }
+          ]
+        },
+        "ftpHost": {
+          "required": true,
+          "type": "string",
+          "title": "${ftpHost}",
+          "x-decorator": "FormItem",
+          "x-component": "Input",
+          "apiServerKey": "ftpHost",
+          "x-index": 30
+        },
+        "ftpPort": {
+          "required": true,
+          "type": "string",
+          "title": "${ftpPort}",
+          "default": 21,
+          "x-decorator": "FormItem",
+          "x-component": "InputNumber",
+          "apiServerKey": "ftpPort",
+          "x-index": 40
+        },
+        "ftpUsername": {
+          "type": "string",
+          "title": "${ftpUsername}",
+          "x-decorator": "FormItem",
+          "x-component": "Input",
+          "apiServerKey": "ftpUsername",
+          "x-index": 50
+        },
+        "ftpPassword": {
+          "type": "string",
+          "title": "${ftpPassword}",
+          "x-decorator": "FormItem",
+          "x-component": "Password",
+          "apiServerKey": "ftpPassword",
+          "x-index": 60
+        },
+        "ftpPassiveMode": {
+          "type": "boolean",
+          "title": "${ftpPassiveMode}",
+          "default": true,
+          "x-decorator": "FormItem",
+          "x-component": "Switch",
+          "x-index": 70
+        },
+        "ftpConnectTimeout": {
+          "required": true,
+          "type": "string",
+          "title": "${ftpConnectTimeout}",
+          "default": 60,
+          "x-decorator": "FormItem",
+          "x-component": "InputNumber",
+          "apiServerKey": "ftpConnectTimeout",
+          "x-index": 72
+        },
+        "ftpDataTimeout": {
+          "required": true,
+          "type": "string",
+          "title": "${ftpDataTimeout}",
+          "default": 0,
+          "x-decorator": "FormItem",
+          "x-component": "InputNumber",
+          "apiServerKey": "ftpDataTimeout",
+          "x-index": 75
+        },
+        "sftpHost": {
+          "required": true,
+          "type": "string",
+          "title": "${sftpHost}",
+          "x-decorator": "FormItem",
+          "x-component": "Input",
+          "apiServerKey": "sftpHost",
+          "x-index": 80
+        },
+        "sftpPort": {
+          "required": true,
+          "type": "string",
+          "title": "${sftpPort}",
+          "default": 22,
+          "x-decorator": "FormItem",
+          "x-component": "InputNumber",
+          "apiServerKey": "sftpPort",
+          "x-index": 90
+        },
+        "sftpUsername": {
+          "required": true,
+          "type": "string",
+          "title": "${sftpUsername}",
+          "x-decorator": "FormItem",
+          "x-component": "Input",
+          "apiServerKey": "sftpUsername",
+          "x-index": 100
+        },
+        "sftpPassword": {
+          "required": true,
+          "type": "string",
+          "title": "${sftpPassword}",
+          "x-decorator": "FormItem",
+          "x-component": "Password",
+          "apiServerKey": "sftpPassword",
+          "x-index": 110
+        },
+        "smbHost": {
+          "required": true,
+          "type": "string",
+          "title": "${smbHost}",
+          "x-decorator": "FormItem",
+          "x-component": "Input",
+          "apiServerKey": "smbHost",
+          "x-index": 120
+        },
+        "smbUsername": {
+          "type": "string",
+          "title": "${smbUsername}",
+          "x-decorator": "FormItem",
+          "x-component": "Input",
+          "apiServerKey": "smbUsername",
+          "x-index": 130
+        },
+        "smbPassword": {
+          "type": "string",
+          "title": "${smbPassword}",
+          "x-decorator": "FormItem",
+          "x-component": "Password",
+          "apiServerKey": "smbPassword",
+          "x-index": 140
+        },
+        "smbShareDir": {
+          "required": true,
+          "type": "string",
+          "title": "${smbShareDir}",
+          "x-decorator": "FormItem",
+          "x-component": "Input",
+          "apiServerKey": "smbShareDir",
+          "x-index": 145
+        },
+        "accessKey": {
+          "required": true,
+          "type": "string",
+          "title": "${accessKey}",
+          "x-decorator": "FormItem",
+          "x-component": "Input",
+          "apiServerKey": "accessKey",
+          "x-index": 150
+        },
+        "secretKey": {
+          "required": true,
+          "type": "string",
+          "title": "${secretKey}",
+          "x-decorator": "FormItem",
+          "x-component": "Password",
+          "apiServerKey": "secretKey",
+          "x-index": 160
+        },
+        "endpoint": {
+          "required": true,
+          "type": "string",
+          "title": "${endpoint}",
+          "x-decorator": "FormItem",
+          "x-component": "Input",
+          "apiServerKey": "endpoint",
+          "x-index": 170
+        },
+        "region": {
+          "type": "string",
+          "title": "${region}",
+          "x-decorator": "FormItem",
+          "x-component": "Input",
+          "apiServerKey": "region",
+          "x-index": 180
+        },
+        "bucket": {
+          "required": true,
+          "type": "string",
+          "title": "${bucket}",
+          "x-decorator": "FormItem",
+          "x-component": "Input",
+          "apiServerKey": "bucket",
+          "x-index": 190
+        },
+        "filePathString": {
+          "type": "string",
+          "title": "${filePathString}",
+          "x-decorator": "FormItem",
+          "x-component": "Input",
+          "apiServerKey": "filePathString",
+          "x-index": 200
+        },
+        "loadSchema": {
+          "type": "boolean",
+          "default": false,
+          "x-display": "hidden"
+        }
+      }
+    },
+    "node": {
+      "type": "object",
+      "properties": {
+        "modelName": {
+          "required": true,
+          "type": "string",
+          "title": "${modelName}",
+          "x-decorator": "FormItem",
+          "x-component": "Input",
+          "x-decorator-props": {
+            "tooltip": "${modelNameTooltip}"
+          },
+          "apiServerKey": "modelName",
+          "x-index": 1
+        },
+        "includeRegString": {
+          "type": "string",
+          "title": "${includeRegString}",
+          "default": "*.csv",
+          "x-decorator": "FormItem",
+          "x-component": "Input",
+          "x-decorator-props": {
+            "tooltip": "${includeRegStringTooltip}"
+          },
+          "apiServerKey": "includeRegString",
+          "x-index": 2,
+          "x-reactions": [
+            {
+              "dependencies": [
+                "$inputs"
+              ],
+              "fulfill": {
+                "state": {
+                  "display": "{{!$deps[0].length ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
+        },
+        "excludeRegString": {
+          "type": "string",
+          "title": "${excludeRegString}",
+          "x-decorator": "FormItem",
+          "x-component": "Input",
+          "x-decorator-props": {
+            "tooltip": "${excludeRegStringTooltip}"
+          },
+          "apiServerKey": "excludeRegString",
+          "x-index": 3,
+          "x-reactions": [
+            {
+              "dependencies": [
+                "$inputs"
+              ],
+              "fulfill": {
+                "state": {
+                  "display": "{{!$deps[0].length ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
+        },
+        "recursive": {
+          "type": "boolean",
+          "title": "${recursive}",
+          "default": true,
+          "x-decorator": "FormItem",
+          "x-component": "Switch",
+          "x-decorator-props": {
+            "tooltip": "${recursiveTooltip}"
+          },
+          "x-index": 4,
+          "x-reactions": [
+            {
+              "dependencies": [
+                "$inputs"
+              ],
+              "fulfill": {
+                "state": {
+                  "display": "{{!$deps[0].length ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
+        },
+        "fileEncoding": {
+          "type": "string",
+          "title": "${fileEncoding}",
+          "x-decorator": "FormItem",
+          "x-component": "Select",
+          "x-decorator-props": {
+            "tooltip": "${fileEncodingTooltip}"
+          },
+          "x-index": 6,
+          "default": "UTF-8",
+          "enum": [
+            {
+              "label": "UTF-8",
+              "value": "UTF-8"
+            },
+            {
+              "label": "UTF-16",
+              "value": "UTF-16"
+            },
+            {
+              "label": "GBK",
+              "value": "GBK"
+            },
+            {
+              "label": "ASCII",
+              "value": "ASCII"
+            }
+          ]
+        },
+        "offStandard": {
+          "type": "boolean",
+          "title": "${offStandard}",
+          "default": false,
+          "x-decorator": "FormItem",
+          "x-component": "Switch",
+          "x-decorator-props": {
+            "tooltip": "${offStandardTooltip}"
+          },
+          "x-index": 7,
+          "x-reactions": [
+            {
+              "dependencies": [
+                "$inputs"
+              ],
+              "fulfill": {
+                "state": {
+                  "display": "{{!$deps[0].length ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
+        },
+        "lineExpression": {
+          "type": "string",
+          "required": true,
+          "title": "${lineExpression}",
+          "x-decorator": "FormItem",
+          "x-component": "Input",
+          "x-decorator-props": {
+            "tooltip": "${lineExpressionTooltip}"
+          },
+          "x-index": 8,
+          "x-reactions": [
+            {
+              "dependencies": [
+                "$inputs",
+                ".offStandard"
+              ],
+              "fulfill": {
+                "state": {
+                  "display": "{{(!$deps[0].length && $deps[1]) ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
+        },
+        "header": {
+          "type": "string",
+          "title": "${header}",
+          "x-decorator": "FormItem",
+          "x-component": "Input",
+          "x-decorator-props": {
+            "tooltip": "${headerTooltip}"
+          },
+          "apiServerKey": "header",
+          "x-index": 9
+        },
+        "headerLine": {
+          "type": "string",
+          "title": "${headerLine}",
+          "default": 1,
+          "x-decorator": "FormItem",
+          "x-component": "InputNumber",
+          "x-decorator-props": {
+            "tooltip": "${headerLineTooltip}"
+          },
+          "x-index": 10
+        },
+        "dataStartLine": {
+          "required": true,
+          "type": "string",
+          "title": "${dataStartLine}",
+          "default": 2,
+          "x-decorator": "FormItem",
+          "x-component": "InputNumber",
+          "x-decorator-props": {
+            "tooltip": "${dataStartLineTooltip}"
+          },
+          "apiServerKey": "dataStartLine",
+          "x-index": 11,
+          "x-reactions": [
+            {
+              "dependencies": [
+                "$inputs"
+              ],
+              "fulfill": {
+                "state": {
+                  "display": "{{!$deps[0].length ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
+        },
+        "justString": {
+          "type": "boolean",
+          "title": "${justString}",
+          "default": true,
+          "x-decorator": "FormItem",
+          "x-component": "Switch",
+          "x-decorator-props": {
+            "tooltip": "${justStringTooltip}"
+          },
+          "x-index": 12,
+          "x-reactions": [
+            {
+              "dependencies": [
+                "$inputs"
+              ],
+              "fulfill": {
+                "state": {
+                  "display": "{{!$deps[0].length ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
+        },
+        "writeFilePath": {
+          "type": "string",
+          "title": "${writeFilePath}",
+          "x-decorator": "FormItem",
+          "x-component": "Input",
+          "x-decorator-props": {
+            "tooltip": "${writeFilePathTooltip}"
+          },
+          "apiServerKey": "writeFilePath",
+          "x-index": 13,
+          "required": true,
+          "x-reactions": [
+            {
+              "dependencies": [
+                "$inputs"
+              ],
+              "fulfill": {
+                "state": {
+                  "display": "{{$deps[0].length > 0 ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
+        },
+        "fileNameExpression": {
+          "type": "string",
+          "title": "${fileNameExpression}",
+          "x-decorator": "FormItem",
+          "x-component": "Input",
+          "x-decorator-props": {
+            "tooltip": "${fileNameExpressionTooltip}"
+          },
+          "apiServerKey": "fileNameExpression",
+          "x-index": 14,
+          "required": true,
+          "x-reactions": [
+            {
+              "dependencies": [
+                "$inputs"
+              ],
+              "fulfill": {
+                "state": {
+                  "display": "{{$deps[0].length > 0 ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
+        },
+        "separatorType": {
+          "type": "string",
+          "title": "${separatorType}",
+          "x-decorator": "FormItem",
+          "x-component": "Select",
+          "x-index": 15,
+          "default": ",",
+          "enum": [
+            {
+              "label": "${tab}",
+              "value": "\\t"
+            },
+            {
+              "label": "${comma}",
+              "value": ","
+            },
+            {
+              "label": "${space}",
+              "value": " "
+            },
+            {
+              "label": "${ascii}",
+              "value": "ascii"
+            }
+          ]
+        },
+        "separator": {
+          "type": "string",
+          "title": "${separator}",
+          "x-decorator": "FormItem",
+          "x-component": "Input",
+          "x-decorator-props": {
+            "tooltip": "${separatorTooltip}"
+          },
+          "apiServerKey": "separator",
+          "x-index": 16,
+          "required": true,
+          "default": "0x",
+          "x-reactions": [
+            {
+              "dependencies": [
+                ".separatorType"
+              ],
+              "fulfill": {
+                "state": {
+                  "display": "{{$deps[0] === 'ascii' ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
+        },
+        "lineEndType": {
+          "type": "string",
+          "title": "${lineEndType}",
+          "x-decorator": "FormItem",
+          "x-component": "Select",
+          "x-index": 17,
+          "default": "\\n",
+          "enum": [
+            {
+              "label": "${enter}",
+              "value": "\\n"
+            },
+            {
+              "label": "${space}",
+              "value": " "
+            },
+            {
+              "label": "${ascii}",
+              "value": "ascii"
+            }
+          ]
+        },
+        "lineEnd": {
+          "type": "string",
+          "title": "${lineEnd}",
+          "x-decorator": "FormItem",
+          "x-component": "Input",
+          "x-decorator-props": {
+            "tooltip": "${lineEndTooltip}"
+          },
+          "x-index": 18,
+          "required": true,
+          "default": "0x",
+          "x-reactions": [
+            {
+              "dependencies": [
+                "$inputs",
+                ".lineEndType"
+              ],
+              "fulfill": {
+                "state": {
+                  "display": "{{$deps[0].length > 0 && $deps[1] === 'ascii' ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
+        },
+        "quoteChar": {
+          "type": "string",
+          "title": "${quoteChar}",
+          "x-decorator": "FormItem",
+          "x-component": "Input",
+          "x-decorator-props": {
+            "tooltip": "${quoteCharTooltip}"
+          },
+          "apiServerKey": "quoteChar",
+          "x-index": 19,
+          "default": "\"",
+          "x-reactions": [
+            {
+              "dependencies": [
+                "$inputs"
+              ],
+              "fulfill": {
+                "state": {
+                  "display": "{{$deps[0].length > 0 ? \"visible\":\"hidden\"}}"
+                }
+              }
+            }
+          ]
+        }
+      }
+    }
+  },
+  "messages": {
+    "default": "en_US",
+    "en_US": {
+      "doc": "docs/csv_en_US.md",
+      "protocol": "File Protocol",
+      "encoding": "Charset",
+      "ftpHost": "Host",
+      "ftpPort": "Port",
+      "ftpUsername": "Username",
+      "ftpPassword": "Password",
+      "ftpPassiveMode": "Passive Mode",
+      "ftpConnectTimeout": "Connect Timeout(second)",
+      "ftpDataTimeout": "Data Timeout(second)",
+      "sftpHost": "Host",
+      "sftpPort": "Port",
+      "sftpUsername": "Username",
+      "sftpPassword": "Password",
+      "smbHost": "Host",
+      "smbUsername": "Username",
+      "smbPassword": "Password",
+      "smbShareDir": "Shared Dir",
+      "accessKey": "Access-Key",
+      "secretKey": "Secret-Key",
+      "endpoint": "Endpoint",
+      "region": "Region",
+      "bucket": "Bucket",
+      "filePathString": "File Path",
+      "includeRegString": "Include Reg",
+      "excludeRegString": "Exclude Reg",
+      "recursive": "Recursive",
+      "delimiter": "Delimiter",
+      "header": "File Header",
+      "dataStartLine": "Data Line",
+      "modelName": "Model Name",
+      "headerLine": "Header Line",
+      "justString": "All To String",
+      "fileEncoding": "File Encoding",
+      "writeFilePath": "File Path",
+      "fileNameExpression": "File Name Expression",
+      "offStandard": "Off Standard CSV",
+      "lineExpression": "Expression Each Line",
+      "separator": "Separator(single-character)",
+      "separatorType": "Separator Type",
+      "quoteChar": "Quote Character(single-character)",
+      "lineEnd": "Line End",
+      "lineEndType": "Line End Type",
+      "filePathStringTooltip": "The root path of all files that need to be read",
+      "includeRegStringTooltip": "Includes wildcards, supports * and ?, takes precedence over excluding wildcards (non regular expressions) ",
+      "excludeRegStringTooltip": "Exclude wildcards, support * and ?, exclude (non regular expressions) if wildcards are included",
+      "recursiveTooltip": "When the directory recursion switch is turned on, files that meet the wildcard requirements will be traversed through the subdirectories",
+      "delimiterTooltip": "The separator used in CSV files usually includes commas, spaces, or tabs",
+      "headerTooltip": "Header names can be customized, separated by commas: if left blank, headers will be generated based on the file content; if not empty, header rows will be ignored, and it should be noted that if the number of headers is not enough, it will result in fewer data collection columns for CSV",
+      "dataStartLineTooltip": "The true starting line for data collection",
+      "modelNameTooltip": "The model name has no actual meaning, and is used to distinguish CSV models for products",
+      "headerLineTooltip": "Header row, default to the first row, ignored when there is a custom header",
+      "justStringTooltip": "CSV defaults to fully converting to strings. If each column of data is well organized, especially in numerical and time formats, and does not contain any strings, it can be turned off (reload the model to see the effect)",
+      "fileEncodingTooltip": "When there is Chinese garbled code when loading the model or data, pay special attention to whether to choose GBK or UTF-8",
+      "writeFilePathTooltip": "The path to the file written when CSV is written as the target",
+      "fileNameExpressionTooltip": "When CSV is used as the target for writing, it is allowed to write to multiple files simultaneously. The file content can be categorized and split using field values and date formats, and saved with corresponding file names. For example: tap_\\${record.id}_\\${date:yyyyMMdd}.csv ",
+      "offStandardTooltip": "Non standard CSV format text files that can be customized to collect file content through regular expression matching and used in conjunction with line expressions",
+      "lineExpressionTooltip": "Regular expressions that can match each column of fields. When unfamiliar with usage, file data demos can be provided for customer service assistance",
+      "separatorTooltip": "Separator (ASCII), hexadecimal number starting with 0x",
+      "lineEndTooltip": "Line break separator (ASCII), hexadecimal number starting with 0x",
+      "quoteCharTooltip": "Column quotation marks (single character), each column of data will be wrapped around that character",
+      "tab": "Tab",
+      "comma": "Comma",
+      "space": "Space",
+      "ascii": "ASCII",
+      "enter": "Enter"
+    }
+  },
+  "dataTypes": {
+    "OBJECT": {
+      "to": "TapMap"
+    },
+    "ARRAY": {
+      "to": "TapArray"
+    },
+    "NUMBER": {
+      "precision": [
+        1,
+        1000
+      ],
+      "scale": [
+        0,
+        1000
+      ],
+      "fixed": true,
+      "preferPrecision": 20,
+      "preferScale": 8,
+      "priority": 1,
+      "to": "TapNumber"
+    },
+    "DATETIME": {
+      "range": [
+        "1000-01-01 00:00:00.000000000",
+        "9999-12-31 23:59:59.999999999"
+      ],
+      "pattern": "yyyy-MM-dd HH:mm:ss.SSSSSSSSS",
+      "fraction": [
+        0,
+        9
+      ],
+      "defaultFraction": 3,
+      "withTimeZone": false,
+      "priority": 2,
+      "to": "TapDateTime"
+    },
+    "INTEGER": {
+      "bit": 32,
+      "priority": 1,
+      "value": [
+        -2147483648,
+        2147483647
+      ],
+      "to": "TapNumber"
+    },
+    "BOOLEAN": {
+      "to": "TapBoolean"
+    },
+    "STRING": {
+      "byte": 200,
+      "priority": 1,
+      "defaultByte": 200,
+      "preferByte": 200,
+      "to": "TapString"
+    },
+    "TEXT": {
+      "to": "TapString"
+    }
+  }
+}

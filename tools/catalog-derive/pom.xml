@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  catalog-derive — the PDK-touching segment of the connector catalog pipeline.
+
+  It classloads a connector jar and runs registerCapabilities() against a capturing
+  ConnectorFunctions to derive the connector's capability bitmap (snapshot/cdc/sink/
+  discovery) WITHOUT opening any database connection. Its output is data (a per-connector
+  capability set) that the PDK-free catalog-assembler later merges into the catalog.
+
+  Deliberately STANDALONE: own coordinates, not under the root parent, not in the default
+  reactor. This keeps the default build PDK-free (zero connector/PDK dependency, native
+  friendly) and keeps the heavy, non-converging PDK transitive tree out of the repo-wide
+  enforcer. Run it explicitly:
+
+      mvn -f tools/catalog-derive/pom.xml test
+
+  Graduating this into a profile-gated reactor module (activated only when connector jars
+  are present) with scoped enforcer is later catalog-pipeline work.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <groupId>io.cyntex.tools</groupId>
+  <artifactId>catalog-derive</artifactId>
+  <version>0.1.0-SNAPSHOT</version>
+
+  <properties>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <maven.compiler.release>21</maven.compiler.release>
+    <pdk-api.version>2.0.8-SNAPSHOT</pdk-api.version>
+    <pdk-runner.version>2.8-SNAPSHOT</pdk-runner.version>
+    <junit.version>5.11.4</junit.version>
+    <assertj.version>3.26.3</assertj.version>
+    <plugin.surefire.version>3.5.2</plugin.surefire.version>
+    <plugin.compiler.version>3.13.0</plugin.compiler.version>
+    <plugin.toolchains.version>3.2.0</plugin.toolchains.version>
+  </properties>
+
+  <dependencies>
+    <!-- PDK API: the connector contract (TapConnector, ConnectorFunctions, TapCodecsRegistry,
+         Capability). This is the single PDK touch point of the catalog pipeline. -->
+    <dependency>
+      <groupId>io.tapdata</groupId>
+      <artifactId>tapdata-pdk-api</artifactId>
+      <version>${pdk-api.version}</version>
+    </dependency>
+    <!-- pdk-runner provides TapRuntime, which the PDK's InstanceFactory bootstraps reflectively
+         when a connector's base class initializes. Connector dist jars are thin plugins (they do
+         not bundle the PDK runtime), so it must be on the host classpath even though this module's
+         own code does not reference it. -->
+    <dependency>
+      <groupId>io.tapdata</groupId>
+      <artifactId>tapdata-pdk-runner</artifactId>
+      <version>${pdk-runner.version}</version>
+      <scope>runtime</scope>
+    </dependency>
+
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <version>${junit.version}</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.assertj</groupId>
+      <artifactId>assertj-core</artifactId>
+      <version>${assertj.version}</version>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <!-- Pin JDK 21 via toolchains so the module builds the same regardless of the launcher JVM,
+           matching the rest of the repo. -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-toolchains-plugin</artifactId>
+        <version>${plugin.toolchains.version}</version>
+        <executions>
+          <execution>
+            <goals>
+              <goal>toolchain</goal>
+            </goals>
+          </execution>
+        </executions>
+        <configuration>
+          <toolchains>
+            <jdk>
+              <version>21</version>
+            </jdk>
+          </toolchains>
+        </configuration>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <version>${plugin.compiler.version}</version>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <version>${plugin.surefire.version}</version>
+      </plugin>
+    </plugins>
+  </build>
+</project>

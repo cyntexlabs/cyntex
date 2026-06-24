@@ -1,0 +1,13 @@
+# Invalid: bare 'customers' exists in both declared sources; an unresolved ambiguous
+# reference is an error — disambiguate with the <source_id>. prefix (§4).
+version: cyntex/v1
+kind: pipeline
+id: cust_merge
+source: [ src_crm, src_erp ]
+transforms:
+  - { id: live_only, from: [customers], type: filter, expr: "op != 'd'" }
+view:
+  id: cust_all
+  from: live_only
+  primary_key: id
+  storage: { warm: { collection: cust_all } }

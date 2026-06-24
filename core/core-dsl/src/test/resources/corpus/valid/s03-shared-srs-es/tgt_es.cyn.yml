@@ -1,0 +1,6 @@
+# Write-target connection (pure connection supplier, X18).
+version: cyntex/v1
+kind: source
+id: tgt_es
+connector: elasticsearch
+config: { hosts: "http://10.30.0.9:9200", username: writer, password: Es_2026 }

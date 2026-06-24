@@ -1,0 +1,16 @@
+version: cyntex/v1
+kind: pipeline
+id: ora2my_ods
+source: src_ora
+serve:
+  id: serve
+  from: /.*/
+  sync:
+    - id: my_ods
+      source: tgt_my
+      rename:
+        map:
+          ORDERS: ods_orders
+        case: lower
+        prefix: ods_
+      ddl: apply

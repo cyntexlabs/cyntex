@@ -1,0 +1,206 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Cyntex mono-repo root POM (reactor + parent for the whole repo).
+  Build doctrine: declarations converge to one place, environment differences are
+  pushed to runtime, deliverables converge to a single point.
+  - Dependency versions have a single source of truth: bom/ (imported by ring parents)
+  - Single version number: ${revision} + flatten-maven-plugin (a bump edits one property)
+  - Maven profiles must never be used for environment switching (build once, run
+    anywhere); profiles are reserved for build-machine differences only
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <groupId>io.cyntex</groupId>
+  <artifactId>cyntex</artifactId>
+  <version>${revision}</version>
+  <packaging>pom</packaging>
+
+  <name>Cyntex</name>
+  <description>Cyntex - next-generation data integration and real-time data processing platform</description>
+
+  <modules>
+    <module>bom</module>
+    <module>core</module>
+    <!-- catalog-assembler is a PDK-free build tool (not a ring); it produces the bundled catalog -->
+    <module>tools/catalog-assembler</module>
+    <!-- cli is the surface ring: the offline CLI product front-end (depends only on the core ring) -->
+    <module>cli</module>
+    <!-- arch-tests stays last in the reactor: it test-depends on every ring to assert R1-R10 -->
+    <module>arch-tests</module>
+  </modules>
+
+  <properties>
+    <revision>0.1.0-SNAPSHOT</revision>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <maven.compiler.release>21</maven.compiler.release>
+    <!-- Reproducible build: the same commit must produce bit-identical artifacts -->
+    <project.build.outputTimestamp>2026-06-12T00:00:00Z</project.build.outputTimestamp>
+
+    <!-- All plugin versions pinned (enforced by requirePluginVersions) -->
+    <plugin.clean.version>3.4.0</plugin.clean.version>
+    <plugin.compiler.version>3.13.0</plugin.compiler.version>
+    <plugin.dependency.version>3.8.1</plugin.dependency.version>
+    <plugin.deploy.version>3.1.3</plugin.deploy.version>
+    <plugin.enforcer.version>3.5.0</plugin.enforcer.version>
+    <plugin.failsafe.version>3.5.2</plugin.failsafe.version>
+    <plugin.flatten.version>1.6.0</plugin.flatten.version>
+    <plugin.install.version>3.1.3</plugin.install.version>
+    <plugin.jar.version>3.4.2</plugin.jar.version>
+    <plugin.resources.version>3.3.1</plugin.resources.version>
+    <plugin.site.version>3.12.1</plugin.site.version>
+    <plugin.surefire.version>3.5.2</plugin.surefire.version>
+    <plugin.toolchains.version>3.2.0</plugin.toolchains.version>
+    <!-- GraalVM native-image build plugin; runs only under the cli module's `native` profile -->
+    <plugin.native.version>0.10.6</plugin.native.version>
+  </properties>
+
+  <build>
+    <pluginManagement>
+      <plugins>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-clean-plugin</artifactId>
+          <version>${plugin.clean.version}</version>
+        </plugin>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-compiler-plugin</artifactId>
+          <version>${plugin.compiler.version}</version>
+        </plugin>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-dependency-plugin</artifactId>
+          <version>${plugin.dependency.version}</version>
+        </plugin>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-deploy-plugin</artifactId>
+          <version>${plugin.deploy.version}</version>
+        </plugin>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-enforcer-plugin</artifactId>
+          <version>${plugin.enforcer.version}</version>
+        </plugin>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-failsafe-plugin</artifactId>
+          <version>${plugin.failsafe.version}</version>
+        </plugin>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-install-plugin</artifactId>
+          <version>${plugin.install.version}</version>
+        </plugin>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-jar-plugin</artifactId>
+          <version>${plugin.jar.version}</version>
+        </plugin>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-resources-plugin</artifactId>
+          <version>${plugin.resources.version}</version>
+        </plugin>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-site-plugin</artifactId>
+          <version>${plugin.site.version}</version>
+        </plugin>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-surefire-plugin</artifactId>
+          <version>${plugin.surefire.version}</version>
+        </plugin>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-toolchains-plugin</artifactId>
+          <version>${plugin.toolchains.version}</version>
+        </plugin>
+        <plugin>
+          <groupId>org.codehaus.mojo</groupId>
+          <artifactId>flatten-maven-plugin</artifactId>
+          <version>${plugin.flatten.version}</version>
+        </plugin>
+        <plugin>
+          <groupId>org.graalvm.buildtools</groupId>
+          <artifactId>native-maven-plugin</artifactId>
+          <version>${plugin.native.version}</version>
+        </plugin>
+      </plugins>
+    </pluginManagement>
+
+    <plugins>
+      <!-- JDK pinned via toolchains: builds always use JDK 21 regardless of the launcher JVM -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-toolchains-plugin</artifactId>
+        <executions>
+          <execution>
+            <goals>
+              <goal>toolchain</goal>
+            </goals>
+          </execution>
+        </executions>
+        <configuration>
+          <toolchains>
+            <jdk>
+              <version>21</version>
+            </jdk>
+          </toolchains>
+        </configuration>
+      </plugin>
+
+      <!-- Global enforcer gate: dependency hygiene must fail the build, never be silently resolved -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-enforcer-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>enforce-global</id>
+            <goals>
+              <goal>enforce</goal>
+            </goals>
+            <configuration>
+              <rules>
+                <dependencyConvergence/>
+                <requireUpperBoundDeps/>
+                <banDuplicatePomDependencyVersions/>
+                <requirePluginVersions/>
+              </rules>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+
+      <!-- Single version number: ${revision} resolved into installed POMs by flatten -->
+      <plugin>
+        <groupId>org.codehaus.mojo</groupId>
+        <artifactId>flatten-maven-plugin</artifactId>
+        <configuration>
+          <updatePomFile>true</updatePomFile>
+          <flattenMode>resolveCiFriendliesOnly</flattenMode>
+        </configuration>
+        <executions>
+          <execution>
+            <id>flatten</id>
+            <phase>process-resources</phase>
+            <goals>
+              <goal>flatten</goal>
+            </goals>
+          </execution>
+          <execution>
+            <id>flatten.clean</id>
+            <phase>clean</phase>
+            <goals>
+              <goal>clean</goal>
+            </goals>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
+</project>

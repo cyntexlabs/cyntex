@@ -1,0 +1,9 @@
+# Whole-source mirror of both API resources (issues + pulls).
+version: cyntex/v1
+kind: pipeline
+id: gh2mongo
+source: src_gh
+serve:
+  from: /.*/
+  sync:
+    - { id: mg, source: tgt_mg, write_mode: upsert }

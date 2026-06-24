@@ -1,0 +1,4 @@
+rule: illegal-expression
+adr: "ADR-0016 §12"
+path: transforms[0].fields.tag
+note: "computed value '=after.region +' is not a well-formed CEL expression"

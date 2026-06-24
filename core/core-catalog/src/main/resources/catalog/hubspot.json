@@ -1,0 +1,40 @@
+{
+  "id": "hubspot",
+  "name": "HubSpot",
+  "displayName": "HubSpot",
+  "icon": "icon/hubspot.png",
+  "group": "saas",
+  "modes": [
+    "api"
+  ],
+  "discovery": "catalog",
+  "sink": {
+    "capable": false,
+    "writeSemantics": []
+  },
+  "pushOut": false,
+  "config": [
+    {
+      "name": "code",
+      "type": "string",
+      "label": {
+        "en_US": "Authorize"
+      },
+      "required": true,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    }
+  ],
+  "provenance": {
+    "connectorRepoSha": "b4151f21",
+    "specPath": "connectors-javascript/hubspot-connector/src/main/resources/spec.json",
+    "specContentHash": "8c1b1ea7e746ab49",
+    "pdkApiVersion": null,
+    "requiredLevel": null,
+    "modeSource": {
+      "api": "declared"
+    }
+  }
+}

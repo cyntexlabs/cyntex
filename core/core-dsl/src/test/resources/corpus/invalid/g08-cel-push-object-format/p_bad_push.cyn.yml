@@ -1,0 +1,12 @@
+# Invalid: a push object-form format projects per field; the 'tag' computed value
+# '=after.region +' is malformed CEL. The object form routes each computed field through the
+# same validate-time compile as a map step, located at serve.push[N].format.<field> (§12).
+version: cyntex/v1
+kind: pipeline
+id: p_bad_push
+source: src_a
+serve:
+  from: src_a
+  push:
+    - source: tgt_k
+      format: { tag: "=after.region +" }

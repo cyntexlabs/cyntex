@@ -1,0 +1,15 @@
+# Invalid: serve.from references 'open_onlyy' (typo) — the step is named 'open_only';
+# neither a step id nor a table in the source universe resolves.
+version: cyntex/v1
+kind: pipeline
+id: ins_to_es
+source: src_ins
+transforms:
+  - id: open_only
+    from: [POLICIES]
+    type: filter
+    expr: "after.STATUS != 'CLOSED'"
+serve:
+  from: open_onlyy
+  sync:
+    - { id: es, source: tgt_es, write_mode: upsert }

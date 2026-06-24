@@ -1,0 +1,17 @@
+# Whole-source mirror: serve.from regex = dynamic link, new tables join automatically (X2/X3/X9/X11).
+version: cyntex/v1
+kind: pipeline
+id: ora2my_ods
+source: src_ora
+serve:
+  from: /.*/
+  sync:
+    - id: my_ods
+      source: tgt_my
+      write_mode: upsert
+      rename:
+        map: { ORDERS: ods_orders }
+        case: lower
+        prefix: ods_
+      ddl: apply
+      options: { auto_create_table: true }

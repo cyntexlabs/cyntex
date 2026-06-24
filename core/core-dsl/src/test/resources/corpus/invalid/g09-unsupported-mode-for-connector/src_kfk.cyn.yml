@@ -1,0 +1,7 @@
+version: cyntex/v1
+kind: source
+id: src_kfk
+connector: kafka
+config: { nameSrvAddr: "k1:9092" }
+mode: cdc
+tables: [ events ]

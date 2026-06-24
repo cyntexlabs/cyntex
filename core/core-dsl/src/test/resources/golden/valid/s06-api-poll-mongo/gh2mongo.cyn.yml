@@ -1,0 +1,10 @@
+version: cyntex/v1
+kind: pipeline
+id: gh2mongo
+source: src_gh
+serve:
+  id: serve
+  from: /.*/
+  sync:
+    - id: mg
+      source: tgt_mg

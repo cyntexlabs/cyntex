@@ -1,0 +1,15 @@
+# js escape hatch parses the message payload; append = change-log write semantics (X6).
+version: cyntex/v1
+kind: pipeline
+id: kfk2my
+source: src_kfk
+transforms:
+  - id: parse
+    from: [orders_topic]
+    type: js
+    script: |
+      function process(record, ctx) { record.after = JSON.parse(record.after.value); return record; }
+serve:
+  from: parse
+  sync:
+    - { id: my, source: tgt_my, write_mode: append }

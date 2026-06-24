@@ -1,0 +1,260 @@
+{
+  "id": "mongodb-atlas",
+  "name": "MongoDB Atlas",
+  "displayName": "MongoDB Atlas",
+  "icon": "icons/atlas.png",
+  "group": "database",
+  "modes": [
+    "cdc",
+    "snapshot"
+  ],
+  "discovery": "catalog",
+  "sink": {
+    "capable": true,
+    "writeSemantics": [
+      "upsert",
+      "append"
+    ]
+  },
+  "pushOut": false,
+  "config": [
+    {
+      "name": "isUri",
+      "type": "boolean",
+      "label": {
+        "en_US": "Connection method"
+      },
+      "required": true,
+      "default": "true",
+      "secret": false,
+      "options": [
+        {
+          "value": "true",
+          "label": {
+            "en_US": "URI Mode"
+          }
+        },
+        {
+          "value": "false",
+          "label": {
+            "en_US": "Standard Mode"
+          }
+        }
+      ],
+      "visibleWhen": null
+    },
+    {
+      "name": "uri",
+      "type": "string",
+      "label": {
+        "en_US": "Database URI"
+      },
+      "required": true,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    },
+    {
+      "name": "host",
+      "type": "string",
+      "label": {
+        "en_US": "DB Address"
+      },
+      "required": true,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": {
+        "controllingField": "isUri",
+        "equalsAnyOf": [
+          "false"
+        ]
+      }
+    },
+    {
+      "name": "database",
+      "type": "string",
+      "label": {
+        "en_US": "DB Name"
+      },
+      "required": true,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": {
+        "controllingField": "isUri",
+        "equalsAnyOf": [
+          "false"
+        ]
+      }
+    },
+    {
+      "name": "user",
+      "type": "string",
+      "label": {
+        "en_US": "User"
+      },
+      "required": false,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": {
+        "controllingField": "isUri",
+        "equalsAnyOf": [
+          "false"
+        ]
+      }
+    },
+    {
+      "name": "password",
+      "type": "string",
+      "label": {
+        "en_US": "Password"
+      },
+      "required": false,
+      "default": null,
+      "secret": true,
+      "options": [],
+      "visibleWhen": {
+        "controllingField": "isUri",
+        "equalsAnyOf": [
+          "false"
+        ]
+      }
+    },
+    {
+      "name": "additionalString",
+      "type": "string",
+      "label": {
+        "en_US": "Other connection string parameters"
+      },
+      "required": false,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": {
+        "controllingField": "isUri",
+        "equalsAnyOf": [
+          "false"
+        ]
+      }
+    },
+    {
+      "name": "schemaLimit",
+      "type": "string",
+      "label": {
+        "en_US": "Fields Load Limit For Each Collection"
+      },
+      "required": false,
+      "default": "1024",
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    },
+    {
+      "name": "ssl",
+      "type": "boolean",
+      "label": {
+        "en_US": "Connect using TLS/SSL"
+      },
+      "required": false,
+      "default": "false",
+      "secret": false,
+      "options": [
+        {
+          "value": "true",
+          "label": {
+            "en_US": "TSL/SSL connection"
+          }
+        },
+        {
+          "value": "false",
+          "label": {
+            "en_US": "Direct connection"
+          }
+        }
+      ],
+      "visibleWhen": null
+    },
+    {
+      "name": "sslKey",
+      "type": "string",
+      "label": {
+        "en_US": "Client private key"
+      },
+      "required": true,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": {
+        "controllingField": "ssl",
+        "equalsAnyOf": [
+          "true"
+        ]
+      }
+    },
+    {
+      "name": "sslPass",
+      "type": "string",
+      "label": {
+        "en_US": "Private key password"
+      },
+      "required": false,
+      "default": null,
+      "secret": true,
+      "options": [],
+      "visibleWhen": {
+        "controllingField": "ssl",
+        "equalsAnyOf": [
+          "true"
+        ]
+      }
+    },
+    {
+      "name": "sslValidate",
+      "type": "boolean",
+      "label": {
+        "en_US": "Validate server certificate"
+      },
+      "required": false,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": {
+        "controllingField": "ssl",
+        "equalsAnyOf": [
+          "true"
+        ]
+      }
+    },
+    {
+      "name": "sslCA",
+      "type": "string",
+      "label": {
+        "en_US": "Certificate Authority"
+      },
+      "required": true,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": {
+        "controllingField": "sslValidate",
+        "equalsAnyOf": [
+          "true"
+        ]
+      }
+    }
+  ],
+  "provenance": {
+    "connectorRepoSha": "b4151f21",
+    "specPath": "connectors/mongodb-atlas-connector/src/main/resources/atlas-spec.json",
+    "specContentHash": "516ffca5536036a0",
+    "pdkApiVersion": null,
+    "requiredLevel": null,
+    "modeSource": {
+      "cdc": "derived",
+      "snapshot": "derived"
+    }
+  }
+}

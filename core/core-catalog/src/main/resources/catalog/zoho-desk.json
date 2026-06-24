@@ -1,0 +1,150 @@
+{
+  "id": "zoho-desk",
+  "name": "Zoho-Desk",
+  "displayName": "Zoho Desk",
+  "icon": "icons/zoho.png",
+  "group": "saas",
+  "modes": [
+    "snapshot"
+  ],
+  "discovery": "catalog",
+  "sink": {
+    "capable": false,
+    "writeSemantics": []
+  },
+  "pushOut": false,
+  "config": [
+    {
+      "name": "orgId",
+      "type": "string",
+      "label": {
+        "en_US": "Organization ID"
+      },
+      "required": true,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    },
+    {
+      "name": "clientID",
+      "type": "string",
+      "label": {
+        "en_US": "Client ID"
+      },
+      "required": true,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    },
+    {
+      "name": "clientSecret",
+      "type": "string",
+      "label": {
+        "en_US": "Client Secret"
+      },
+      "required": true,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    },
+    {
+      "name": "generateCode",
+      "type": "string",
+      "label": {
+        "en_US": "Generate Code"
+      },
+      "required": true,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    },
+    {
+      "name": "getTokenMsg",
+      "type": "string",
+      "label": {
+        "en_US": " "
+      },
+      "required": false,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    },
+    {
+      "name": "getRefreshMsg",
+      "type": "string",
+      "label": {
+        "en_US": " "
+      },
+      "required": false,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    },
+    {
+      "name": "connectionMode",
+      "type": "string",
+      "label": {
+        "en_US": "Connection mode"
+      },
+      "required": false,
+      "default": "DocumentMode",
+      "secret": false,
+      "options": [
+        {
+          "value": "DocumentMode",
+          "label": {
+            "en_US": "General document"
+          }
+        }
+      ],
+      "visibleWhen": null
+    },
+    {
+      "name": "streamReadType",
+      "type": "string",
+      "label": {
+        "en_US": "Incremental mode"
+      },
+      "required": false,
+      "default": "WebHook",
+      "secret": false,
+      "options": [
+        {
+          "value": "WebHook",
+          "label": {
+            "en_US": "Web Hook"
+          }
+        }
+      ],
+      "visibleWhen": null
+    },
+    {
+      "name": "hookText",
+      "type": "string",
+      "label": {
+        "en_US": "URL to notify"
+      },
+      "required": false,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    }
+  ],
+  "provenance": {
+    "connectorRepoSha": "b4151f21",
+    "specPath": "connectors/zoho-desk-connector/src/main/resources/spec.json",
+    "specContentHash": "43d2f4245cf9efcb",
+    "pdkApiVersion": null,
+    "requiredLevel": null,
+    "modeSource": {
+      "snapshot": "derived"
+    }
+  }
+}

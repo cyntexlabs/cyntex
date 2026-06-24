@@ -1,0 +1,4 @@
+rule: mode-mismatch
+adr: "ADR-0016 §4 (X10)"
+path: options.start_from
+note: "start_from on mode: api; legal only for stream, or cdc with snapshot_mode: never"

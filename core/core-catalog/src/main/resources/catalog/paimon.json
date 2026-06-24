@@ -1,0 +1,281 @@
+{
+  "id": "paimon",
+  "name": "Paimon",
+  "displayName": "Apache Paimon",
+  "icon": "icons/paimon.png",
+  "group": "database",
+  "modes": [
+    "cdc",
+    "snapshot"
+  ],
+  "discovery": "catalog",
+  "sink": {
+    "capable": true,
+    "writeSemantics": [
+      "upsert",
+      "append"
+    ]
+  },
+  "pushOut": false,
+  "config": [
+    {
+      "name": "warehouse",
+      "type": "string",
+      "label": {
+        "en_US": "Warehouse Path"
+      },
+      "required": true,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    },
+    {
+      "name": "storageType",
+      "type": "string",
+      "label": {
+        "en_US": "Storage Type"
+      },
+      "required": true,
+      "default": "local",
+      "secret": false,
+      "options": [
+        {
+          "value": "s3",
+          "label": {
+            "en_US": "S3"
+          }
+        },
+        {
+          "value": "hdfs",
+          "label": {
+            "en_US": "HDFS"
+          }
+        },
+        {
+          "value": "oss",
+          "label": {
+            "en_US": "OSS"
+          }
+        },
+        {
+          "value": "local",
+          "label": {
+            "en_US": "Local"
+          }
+        }
+      ],
+      "visibleWhen": null
+    },
+    {
+      "name": "s3Endpoint",
+      "type": "string",
+      "label": {
+        "en_US": "S3 Endpoint"
+      },
+      "required": false,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": {
+        "controllingField": "storageType",
+        "equalsAnyOf": [
+          "s3"
+        ]
+      }
+    },
+    {
+      "name": "s3AccessKey",
+      "type": "string",
+      "label": {
+        "en_US": "S3 Access Key"
+      },
+      "required": false,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": {
+        "controllingField": "storageType",
+        "equalsAnyOf": [
+          "s3"
+        ]
+      }
+    },
+    {
+      "name": "s3SecretKey",
+      "type": "string",
+      "label": {
+        "en_US": "S3 Secret Key"
+      },
+      "required": false,
+      "default": null,
+      "secret": true,
+      "options": [],
+      "visibleWhen": {
+        "controllingField": "storageType",
+        "equalsAnyOf": [
+          "s3"
+        ]
+      }
+    },
+    {
+      "name": "s3Region",
+      "type": "string",
+      "label": {
+        "en_US": "S3 Region"
+      },
+      "required": false,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": {
+        "controllingField": "storageType",
+        "equalsAnyOf": [
+          "s3"
+        ]
+      }
+    },
+    {
+      "name": "s3Properties",
+      "type": "array",
+      "label": {
+        "en_US": "S3 Properties"
+      },
+      "required": false,
+      "default": "[{\"propKey\":\"fs.s3a.connection.maximum\",\"propValue\":\"1000\"},{\"propKey\":\"fs.s3a.connection.establish.timeout\",\"propValue\":\"5000\"}]",
+      "secret": false,
+      "options": [],
+      "visibleWhen": {
+        "controllingField": "storageType",
+        "equalsAnyOf": [
+          "s3"
+        ]
+      }
+    },
+    {
+      "name": "hdfsHost",
+      "type": "string",
+      "label": {
+        "en_US": "HDFS Host"
+      },
+      "required": false,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": {
+        "controllingField": "storageType",
+        "equalsAnyOf": [
+          "hdfs"
+        ]
+      }
+    },
+    {
+      "name": "hdfsPort",
+      "type": "number",
+      "label": {
+        "en_US": "HDFS Port"
+      },
+      "required": false,
+      "default": "9000",
+      "secret": false,
+      "options": [],
+      "visibleWhen": {
+        "controllingField": "storageType",
+        "equalsAnyOf": [
+          "hdfs"
+        ]
+      }
+    },
+    {
+      "name": "hdfsUser",
+      "type": "string",
+      "label": {
+        "en_US": "HDFS User"
+      },
+      "required": false,
+      "default": "hadoop",
+      "secret": false,
+      "options": [],
+      "visibleWhen": {
+        "controllingField": "storageType",
+        "equalsAnyOf": [
+          "hdfs"
+        ]
+      }
+    },
+    {
+      "name": "ossEndpoint",
+      "type": "string",
+      "label": {
+        "en_US": "OSS Endpoint"
+      },
+      "required": false,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": {
+        "controllingField": "storageType",
+        "equalsAnyOf": [
+          "oss"
+        ]
+      }
+    },
+    {
+      "name": "ossAccessKey",
+      "type": "string",
+      "label": {
+        "en_US": "OSS Access Key"
+      },
+      "required": false,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": {
+        "controllingField": "storageType",
+        "equalsAnyOf": [
+          "oss"
+        ]
+      }
+    },
+    {
+      "name": "ossSecretKey",
+      "type": "string",
+      "label": {
+        "en_US": "OSS Secret Key"
+      },
+      "required": false,
+      "default": null,
+      "secret": true,
+      "options": [],
+      "visibleWhen": {
+        "controllingField": "storageType",
+        "equalsAnyOf": [
+          "oss"
+        ]
+      }
+    },
+    {
+      "name": "database",
+      "type": "string",
+      "label": {
+        "en_US": "Database Name"
+      },
+      "required": true,
+      "default": "default",
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    }
+  ],
+  "provenance": {
+    "connectorRepoSha": "b4151f21",
+    "specPath": "connectors/paimon-connector/src/main/resources/spec.json",
+    "specContentHash": "2d1fbb37c3db5723",
+    "pdkApiVersion": null,
+    "requiredLevel": null,
+    "modeSource": {
+      "cdc": "derived",
+      "snapshot": "derived"
+    }
+  }
+}

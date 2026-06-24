@@ -1,0 +1,13 @@
+# Invalid: the step is named 'src_a', which is also the id of the referenced source — the
+# <source_id>.<table> disambiguation prefix could no longer tell a step from a source
+# (ADR-0016 §5, no shadowing). Rename the step and the batch is valid.
+version: cyntex/v1
+kind: pipeline
+id: p
+source: src_a
+transforms:
+  - { id: src_a, from: [orders], type: filter, expr: "op != 'd'" }
+serve:
+  from: src_a
+  sync:
+    - { id: out, source: src_a }

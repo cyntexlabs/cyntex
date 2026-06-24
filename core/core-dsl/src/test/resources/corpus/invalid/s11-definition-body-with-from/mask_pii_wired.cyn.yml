@@ -1,0 +1,9 @@
+# Invalid: a definition body is pure logic — from: is forbidden; wiring belongs to the
+# pipeline. Outside a pipeline there is no table universe and no step namespace, so this
+# from: is a dangling reference by construction (X19).
+version: cyntex/v1
+kind: transform
+id: mask_pii_wired
+type: map
+from: [customers]
+fields: { ssn: false, phone: false }

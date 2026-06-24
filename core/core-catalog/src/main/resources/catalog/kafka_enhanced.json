@@ -1,0 +1,682 @@
+{
+  "id": "kafka_enhanced",
+  "name": "Kafka-Enhanced",
+  "displayName": "Apache Kafka(Confluent Compatible)",
+  "icon": "icons/kafka_enhanced.png",
+  "group": "mq",
+  "modes": [
+    "stream"
+  ],
+  "discovery": "catalog",
+  "sink": {
+    "capable": true,
+    "writeSemantics": [
+      "upsert",
+      "append"
+    ]
+  },
+  "pushOut": true,
+  "config": [
+    {
+      "name": "clusterURI",
+      "type": "string",
+      "label": {
+        "en_US": "Connection address"
+      },
+      "required": true,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    },
+    {
+      "name": "schemaRegister",
+      "type": "boolean",
+      "label": {
+        "en_US": "Schema Registry"
+      },
+      "required": false,
+      "default": "false",
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    },
+    {
+      "name": "schemaRegisterUrl",
+      "type": "string",
+      "label": {
+        "en_US": "Schema Registry Url"
+      },
+      "required": true,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": {
+        "controllingField": "schemaRegister",
+        "equalsAnyOf": [
+          "true"
+        ]
+      }
+    },
+    {
+      "name": "registrySchemaType",
+      "type": "string",
+      "label": {
+        "en_US": "Schema Type"
+      },
+      "required": false,
+      "default": "JSON",
+      "secret": false,
+      "options": [
+        {
+          "value": "JSON",
+          "label": {
+            "en_US": "JSON"
+          }
+        },
+        {
+          "value": "AVRO",
+          "label": {
+            "en_US": "AVRO"
+          }
+        },
+        {
+          "value": "PROTOBUF",
+          "label": {
+            "en_US": "PROTOBUF"
+          }
+        }
+      ],
+      "visibleWhen": {
+        "controllingField": "schemaRegister",
+        "equalsAnyOf": [
+          "true"
+        ]
+      }
+    },
+    {
+      "name": "basicAuth",
+      "type": "boolean",
+      "label": {
+        "en_US": "Basic Auth"
+      },
+      "required": false,
+      "default": "false",
+      "secret": false,
+      "options": [],
+      "visibleWhen": {
+        "controllingField": "schemaRegister",
+        "equalsAnyOf": [
+          "true"
+        ]
+      }
+    },
+    {
+      "name": "authCredentialsSource",
+      "type": "string",
+      "label": {
+        "en_US": "Auth Credentials Source"
+      },
+      "required": false,
+      "default": "USER_INFO",
+      "secret": false,
+      "options": [
+        {
+          "value": "USER_INFO",
+          "label": {
+            "en_US": "USER_INFO"
+          }
+        },
+        {
+          "value": "SASL_INHERIT",
+          "label": {
+            "en_US": "SASL_INHERIT"
+          }
+        }
+      ],
+      "visibleWhen": {
+        "controllingField": "basicAuth",
+        "equalsAnyOf": [
+          "true"
+        ]
+      }
+    },
+    {
+      "name": "authUserName",
+      "type": "string",
+      "label": {
+        "en_US": "Auth UserName"
+      },
+      "required": true,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": {
+        "controllingField": "basicAuth",
+        "equalsAnyOf": [
+          "true"
+        ]
+      }
+    },
+    {
+      "name": "authPassword",
+      "type": "string",
+      "label": {
+        "en_US": "Auth Password"
+      },
+      "required": true,
+      "default": null,
+      "secret": true,
+      "options": [],
+      "visibleWhen": {
+        "controllingField": "basicAuth",
+        "equalsAnyOf": [
+          "true"
+        ]
+      }
+    },
+    {
+      "name": "schemaMode",
+      "type": "string",
+      "label": {
+        "en_US": "Structural mode"
+      },
+      "required": false,
+      "default": "STANDARD",
+      "secret": false,
+      "options": [
+        {
+          "value": "STANDARD",
+          "label": {
+            "en_US": "Standard structure"
+          }
+        },
+        {
+          "value": "STANDARD_JSON",
+          "label": {
+            "en_US": "Standard JSON structure"
+          }
+        },
+        {
+          "value": "ORIGINAL",
+          "label": {
+            "en_US": "Original structure"
+          }
+        },
+        {
+          "value": "CANAL",
+          "label": {
+            "en_US": "Canal"
+          }
+        },
+        {
+          "value": "DEBEZIUM",
+          "label": {
+            "en_US": "Debezium"
+          }
+        },
+        {
+          "value": "FLINK_CDC",
+          "label": {
+            "en_US": "Flink CDC"
+          }
+        },
+        {
+          "value": "CUSTOM",
+          "label": {
+            "en_US": "Custom structure"
+          }
+        }
+      ],
+      "visibleWhen": {
+        "controllingField": "schemaRegister",
+        "equalsAnyOf": [
+          "false"
+        ]
+      }
+    },
+    {
+      "name": "analyzeScript",
+      "type": "string",
+      "label": {
+        "en_US": "analyzeScript"
+      },
+      "required": false,
+      "default": "function analyze(header, key, value, partition){\n\n\t// Enter your code at here\n\t return value;\n}",
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    },
+    {
+      "name": "keySerialization",
+      "type": "string",
+      "label": {
+        "en_US": "Key serializer"
+      },
+      "required": true,
+      "default": "Binary",
+      "secret": false,
+      "options": [
+        {
+          "value": "Binary",
+          "label": {
+            "en_US": "Binary"
+          }
+        },
+        {
+          "value": "JsonArray",
+          "label": {
+            "en_US": "JsonArray"
+          }
+        },
+        {
+          "value": "JsonObject",
+          "label": {
+            "en_US": "JsonObject"
+          }
+        },
+        {
+          "value": "String",
+          "label": {
+            "en_US": "String"
+          }
+        },
+        {
+          "value": "Short",
+          "label": {
+            "en_US": "Short"
+          }
+        },
+        {
+          "value": "Integer",
+          "label": {
+            "en_US": "Integer"
+          }
+        },
+        {
+          "value": "Long",
+          "label": {
+            "en_US": "Long"
+          }
+        },
+        {
+          "value": "UUID",
+          "label": {
+            "en_US": "UUID"
+          }
+        }
+      ],
+      "visibleWhen": null
+    },
+    {
+      "name": "valueSerialization",
+      "type": "string",
+      "label": {
+        "en_US": "Value serializer"
+      },
+      "required": true,
+      "default": "Binary",
+      "secret": false,
+      "options": [
+        {
+          "value": "Binary",
+          "label": {
+            "en_US": "Binary"
+          }
+        },
+        {
+          "value": "JsonArray",
+          "label": {
+            "en_US": "JsonArray"
+          }
+        },
+        {
+          "value": "JsonObject",
+          "label": {
+            "en_US": "JsonObject"
+          }
+        },
+        {
+          "value": "String",
+          "label": {
+            "en_US": "String"
+          }
+        },
+        {
+          "value": "Short",
+          "label": {
+            "en_US": "Short"
+          }
+        },
+        {
+          "value": "Integer",
+          "label": {
+            "en_US": "Integer"
+          }
+        },
+        {
+          "value": "Long",
+          "label": {
+            "en_US": "Long"
+          }
+        },
+        {
+          "value": "UUID",
+          "label": {
+            "en_US": "UUID"
+          }
+        }
+      ],
+      "visibleWhen": null
+    },
+    {
+      "name": "useSasl",
+      "type": "boolean",
+      "label": {
+        "en_US": "Enable SASL"
+      },
+      "required": false,
+      "default": "false",
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    },
+    {
+      "name": "saslMechanism",
+      "type": "string",
+      "label": {
+        "en_US": "Mechanism"
+      },
+      "required": false,
+      "default": "PLAIN",
+      "secret": false,
+      "options": [
+        {
+          "value": "PLAIN",
+          "label": {
+            "en_US": "PLAIN"
+          }
+        },
+        {
+          "value": "SCRAM-SHA-256",
+          "label": {
+            "en_US": "SCRAM-SHA-256"
+          }
+        },
+        {
+          "value": "SCRAM-SHA-512",
+          "label": {
+            "en_US": "SCRAM-SHA-512"
+          }
+        }
+      ],
+      "visibleWhen": null
+    },
+    {
+      "name": "saslUsername",
+      "type": "string",
+      "label": {
+        "en_US": "Username"
+      },
+      "required": false,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    },
+    {
+      "name": "saslPassword",
+      "type": "string",
+      "label": {
+        "en_US": "Password"
+      },
+      "required": false,
+      "default": null,
+      "secret": true,
+      "options": [],
+      "visibleWhen": null
+    },
+    {
+      "name": "krb5",
+      "type": "boolean",
+      "label": {
+        "en_US": "kerberos authentication"
+      },
+      "required": false,
+      "default": "false",
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    },
+    {
+      "name": "krb5Keytab",
+      "type": "string",
+      "label": {
+        "en_US": "Key representation file"
+      },
+      "required": true,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": {
+        "controllingField": "krb5",
+        "equalsAnyOf": [
+          "true"
+        ]
+      }
+    },
+    {
+      "name": "krb5Conf",
+      "type": "string",
+      "label": {
+        "en_US": "Configuration file"
+      },
+      "required": true,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": {
+        "controllingField": "krb5",
+        "equalsAnyOf": [
+          "true"
+        ]
+      }
+    },
+    {
+      "name": "krb5Principal",
+      "type": "string",
+      "label": {
+        "en_US": "Body Configuration"
+      },
+      "required": true,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": {
+        "controllingField": "krb5",
+        "equalsAnyOf": [
+          "true"
+        ]
+      }
+    },
+    {
+      "name": "krb5ServiceName",
+      "type": "string",
+      "label": {
+        "en_US": "Service name"
+      },
+      "required": true,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": {
+        "controllingField": "krb5",
+        "equalsAnyOf": [
+          "true"
+        ]
+      }
+    },
+    {
+      "name": "batchMaxDelay",
+      "type": "string",
+      "label": {
+        "en_US": "Consumption timeout (ms)"
+      },
+      "required": true,
+      "default": "2000",
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    },
+    {
+      "name": "kafkaSaslMechanism",
+      "type": "string",
+      "label": {
+        "en_US": "SASL Mechanism"
+      },
+      "required": false,
+      "default": "PLAIN",
+      "secret": false,
+      "options": [
+        {
+          "value": "PLAIN",
+          "label": {
+            "en_US": "PLAIN"
+          }
+        },
+        {
+          "value": "SHA256",
+          "label": {
+            "en_US": "SHA256"
+          }
+        },
+        {
+          "value": "SHA512",
+          "label": {
+            "en_US": "SHA512"
+          }
+        }
+      ],
+      "visibleWhen": {
+        "controllingField": "krb5",
+        "equalsAnyOf": [
+          "false"
+        ]
+      }
+    },
+    {
+      "name": "clientId",
+      "type": "string",
+      "label": {
+        "en_US": "Client number"
+      },
+      "required": false,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    },
+    {
+      "name": "acksType",
+      "type": "string",
+      "label": {
+        "en_US": "ACK confirmation mechanism"
+      },
+      "required": false,
+      "default": "-1",
+      "secret": false,
+      "options": [
+        {
+          "value": "0",
+          "label": {
+            "en_US": "No confirmation"
+          }
+        },
+        {
+          "value": "1",
+          "label": {
+            "en_US": "Write only Master partition"
+          }
+        },
+        {
+          "value": "-1",
+          "label": {
+            "en_US": "Write most ISR partition"
+          }
+        },
+        {
+          "value": "all",
+          "label": {
+            "en_US": "Write all ISR partitions"
+          }
+        }
+      ],
+      "visibleWhen": null
+    },
+    {
+      "name": "compressionType",
+      "type": "string",
+      "label": {
+        "en_US": "Compression type"
+      },
+      "required": false,
+      "default": "lz4",
+      "secret": false,
+      "options": [
+        {
+          "value": "disable",
+          "label": {
+            "en_US": "No compression"
+          }
+        },
+        {
+          "value": "gzip",
+          "label": {
+            "en_US": "gzip"
+          }
+        },
+        {
+          "value": "snappy",
+          "label": {
+            "en_US": "snappy"
+          }
+        },
+        {
+          "value": "lz4",
+          "label": {
+            "en_US": "lz4"
+          }
+        },
+        {
+          "value": "zstd",
+          "label": {
+            "en_US": "zstd"
+          }
+        }
+      ],
+      "visibleWhen": null
+    },
+    {
+      "name": "extParams",
+      "type": "array",
+      "label": {
+        "en_US": "Extended configuration"
+      },
+      "required": false,
+      "default": "[]",
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    }
+  ],
+  "provenance": {
+    "connectorRepoSha": "b4151f21",
+    "specPath": "connectors/kafka-enhanced-connector/src/main/resources/spec_kafka_enhanced.json",
+    "specContentHash": "35375a56f1df9859",
+    "pdkApiVersion": null,
+    "requiredLevel": null,
+    "modeSource": {
+      "stream": "declared"
+    }
+  }
+}

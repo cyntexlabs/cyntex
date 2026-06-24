@@ -1,0 +1,12 @@
+# Invalid: push elements carry no 'type' — the connector category is derived from the
+# referenced source (X11); an explicit type is an unknown field under strict rejection.
+version: cyntex/v1
+kind: pipeline
+id: my2kfk
+source: src_my
+serve:
+  from: orders
+  push:
+    - source: tgt_kfk
+      type: kafka
+      topic: orders_events

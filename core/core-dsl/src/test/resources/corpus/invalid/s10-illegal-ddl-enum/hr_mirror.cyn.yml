@@ -1,0 +1,9 @@
+# Invalid: sync[].ddl enum is apply | ignore | fail — 'skip' is not a member (X5).
+version: cyntex/v1
+kind: pipeline
+id: hr_mirror
+source: src_hr
+serve:
+  from: employees
+  sync:
+    - { id: dw, source: tgt_dw, write_mode: upsert, ddl: skip }

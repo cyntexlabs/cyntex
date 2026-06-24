@@ -1,0 +1,12 @@
+# Build output
+target/
+*.class
+.flattened-pom.xml
+
+# macOS
+.DS_Store
+
+# IDE / editor (per-developer, never shared)
+.idea/
+.vscode/
+*.iml

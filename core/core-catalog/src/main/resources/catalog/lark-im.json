@@ -1,0 +1,60 @@
+{
+  "id": "lark-im",
+  "name": "Lark-IM",
+  "displayName": "Lark IM",
+  "icon": "icon/lark.png",
+  "group": "saas",
+  "modes": [],
+  "discovery": "catalog",
+  "sink": {
+    "capable": false,
+    "writeSemantics": []
+  },
+  "pushOut": false,
+  "config": [
+    {
+      "name": "app_id",
+      "type": "string",
+      "label": {
+        "en_US": "App Id"
+      },
+      "required": true,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    },
+    {
+      "name": "app_secret",
+      "type": "string",
+      "label": {
+        "en_US": "App Secret"
+      },
+      "required": true,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    },
+    {
+      "name": "app_name",
+      "type": "string",
+      "label": {
+        "en_US": "App Name"
+      },
+      "required": false,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    }
+  ],
+  "provenance": {
+    "connectorRepoSha": "b4151f21",
+    "specPath": "connectors-javascript/lark-im-connector/src/main/resources/spec.json",
+    "specContentHash": "3090cc6b52e9d7d7",
+    "pdkApiVersion": null,
+    "requiredLevel": null,
+    "modeSource": {}
+  }
+}

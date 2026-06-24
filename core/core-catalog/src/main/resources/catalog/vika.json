@@ -1,0 +1,63 @@
+{
+  "id": "vika",
+  "name": "vika",
+  "displayName": "vika",
+  "icon": "icons/vika.png",
+  "group": "saas",
+  "modes": [],
+  "discovery": "catalog",
+  "sink": {
+    "capable": true,
+    "writeSemantics": [
+      "upsert",
+      "append"
+    ]
+  },
+  "pushOut": false,
+  "config": [
+    {
+      "name": "hostUrl",
+      "type": "string",
+      "label": {
+        "en_US": "Host Url"
+      },
+      "required": true,
+      "default": "https://api.vika.cn",
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    },
+    {
+      "name": "spaceId",
+      "type": "string",
+      "label": {
+        "en_US": "Space Id"
+      },
+      "required": true,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    },
+    {
+      "name": "credential",
+      "type": "string",
+      "label": {
+        "en_US": "Your API Key"
+      },
+      "required": true,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    }
+  ],
+  "provenance": {
+    "connectorRepoSha": "b4151f21",
+    "specPath": "connectors/vika-connector/src/main/resources/spec_vika.json",
+    "specContentHash": "f3028f7a4ff04dfd",
+    "pdkApiVersion": null,
+    "requiredLevel": null,
+    "modeSource": {}
+  }
+}

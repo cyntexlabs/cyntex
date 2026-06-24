@@ -1,0 +1,11 @@
+# Fallback branch: mutual exclusivity is maintained by the filter conditions themselves
+# (accepted v1 trade-off, §14.9).
+version: cyntex/v1
+kind: pipeline
+id: orders_rest
+source: src_orders
+transforms:
+  - { id: row_only, from: [orders], type: filter, expr: "after.region != 'US' && after.region != 'EU'" }
+serve:
+  from: row_only
+  sync: [ { id: row_db, source: tgt_row_my, write_mode: upsert } ]

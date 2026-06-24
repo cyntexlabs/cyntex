@@ -1,0 +1,6 @@
+# Write-target connection (pure connection supplier, X18).
+version: cyntex/v1
+kind: source
+id: tgt_eu_my
+connector: mysql
+config: { host: 10.30.2.5, username: writer, password: Eu_2026 }

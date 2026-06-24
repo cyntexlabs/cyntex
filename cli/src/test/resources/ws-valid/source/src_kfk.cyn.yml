@@ -1,0 +1,9 @@
+# CLI smoke fixture: a valid Kafka stream source (topic -> table addressing, consume position).
+version: cyntex/v1
+kind: source
+id: src_kfk
+connector: kafka
+config: { brokers: "k1:9092,k2:9092", group_id: cyntex_orders }
+mode: stream
+tables: [ orders_topic ]
+options: { start_from: earliest }

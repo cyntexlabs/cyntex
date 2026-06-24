@@ -1,0 +1,12 @@
+version: cyntex/v1
+kind: source
+id: src_my
+connector: mysql
+config:
+  host: 10.10.0.3
+  password: My_2026
+  username: cdc_user
+mode: cdc
+tables: [orders]
+options:
+  snapshot_mode: never

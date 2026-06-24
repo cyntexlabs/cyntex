@@ -1,0 +1,9 @@
+# ADR-0016 §14.7 — CSV batch import + cleanse (file mode, bounded one-shot).
+# Bare csv has no discovery catalog: tables is required and literal-only (X12).
+version: cyntex/v1
+kind: source
+id: csv_in
+connector: csv
+config: { path: "/data/in/*.csv", header: true }
+mode: file
+tables: [ legacy_customers ]

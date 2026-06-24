@@ -1,0 +1,182 @@
+{
+  "id": "redis",
+  "name": "Redis",
+  "displayName": "Redis",
+  "icon": "icons/redis.png",
+  "group": "database",
+  "modes": [
+    "cdc",
+    "snapshot"
+  ],
+  "discovery": "catalog",
+  "sink": {
+    "capable": true,
+    "writeSemantics": [
+      "upsert",
+      "append"
+    ]
+  },
+  "pushOut": false,
+  "config": [
+    {
+      "name": "deploymentMode",
+      "type": "string",
+      "label": {
+        "en_US": "Deployment mode"
+      },
+      "required": false,
+      "default": "standalone",
+      "secret": false,
+      "options": [
+        {
+          "value": "standalone",
+          "label": {
+            "en_US": "Single machine deployment"
+          }
+        },
+        {
+          "value": "sentinel",
+          "label": {
+            "en_US": "Sentinel deployment"
+          }
+        },
+        {
+          "value": "cluster",
+          "label": {
+            "en_US": "Cluster deployment"
+          }
+        }
+      ],
+      "visibleWhen": null
+    },
+    {
+      "name": "host",
+      "type": "string",
+      "label": {
+        "en_US": "DB Host"
+      },
+      "required": true,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": {
+        "controllingField": "deploymentMode",
+        "equalsAnyOf": [
+          "standalone"
+        ]
+      }
+    },
+    {
+      "name": "port",
+      "type": "string",
+      "label": {
+        "en_US": "Port"
+      },
+      "required": true,
+      "default": "6379",
+      "secret": false,
+      "options": [],
+      "visibleWhen": {
+        "controllingField": "deploymentMode",
+        "equalsAnyOf": [
+          "standalone"
+        ]
+      }
+    },
+    {
+      "name": "sentinelName",
+      "type": "string",
+      "label": {
+        "en_US": "Sentinel name/Cluster name"
+      },
+      "required": true,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": {
+        "controllingField": "deploymentMode",
+        "equalsAnyOf": [
+          "sentinel",
+          "cluster"
+        ]
+      }
+    },
+    {
+      "name": "sentinelAddress",
+      "type": "array",
+      "label": {
+        "en_US": "Server address"
+      },
+      "required": false,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": {
+        "controllingField": "deploymentMode",
+        "equalsAnyOf": [
+          "sentinel",
+          "cluster"
+        ]
+      }
+    },
+    {
+      "name": "database",
+      "type": "string",
+      "label": {
+        "en_US": "Redis DB"
+      },
+      "required": true,
+      "default": "0",
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    },
+    {
+      "name": "username",
+      "type": "string",
+      "label": {
+        "en_US": "Username"
+      },
+      "required": false,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    },
+    {
+      "name": "password",
+      "type": "string",
+      "label": {
+        "en_US": "Password"
+      },
+      "required": false,
+      "default": null,
+      "secret": true,
+      "options": [],
+      "visibleWhen": null
+    },
+    {
+      "name": "schemaKey",
+      "type": "string",
+      "label": {
+        "en_US": "Schema Key"
+      },
+      "required": true,
+      "default": "-schema-key-",
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    }
+  ],
+  "provenance": {
+    "connectorRepoSha": "b4151f21",
+    "specPath": "connectors/redis-connector/src/main/resources/spec_redis.json",
+    "specContentHash": "795c6bff1bc4ee5b",
+    "pdkApiVersion": null,
+    "requiredLevel": null,
+    "modeSource": {
+      "cdc": "derived",
+      "snapshot": "derived"
+    }
+  }
+}

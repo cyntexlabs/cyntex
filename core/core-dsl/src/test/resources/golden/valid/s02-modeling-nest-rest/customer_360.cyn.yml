@@ -1,0 +1,50 @@
+version: cyntex/v1
+kind: pipeline
+id: customer_360
+source: src_ins
+transforms:
+  - id: clean
+    type: map
+    from: [CUSTOMERS]
+    fields:
+      customer_id: $CUST_ID
+      name: $CUST_NAME
+      segment: $SEG_CODE
+  - id: c360
+    type: nest
+    from:
+      claim: CLAIMS
+      customer: clean
+      policy: POLICIES
+    root:
+      from: customer
+      key: [customer_id]
+      embed:
+        - from: policy
+          on:
+            CUST_ID: customer_id
+          as: array
+          path: policies
+          arrayKey: [POLICY_ID]
+          embed:
+            - from: claim
+              on:
+                POLICY_ID: POLICY_ID
+              as: array
+              path: claims
+              arrayKey: [CLAIM_ID]
+view:
+  id: customer_360
+  from: c360
+  primary_key: customer_id
+  storage:
+    hot:
+      ttl: 1h
+    warm:
+      collection: customer_360
+      indexes: [customer_id]
+serve:
+  id: serve
+  from: customer_360
+  query:
+    - type: rest

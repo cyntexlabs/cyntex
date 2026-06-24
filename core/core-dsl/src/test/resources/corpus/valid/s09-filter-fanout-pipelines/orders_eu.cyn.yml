@@ -1,0 +1,9 @@
+version: cyntex/v1
+kind: pipeline
+id: orders_eu
+source: src_orders
+transforms:
+  - { id: eu_only, from: [orders], type: filter, expr: "after.region == 'EU'" }
+serve:
+  from: eu_only
+  sync: [ { id: eu_db, source: tgt_eu_my, write_mode: upsert } ]

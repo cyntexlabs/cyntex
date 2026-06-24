@@ -1,0 +1,32 @@
+package io.cyntex.core.model;
+
+import java.lang.annotation.ElementType;
+import java.lang.annotation.Retention;
+import java.lang.annotation.RetentionPolicy;
+import java.lang.annotation.Target;
+
+/**
+ * Human-facing documentation for a grammar element — the single source the {@code cyntex/v1}
+ * JSON Schema is generated from. Every type, record component and enum constant that the schema
+ * emits as a documented object/property/value must carry one with a non-blank {@link #value()};
+ * the schema generator fails the build otherwise. (Scalar {@link YamlForm} wrappers and flattened
+ * {@link YamlFlatten} components are not emitted as documented fields and are exempt.)
+ *
+ * <p>This is metadata only: it never affects parsing or canonical serialization.
+ */
+@Retention(RetentionPolicy.RUNTIME)
+@Target({ElementType.RECORD_COMPONENT, ElementType.FIELD, ElementType.TYPE})
+public @interface Doc {
+
+    /** One-line description of the element. Required, non-blank. */
+    String value();
+
+    /** Whether this field must be present in a valid document. */
+    boolean required() default false;
+
+    /** YAML key override, when it is not the camelCase-to-snake_case of the component name. */
+    String key() default "";
+
+    /** Documented default value (the YAML form), rendered as the schema {@code default}; empty = none. */
+    String def() default "";
+}

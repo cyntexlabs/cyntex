@@ -1,0 +1,60 @@
+{
+  "id": "bes-channels",
+  "name": "BesChannels",
+  "displayName": "BesChannels",
+  "icon": "icon/bes-channels.png",
+  "group": "saas",
+  "modes": [],
+  "discovery": "catalog",
+  "sink": {
+    "capable": false,
+    "writeSemantics": []
+  },
+  "pushOut": false,
+  "config": [
+    {
+      "name": "userSecret",
+      "type": "string",
+      "label": {
+        "en_US": "Customer Unique Encrypted String"
+      },
+      "required": true,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    },
+    {
+      "name": "userAppId",
+      "type": "string",
+      "label": {
+        "en_US": "App ID of WeChat official account"
+      },
+      "required": true,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    },
+    {
+      "name": "userSource",
+      "type": "string",
+      "label": {
+        "en_US": "Customer unique identification code"
+      },
+      "required": true,
+      "default": null,
+      "secret": false,
+      "options": [],
+      "visibleWhen": null
+    }
+  ],
+  "provenance": {
+    "connectorRepoSha": "b4151f21",
+    "specPath": "connectors-javascript/beschannels-connector/src/main/resources/spec.json",
+    "specContentHash": "f2d4ec47bd72e699",
+    "pdkApiVersion": null,
+    "requiredLevel": null,
+    "modeSource": {}
+  }
+}

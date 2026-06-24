@@ -1,0 +1,10 @@
+# ADR-0016 §14.3 — shared-SRS second consumer (same source definition as s02; batches are
+# per-directory workspaces, so the definition is repeated here to keep the batch closed).
+version: cyntex/v1
+kind: source
+id: src_ins
+connector: oracle
+config: { host: 10.20.0.16, service_name: INS, username: cdc_user, password: Ins_2026 }
+mode: cdc
+tables: [ CUSTOMERS, POLICIES, CLAIMS ]
+srs: { retention: 30d, schema_evolution: track, queryable: true }

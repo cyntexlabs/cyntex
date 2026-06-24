@@ -1,0 +1,6 @@
+# Write-target connection. Pure connection supplier: mode/tables omitted (X18 dual-role).
+version: cyntex/v1
+kind: source
+id: tgt_my
+connector: mysql
+config: { host: 10.30.0.5, username: writer, password: My_2026 }

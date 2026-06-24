@@ -1,0 +1,15 @@
+version: cyntex/v1
+kind: pipeline
+id: ins_to_es
+source: src_ins
+transforms:
+  - id: open_only
+    type: filter
+    from: [POLICIES]
+    expr: "after.STATUS != 'CLOSED'"
+serve:
+  id: serve
+  from: open_only
+  sync:
+    - id: es
+      source: tgt_es

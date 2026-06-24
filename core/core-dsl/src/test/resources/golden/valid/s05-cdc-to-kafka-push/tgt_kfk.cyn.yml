@@ -1,0 +1,6 @@
+version: cyntex/v1
+kind: source
+id: tgt_kfk
+connector: kafka
+config:
+  brokers: k1:9092,k2:9092

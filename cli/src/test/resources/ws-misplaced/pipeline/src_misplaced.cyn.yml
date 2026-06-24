@@ -1,0 +1,7 @@
+# CLI smoke fixture (misplaced): a valid source dropped into the pipeline/ directory.
+# Structurally fine on its own; the only fault is that its kind does not match its parent dir.
+version: cyntex/v1
+kind: source
+id: src_misplaced
+connector: mysql
+config: { host: 10.0.0.9, username: u, password: p }

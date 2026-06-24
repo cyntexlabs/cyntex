@@ -1,0 +1,22 @@
+# Canonical first-party error codes — the build-time stability lock (ADR-0024 D5-5).
+# Sorted, one <domain>.<symbol> per line. The ErrorCodeGatesTest diffs the scanned codes
+# against this file. Adding a code = append it here in the same change set; renaming or
+# removing one = a breaking change to an external contract (review + major version).
+# @Deprecated codes stay listed as tombstones until intentionally retired.
+cli.artifact-exists
+cli.kind-dir-mismatch
+cli.resource-not-found
+cli.unknown-connector
+dsl.ambiguous-reference
+dsl.composition
+dsl.config-type-mismatch
+dsl.duplicate-id
+dsl.forbidden-field
+dsl.illegal-expression
+dsl.illegal-value
+dsl.invalid-config-value
+dsl.malformed-yaml
+dsl.missing-reference
+dsl.mode-mismatch
+dsl.unknown-field
+dsl.unsupported-mode

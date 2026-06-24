@@ -1,0 +1,17 @@
+version: cyntex/v1
+kind: pipeline
+id: kfk2my
+source: src_kfk
+transforms:
+  - id: parse
+    type: js
+    from: [orders_topic]
+    script: |
+      function process(record, ctx) { record.after = JSON.parse(record.after.value); return record; }
+serve:
+  id: serve
+  from: parse
+  sync:
+    - id: my
+      source: tgt_my
+      write_mode: append

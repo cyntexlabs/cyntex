@@ -1,0 +1,27 @@
+version: cyntex/v1
+kind: pipeline
+id: ddl_chain
+source: src_hr
+transforms:
+  - id: norm
+    type: map
+    from: [employees]
+    fields:
+      emp_id: $id
+view:
+  id: emp_mirror
+  from: norm
+  primary_key: emp_id
+  storage:
+    warm:
+      collection: emp_mirror
+  schema:
+    enforce: true
+    evolution: additive
+serve:
+  id: serve
+  from: emp_mirror
+  sync:
+    - id: dw
+      source: tgt_dw
+      ddl: apply

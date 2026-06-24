@@ -1,0 +1,16 @@
+version: cyntex/v1
+kind: source
+id: src_hr
+connector: mysql
+config:
+  host: 10.40.0.7
+  password: Hr_2026
+  username: cdc_user
+mode: cdc
+tables: [employees]
+options:
+  include_ddl: true
+  snapshot_mode: initial
+srs:
+  retention: 7d
+  schema_evolution: track
