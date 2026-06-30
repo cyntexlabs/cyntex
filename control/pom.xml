@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Control ring aggregate parent.
+  Ring rules R5 / R9: control-core depends on core + spi-store; rest-api depends on
+  control-core + core. The control ring must NOT hold a compile dependency on the runtime ring
+  (control writes desired state, the runtime watches and converges — they decouple through the
+  store, never holding each other's references). It must not pull Hazelcast, the PDK, or any
+  adapter. Spring is allowed (rest-api is the HTTP presentation layer). The coarse enforcer
+  gate below bans runtime modules / Hazelcast / PDK / adapters; the precise per-module check
+  (rest-api must not depend on spi directly) is the ArchUnit R5 rule.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>io.cyntex</groupId>
+    <artifactId>cyntex</artifactId>
+    <version>${revision}</version>
+  </parent>
+
+  <artifactId>control</artifactId>
+  <packaging>pom</packaging>
+  <name>Cyntex :: Control Ring</name>
+
+  <modules>
+    <module>control-core</module>
+    <module>rest-api</module>
+  </modules>
+
+  <dependencyManagement>
+    <dependencies>
+      <dependency>
+        <groupId>io.cyntex</groupId>
+        <artifactId>bom</artifactId>
+        <version>${revision}</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
+
+  <build>
+    <plugins>
+      <!-- Coarse ring gate (R5 / R9): the control ring must not hold a compile dependency on the
+           runtime ring, nor pull Hazelcast / PDK / any adapter. Spring is allowed. The precise
+           per-module check is the ArchUnit R5 rule. -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-enforcer-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>enforce-control-ring-blacklist</id>
+            <goals>
+              <goal>enforce</goal>
+            </goals>
+            <configuration>
+              <rules>
+                <bannedDependencies>
+                  <excludes>
+                    <exclude>io.cyntex:engine</exclude>
+                    <exclude>io.cyntex:scheduler</exclude>
+                    <exclude>io.cyntex:adapter-*</exclude>
+                    <exclude>com.hazelcast*</exclude>
+                    <exclude>io.tapdata*</exclude>
+                  </excludes>
+                  <message>
+Forbidden dependency in the Control ring (rules R5 / R9). Control must not hold a compile
+dependency on the runtime ring (control writes desired state, the runtime watches and
+converges — they decouple through the store), nor pull Hazelcast / PDK / any adapter. Spring
+is allowed. The precise per-module check is the ArchUnit R5 rule.
+                  </message>
+                </bannedDependencies>
+              </rules>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
+</project>

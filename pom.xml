@@ -24,6 +24,11 @@
   <modules>
     <module>bom</module>
     <module>core</module>
+    <!-- service rings (ports -> adapters -> runtime -> control), declared in dependency order -->
+    <module>spi</module>
+    <module>adapters</module>
+    <module>runtime</module>
+    <module>control</module>
     <!-- catalog-assembler is a PDK-free build tool (not a ring); it produces the bundled catalog -->
     <module>tools/catalog-assembler</module>
     <!-- cli is the surface ring: the offline CLI product front-end (depends only on the core ring) -->

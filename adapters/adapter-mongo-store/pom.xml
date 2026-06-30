@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>io.cyntex</groupId>
+    <artifactId>adapters</artifactId>
+    <version>${revision}</version>
+  </parent>
+
+  <artifactId>adapter-mongo-store</artifactId>
+  <name>Cyntex :: Adapters :: Mongo Store</name>
+  <!-- The only module allowed to depend on the Mongo driver (rule R3). The driver dependency
+       and the compare-and-swap transaction are intentionally NOT declared yet; they land
+       with the store implementation. -->
+  <description>MongoDB implementation of the storage port (real CAS transaction); placeholder, the driver and implementation land later</description>
+</project>

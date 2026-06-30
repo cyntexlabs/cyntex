@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  SPI ring aggregate parent.
+  Ring rule R2: ports depend one-way on the core ring and on nothing else. The coarse
+  enforcer gate below bans framework families (Spring / Hazelcast / PDK / Mongo driver)
+  from leaking into the port layer; the fine-grained "core only" assertion lives in the
+  ArchUnit R2 rule. Adding a third-party here means amending the recorded allowlist
+  decision first; never introduce one silently.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>io.cyntex</groupId>
+    <artifactId>cyntex</artifactId>
+    <version>${revision}</version>
+  </parent>
+
+  <artifactId>spi</artifactId>
+  <packaging>pom</packaging>
+  <name>Cyntex :: SPI Ring</name>
+
+  <modules>
+    <module>spi-capture</module>
+    <module>spi-sink</module>
+    <module>spi-store</module>
+    <module>spi-transform</module>
+  </modules>
+
+  <dependencyManagement>
+    <dependencies>
+      <dependency>
+        <groupId>io.cyntex</groupId>
+        <artifactId>bom</artifactId>
+        <version>${revision}</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
+
+  <build>
+    <plugins>
+      <!-- Coarse ring gate (R2): ban framework families from the port layer. The fine-grained
+           "depends on core only" check is the ArchUnit R2 rule (the two are deliberate twins). -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-enforcer-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>enforce-spi-ring-blacklist</id>
+            <goals>
+              <goal>enforce</goal>
+            </goals>
+            <configuration>
+              <rules>
+                <bannedDependencies>
+                  <excludes>
+                    <exclude>org.springframework*</exclude>
+                    <exclude>com.hazelcast*</exclude>
+                    <exclude>io.tapdata*</exclude>
+                    <exclude>org.mongodb*</exclude>
+                  </excludes>
+                  <message>
+Banned framework family in the SPI ring (rule R2). Ports must stay framework-free
+(no Spring / Hazelcast / PDK / Mongo driver); they depend only on the core ring. The
+precise core-only check is the ArchUnit R2 rule. Amend the recorded decision before
+adding a third-party; never introduce one silently.
+                  </message>
+                </bannedDependencies>
+              </rules>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
+</project>

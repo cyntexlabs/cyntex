@@ -66,6 +66,74 @@
       <scope>test</scope>
     </dependency>
 
+    <!-- spi ring: registered so the R2 rule scans the port classes -->
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>spi-capture</artifactId>
+      <version>${revision}</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>spi-sink</artifactId>
+      <version>${revision}</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>spi-store</artifactId>
+      <version>${revision}</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>spi-transform</artifactId>
+      <version>${revision}</version>
+      <scope>test</scope>
+    </dependency>
+
+    <!-- adapters ring: registered so the R3 rule scans the adapter classes -->
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>adapter-pdk</artifactId>
+      <version>${revision}</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>adapter-mongo-store</artifactId>
+      <version>${revision}</version>
+      <scope>test</scope>
+    </dependency>
+
+    <!-- runtime ring: registered so the R4 rule scans the runtime classes -->
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>engine</artifactId>
+      <version>${revision}</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>scheduler</artifactId>
+      <version>${revision}</version>
+      <scope>test</scope>
+    </dependency>
+
+    <!-- control ring: registered so the R5 rule scans the control classes -->
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>control-core</artifactId>
+      <version>${revision}</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>rest-api</artifactId>
+      <version>${revision}</version>
+      <scope>test</scope>
+    </dependency>
+
     <dependency>
       <groupId>com.tngtech.archunit</groupId>
       <artifactId>archunit-junit5</artifactId>

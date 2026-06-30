@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Adapters ring aggregate parent.
+  Ring rule R3: adapters depend on spi + core only, and each adapter locks its own
+  third-party system dependency inside its own module (PDK only in adapter-pdk, the Mongo
+  driver only in adapter-mongo-store). The coarse enforcer gate below bans cross-ring
+  leakage (Spring / Hazelcast / runtime / control); the per-module third-party locking and
+  the precise "spi + core only" check live in the ArchUnit R3 rule. The PDK and Mongo
+  driver families are NOT banned here because they legitimately belong to this ring; they
+  are introduced module-by-module when each adapter's bridge lands.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>io.cyntex</groupId>
+    <artifactId>cyntex</artifactId>
+    <version>${revision}</version>
+  </parent>
+
+  <artifactId>adapters</artifactId>
+  <packaging>pom</packaging>
+  <name>Cyntex :: Adapters Ring</name>
+
+  <modules>
+    <module>adapter-pdk</module>
+    <module>adapter-mongo-store</module>
+  </modules>
+
+  <dependencyManagement>
+    <dependencies>
+      <dependency>
+        <groupId>io.cyntex</groupId>
+        <artifactId>bom</artifactId>
+        <version>${revision}</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
+
+  <build>
+    <plugins>
+      <!-- Coarse ring gate (R3): adapters must not pull Spring / Hazelcast, nor depend on the
+           runtime or control rings. Per-module third-party locking and the precise "spi + core
+           only" check are the ArchUnit R3 rule. -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-enforcer-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>enforce-adapters-ring-blacklist</id>
+            <goals>
+              <goal>enforce</goal>
+            </goals>
+            <configuration>
+              <rules>
+                <bannedDependencies>
+                  <excludes>
+                    <exclude>org.springframework*</exclude>
+                    <exclude>com.hazelcast*</exclude>
+                    <exclude>io.cyntex:engine</exclude>
+                    <exclude>io.cyntex:scheduler</exclude>
+                    <exclude>io.cyntex:control-core</exclude>
+                    <exclude>io.cyntex:rest-api</exclude>
+                  </excludes>
+                  <message>
+Cross-ring leakage in the Adapters ring (rule R3). Adapters depend on spi + core only and
+must not pull Spring / Hazelcast, nor depend on the runtime or control rings. Each adapter
+locks its own third-party system dependency inside its own module (PDK only in adapter-pdk,
+the Mongo driver only in adapter-mongo-store) — those are added module-by-module, never at
+the ring level.
+                  </message>
+                </bannedDependencies>
+              </rules>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
+</project>
