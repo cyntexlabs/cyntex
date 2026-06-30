@@ -1,6 +1,7 @@
 package io.cyntex.cli;
 
 import io.cyntex.core.common.CyntexErrorCode;
+import io.cyntex.messages.MessageCatalog;
 
 import java.util.LinkedHashMap;
 import java.util.Map;

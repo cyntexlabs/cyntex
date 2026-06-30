@@ -58,6 +58,14 @@
       <version>${revision}</version>
       <scope>test</scope>
     </dependency>
+    <!-- shared presentation catalog: registered so its dependency rule scans the renderer classes
+         and the D5-3 / D5-4 catalog gates read the bundled messages/en.yml it now owns -->
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>messages</artifactId>
+      <version>${revision}</version>
+      <scope>test</scope>
+    </dependency>
     <!-- surface ring: registered so the R6 rule actually scans the cli classes -->
     <dependency>
       <groupId>io.cyntex</groupId>

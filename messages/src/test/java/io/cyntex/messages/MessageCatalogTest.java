@@ -1,4 +1,4 @@
-package io.cyntex.cli;
+package io.cyntex.messages;
 
 import io.cyntex.core.common.CyntexErrorCode;
 import io.cyntex.core.common.Severity;

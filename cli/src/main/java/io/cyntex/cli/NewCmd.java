@@ -18,6 +18,7 @@ import io.cyntex.core.model.TransformBody;
 import io.cyntex.core.model.TransformResource;
 import io.cyntex.core.model.ViewResource;
 import io.cyntex.core.model.canonical.CanonicalWriter;
+import io.cyntex.messages.MessageCatalog;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Mixin;

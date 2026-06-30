@@ -83,19 +83,37 @@ class RingDependencyRulesTest {
     }
 
     @Test
-    @DisplayName("R6: cli depends only on the core ring (idle until the cli module exists)")
+    @DisplayName("R6: cli depends only on the core ring + the shared message catalog")
     void r6_cliOnlyDependsOnCoreRing() {
         classes().that().resideInAPackage("io.cyntex.cli..")
                 .should().onlyDependOnClassesThat().resideInAnyPackage(
                         "java..",
                         "io.cyntex.cli..",
                         "io.cyntex.core..",
+                        // the shared error-code message catalog + renderer (presentation layer)
+                        "io.cyntex.messages..",
                         // the CLI's own facade libraries
                         "picocli..",
                         "org.jline..")
                 .allowEmptyShould(true)
                 .because("the CLI talks to services over HTTP only; it must have no compile "
-                        + "dependency on control or runtime modules")
+                        + "dependency on control or runtime modules; the shared message catalog is "
+                        + "a presentation-layer leaf, not a service ring")
+                .check(cyntexClasses);
+    }
+
+    @Test
+    @DisplayName("messages (shared presentation catalog) depends only on the core ring")
+    void messagesModuleDependsOnCoreRingOnly() {
+        classes().that().resideInAPackage("io.cyntex.messages..")
+                .should().onlyDependOnClassesThat().resideInAnyPackage(
+                        "java..",
+                        "io.cyntex.messages..",
+                        "io.cyntex.core..")
+                .allowEmptyShould(true)
+                .because("the shared message catalog renders coded errors for every presentation "
+                        + "face; it depends only on the error-code contract in the core ring and "
+                        + "carries no third-party, so no face inherits a library through it")
                 .check(cyntexClasses);
     }
 

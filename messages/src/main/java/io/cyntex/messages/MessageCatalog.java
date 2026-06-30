@@ -1,4 +1,4 @@
-package io.cyntex.cli;
+package io.cyntex.messages;
 
 import io.cyntex.core.common.CyntexErrorCode;
 
@@ -16,16 +16,20 @@ import java.util.Map;
  * from the arguments. A code with no catalog entry falls back to its bare canonical code, so a
  * missing entry degrades to the machine-stable identity rather than failing.
  *
- * <p>The catalog is read with a small purpose-built reader rather than a YAML library: the surface
- * ring carries no YAML dependency (rule R6), and the catalog is a controlled, fixed-shape file we
- * own. The reader accepts exactly two levels — a top-level {@code <code>:} key, then {@code message}
- * and optional {@code solution} double-quoted scalars — and fails loudly on anything else, since a
- * malformed catalog is a build asset defect, not a user input.
+ * <p>This is a shared module so every presentation face renders coded errors the same way: the
+ * offline CLI and the service assembly root both depend on it. It depends only on the core ring
+ * (the error-code contract) and carries no third-party dependency.
+ *
+ * <p>The catalog is read with a small purpose-built reader rather than a YAML library, so the
+ * presentation faces that depend on it carry no YAML dependency, and the catalog is a controlled,
+ * fixed-shape file we own. The reader accepts exactly two levels — a top-level {@code <code>:} key,
+ * then {@code message} and optional {@code solution} double-quoted scalars — and fails loudly on
+ * anything else, since a malformed catalog is a build asset defect, not a user input.
  */
-final class MessageCatalog {
+public final class MessageCatalog {
 
     /** A rendered diagnostic: the primary user-facing message and an optional next-step hint. */
-    record Rendered(String message, String solution) {
+    public record Rendered(String message, String solution) {
     }
 
     /** A raw catalog entry: the message template and an optional solution template. */
@@ -39,12 +43,12 @@ final class MessageCatalog {
     }
 
     /** Loads the bundled {@code en} catalog (the mandatory locale). */
-    static MessageCatalog bundled() {
+    public static MessageCatalog bundled() {
         return new MessageCatalog(parse(read("/messages/en.yml")));
     }
 
     /** Renders the code's message and solution, substituting named placeholders from the args. */
-    Rendered render(CyntexErrorCode code, Map<String, Object> args) {
+    public Rendered render(CyntexErrorCode code, Map<String, Object> args) {
         Entry entry = entries.get(code.code());
         if (entry == null) {
             return new Rendered(code.code(), null);

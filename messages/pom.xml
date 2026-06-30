@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  messages — the shared error-code message catalog (presentation-layer renderer).
+
+  Every presentation face renders coded errors the same way, so the catalog + renderer live in one
+  module that each face depends on: the offline CLI (surface ring) and the service assembly root
+  (app). The renderer is a small zero-dependency reader; the catalog is messages/en.yml, the single
+  first-party catalog the build-time completeness gate reads.
+
+  Dependency surface (allowlisted; the coarse twin of the arch-tests rule for this module): only the
+  core ring (the error-code contract) plus test scope. No third-party on the compile surface — a
+  presentation face that depends on this module must not inherit a YAML or other library through it.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>io.cyntex</groupId>
+    <artifactId>cyntex</artifactId>
+    <version>${revision}</version>
+  </parent>
+
+  <artifactId>messages</artifactId>
+  <name>Cyntex :: Messages</name>
+  <description>Shared error-code message catalog + zero-dependency renderer; depends only on the
+    core ring. Both the CLI and the service assembly root render coded errors through it.</description>
+
+  <dependencyManagement>
+    <dependencies>
+      <dependency>
+        <groupId>io.cyntex</groupId>
+        <artifactId>bom</artifactId>
+        <version>${revision}</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
+
+  <dependencies>
+    <!-- The error-code contract: render() takes a CyntexErrorCode and its named arguments. -->
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>core-common</artifactId>
+      <version>${revision}</version>
+    </dependency>
+
+    <!-- Test only: the renderer is exercised against the real DSL code set (every code renders
+         with no leftover placeholders). -->
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>core-dsl</artifactId>
+      <version>${revision}</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.assertj</groupId>
+      <artifactId>assertj-core</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <!-- Coarse gate: only the core ring on the compile/runtime surface, nothing third-party.
+           The fine-grained twin is the arch-tests rule that asserts the package edges. -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-enforcer-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>enforce-messages-ring-whitelist</id>
+            <goals>
+              <goal>enforce</goal>
+            </goals>
+            <configuration>
+              <rules>
+                <bannedDependencies>
+                  <searchTransitive>false</searchTransitive>
+                  <excludes>
+                    <exclude>*</exclude>
+                  </excludes>
+                  <includes>
+                    <!-- the only compile dependency: the error-code contract -->
+                    <include>io.cyntex:core-common</include>
+                    <!-- test scope never ships (core-dsl, junit, assertj) -->
+                    <include>*:*:*:*:test</include>
+                  </includes>
+                  <message>
+Dependency outside the messages module allowlist. Only the core ring (core-common) is allowed on
+the compile surface; this module carries no third-party so the presentation faces that depend on it
+inherit none through it. Amend the recorded allowlist decision before adding an exception.
+                  </message>
+                </bannedDependencies>
+              </rules>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
+</project>

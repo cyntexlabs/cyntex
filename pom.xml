@@ -24,6 +24,9 @@
   <modules>
     <module>bom</module>
     <module>core</module>
+    <!-- shared presentation: the error-code message catalog + renderer, depended on by the CLI
+         and the app assembly root; sits above core, below any presentation face -->
+    <module>messages</module>
     <!-- service rings (ports -> adapters -> runtime -> control), declared in dependency order -->
     <module>spi</module>
     <module>adapters</module>
