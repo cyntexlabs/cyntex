@@ -50,7 +50,13 @@
     <!-- Reproducible build: the same commit must produce bit-identical artifacts -->
     <project.build.outputTimestamp>2026-06-12T00:00:00Z</project.build.outputTimestamp>
 
+    <!-- Spring Boot platform version: single source of truth for both the spring-boot-dependencies
+         import (declared in bom/, which inherits this property from here) and the
+         spring-boot-maven-plugin that repackages the app fat-jar. A bump moves both together. -->
+    <spring.boot.version>3.4.8</spring.boot.version>
+
     <!-- All plugin versions pinned (enforced by requirePluginVersions) -->
+    <plugin.assembly.version>3.7.1</plugin.assembly.version>
     <plugin.clean.version>3.4.0</plugin.clean.version>
     <plugin.compiler.version>3.13.0</plugin.compiler.version>
     <plugin.dependency.version>3.8.1</plugin.dependency.version>
@@ -71,6 +77,11 @@
   <build>
     <pluginManagement>
       <plugins>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-assembly-plugin</artifactId>
+          <version>${plugin.assembly.version}</version>
+        </plugin>
         <plugin>
           <groupId>org.apache.maven.plugins</groupId>
           <artifactId>maven-clean-plugin</artifactId>
@@ -140,6 +151,14 @@
           <groupId>org.graalvm.buildtools</groupId>
           <artifactId>native-maven-plugin</artifactId>
           <version>${plugin.native.version}</version>
+        </plugin>
+        <!-- Repackages the app module's thin jar into a runnable Spring Boot fat-jar; used only by the
+             app assembly root (the single service deliverable). Pinned to the Spring Boot platform
+             version so the loader matches the runtime. -->
+        <plugin>
+          <groupId>org.springframework.boot</groupId>
+          <artifactId>spring-boot-maven-plugin</artifactId>
+          <version>${spring.boot.version}</version>
         </plugin>
       </plugins>
     </pluginManagement>

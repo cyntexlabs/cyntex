@@ -24,13 +24,14 @@
     <snakeyaml.version>2.4</snakeyaml.version>
     <cel.version>0.10.1</cel.version>
     <!-- Spring Boot is the service runtime substrate (assembly root + control ring). It is a
-         working-assumption baseline (full framework decision pending), pinned to a current 3.x.
-         The repo's own pins still win over Spring Boot's managed versions: jackson is imported
-         via jackson-bom FIRST (competing imported BOMs resolve first-import-wins), and snakeyaml
-         is a direct managed pin (a direct entry always overrides any imported BOM, order-
+         working-assumption baseline (full framework decision pending). The version (spring.boot.version)
+         is the single source of truth defined in the root POM and inherited here, so the
+         spring-boot-dependencies import below and the spring-boot-maven-plugin that repackages the app
+         fat-jar always move together. The repo's own pins still win over Spring Boot's managed versions:
+         jackson is imported via jackson-bom FIRST (competing imported BOMs resolve first-import-wins),
+         and snakeyaml is a direct managed pin (a direct entry always overrides any imported BOM, order-
          independent). The spring-boot-dependencies import is placed last only to read as the
          lowest-priority substrate, not as the cause of that precedence. -->
-    <spring.boot.version>3.4.8</spring.boot.version>
     <!-- CLI facade libraries (surface ring): the command framework and the REPL line reader.
          Both are self-contained (picocli has no transitive deps; jline aggregates its own
          modules at one version) and are allowlisted to the cli module only (rule R6). -->

@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Service distribution layout. Produces a single tar.gz that unpacks to a versioned root holding:
+    bin/  the launcher script (executable)
+    conf/ external configuration; files here override the defaults baked into the fat-jar
+    lib/  the runnable Spring Boot fat-jar
+  This is the only service deliverable.
+-->
+<assembly xmlns="http://maven.apache.org/ASSEMBLY/2.2.0"
+          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+          xsi:schemaLocation="http://maven.apache.org/ASSEMBLY/2.2.0 http://maven.apache.org/xsd/assembly-2.2.0.xsd">
+  <id>dist</id>
+  <formats>
+    <format>tar.gz</format>
+  </formats>
+  <baseDirectory>cyntex-server-${project.version}</baseDirectory>
+
+  <fileSets>
+    <!-- launcher scripts: executable -->
+    <fileSet>
+      <directory>src/dist/bin</directory>
+      <outputDirectory>bin</outputDirectory>
+      <fileMode>0755</fileMode>
+    </fileSet>
+    <!-- external configuration: read-only -->
+    <fileSet>
+      <directory>src/dist/conf</directory>
+      <outputDirectory>conf</outputDirectory>
+      <fileMode>0644</fileMode>
+    </fileSet>
+  </fileSets>
+
+  <files>
+    <!-- the runnable fat-jar produced by the spring-boot repackage (boot classifier) -->
+    <file>
+      <source>${project.build.directory}/${project.build.finalName}-boot.jar</source>
+      <outputDirectory>lib</outputDirectory>
+    </file>
+  </files>
+</assembly>

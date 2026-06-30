@@ -28,6 +28,10 @@
   <description>Service assembly root: single-process bootstrap (--role=all at L1), the only module
     permitted to depend on the adapters ring (rule R7). Runs on the JVM, not native.</description>
 
+  <properties>
+    <mainClass>io.cyntex.app.Bootstrap</mainClass>
+  </properties>
+
   <dependencyManagement>
     <dependencies>
       <dependency>
@@ -85,4 +89,54 @@
       <scope>test</scope>
     </dependency>
   </dependencies>
+
+  <build>
+    <plugins>
+      <!-- Repackage the thin jar into a runnable Spring Boot fat-jar. Attached under the `boot`
+           classifier so the plain library jar (app-<ver>.jar) remains the main artifact: arch-tests
+           consumes it to scan this module's classes for rule R7 and the error-code gates, which a
+           fat-jar's nested BOOT-INF/classes layout would hide. The deliverable is
+           app/target/app-<ver>-boot.jar, started with `java -jar` (role defaults to all). -->
+      <plugin>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-maven-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>repackage-boot-jar</id>
+            <goals>
+              <goal>repackage</goal>
+            </goals>
+            <configuration>
+              <classifier>boot</classifier>
+              <mainClass>${mainClass}</mainClass>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+
+      <!-- Assemble the distribution: a tar.gz unpacking to bin/ (launcher) + conf/ (external config)
+           + lib/ (the boot jar). This is the only service deliverable — other modules ship no
+           executable package (the CLI is the separate second deliverable, native-image packaged).
+           Bound to package after the repackage above, so the boot jar exists when it is bundled. -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-assembly-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>dist-tarball</id>
+            <phase>package</phase>
+            <goals>
+              <goal>single</goal>
+            </goals>
+            <configuration>
+              <descriptors>
+                <descriptor>src/assembly/dist.xml</descriptor>
+              </descriptors>
+              <tarLongFileMode>posix</tarLongFileMode>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
 </project>
