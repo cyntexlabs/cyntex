@@ -18,7 +18,10 @@ public enum Domain {
     CLI,
     CORE,
     CATALOG,
-    SCHEMA;
+    SCHEMA,
+    // service assembly root: role selection and startup-fatal failures (app)
+    ROLE,
+    BOOT;
 
     /** The lower-case identifier used as the {@code <domain>} segment of a canonical code. */
     public String id() {

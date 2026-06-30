@@ -32,6 +32,9 @@
     <module>adapters</module>
     <module>runtime</module>
     <module>control</module>
+    <!-- app is the service assembly root: single-process bootstrap, the only module that may depend
+         on the adapters ring (rule R7); declared after the rings it wires -->
+    <module>app</module>
     <!-- catalog-assembler is a PDK-free build tool (not a ring); it produces the bundled catalog -->
     <module>tools/catalog-assembler</module>
     <!-- cli is the surface ring: the offline CLI product front-end (depends only on the core ring) -->

@@ -59,3 +59,6 @@ dsl.invalid-config-value:
 dsl.malformed-yaml:
   message: "Malformed YAML: {detail}."
   solution: "Fix the YAML syntax; the line and column point at the problem."
+role.unsupported:
+  message: "Unsupported --role value '{role}'."
+  solution: "L1 runs the whole platform in one process; use --role=all (the default)."

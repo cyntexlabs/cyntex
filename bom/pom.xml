@@ -23,6 +23,14 @@
     <jackson.version>2.18.2</jackson.version>
     <snakeyaml.version>2.4</snakeyaml.version>
     <cel.version>0.10.1</cel.version>
+    <!-- Spring Boot is the service runtime substrate (assembly root + control ring). It is a
+         working-assumption baseline (full framework decision pending), pinned to a current 3.x.
+         The repo's own pins still win over Spring Boot's managed versions: jackson is imported
+         via jackson-bom FIRST (competing imported BOMs resolve first-import-wins), and snakeyaml
+         is a direct managed pin (a direct entry always overrides any imported BOM, order-
+         independent). The spring-boot-dependencies import is placed last only to read as the
+         lowest-priority substrate, not as the cause of that precedence. -->
+    <spring.boot.version>3.4.8</spring.boot.version>
     <!-- CLI facade libraries (surface ring): the command framework and the REPL line reader.
          Both are self-contained (picocli has no transitive deps; jline aggregates its own
          modules at one version) and are allowlisted to the cli module only (rule R6). -->
@@ -102,6 +110,17 @@
         <groupId>org.jline</groupId>
         <artifactId>jline</artifactId>
         <version>${jline.version}</version>
+      </dependency>
+      <!-- Spring Boot dependency management. The pins above keep precedence on overlap (jackson-bom
+           is imported first; snakeyaml is a direct managed pin), so this import is placed last as the
+           lowest-priority substrate. Only the service modules (the app assembly root, and the control
+           ring later) draw Spring artifacts from it. -->
+      <dependency>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-dependencies</artifactId>
+        <version>${spring.boot.version}</version>
+        <type>pom</type>
+        <scope>import</scope>
       </dependency>
     </dependencies>
   </dependencyManagement>

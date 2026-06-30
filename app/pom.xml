@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  app — the service assembly root.
+
+  This is the single deliverable that brings the whole platform up in one process. It is the only
+  non-adapter module permitted to depend on the adapters ring (rule R7): the assembly root is where
+  the adapter bridges are bound into the runtime under the conditional role wiring. Because it is
+  the assembly point it carries no ring whitelist of its own — it is allowed to depend on every ring;
+  the dependency laws are enforced on the rings it wires, not on the root that wires them.
+
+  The server runs on the JVM (Spring Boot), not as a native image: it dynamically class-loads PDK
+  connector jars at runtime, which a closed-world native image cannot pre-analyse (the CLI stays
+  native). Maven profiles are never used for environment switching (build once, run anywhere).
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>io.cyntex</groupId>
+    <artifactId>cyntex</artifactId>
+    <version>${revision}</version>
+  </parent>
+
+  <artifactId>app</artifactId>
+  <name>Cyntex :: App</name>
+  <description>Service assembly root: single-process bootstrap (--role=all at L1), the only module
+    permitted to depend on the adapters ring (rule R7). Runs on the JVM, not native.</description>
+
+  <dependencyManagement>
+    <dependencies>
+      <dependency>
+        <groupId>io.cyntex</groupId>
+        <artifactId>bom</artifactId>
+        <version>${revision}</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
+
+  <dependencies>
+    <!-- The service runtime substrate: a single Spring application context. -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter</artifactId>
+    </dependency>
+
+    <!-- The error-code contract (CyntexException / Severity) for coded startup diagnostics. -->
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>core-common</artifactId>
+      <version>${revision}</version>
+    </dependency>
+    <!-- The shared error-code message catalog + renderer: the server renders coded diagnostics
+         through the same catalog as the CLI. -->
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>messages</artifactId>
+      <version>${revision}</version>
+    </dependency>
+
+    <!-- The adapters ring: the assembly root is the only non-adapter module allowed to depend on it
+         (rule R7); the bridges are wired into the runtime here. Placeholders at L1. -->
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>adapter-pdk</artifactId>
+      <version>${revision}</version>
+    </dependency>
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>adapter-mongo-store</artifactId>
+      <version>${revision}</version>
+    </dependency>
+
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.assertj</groupId>
+      <artifactId>assertj-core</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+</project>

@@ -20,3 +20,4 @@ dsl.missing-reference
 dsl.mode-mismatch
 dsl.unknown-field
 dsl.unsupported-mode
+role.unsupported

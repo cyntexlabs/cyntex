@@ -142,6 +142,15 @@
       <scope>test</scope>
     </dependency>
 
+    <!-- assembly root: registered so the R7 rule scans the app classes and the error-code gates
+         scan its role-domain codes -->
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>app</artifactId>
+      <version>${revision}</version>
+      <scope>test</scope>
+    </dependency>
+
     <dependency>
       <groupId>com.tngtech.archunit</groupId>
       <artifactId>archunit-junit5</artifactId>
