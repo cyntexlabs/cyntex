@@ -18,10 +18,25 @@ class BootstrapTest {
 
     @Test
     void springApplicationContextStartsAndStops() {
+        // This checks the Spring Boot substrate on JDK 21, not store connectivity, so the store
+        // connection is disabled — its own wiring is covered by StoreStartupTest.
         try (ConfigurableApplicationContext context = new SpringApplicationBuilder(Bootstrap.class)
                 .web(WebApplicationType.NONE)
+                .properties("cyntex.store.mongo.enabled=false")
                 .run()) {
             assertThat(context.isRunning()).isTrue();
+        }
+    }
+
+    @Test
+    void doesNotAutoConfigureAStoreClient() {
+        // The Mongo driver is on the classpath (through the adapter), but Spring Boot must not
+        // auto-configure its own client: the only store client is the controlled MongoConnection.
+        try (ConfigurableApplicationContext context = new SpringApplicationBuilder(Bootstrap.class)
+                .web(WebApplicationType.NONE)
+                .properties("cyntex.store.mongo.enabled=false")
+                .run()) {
+            assertThat(context.getBeansOfType(com.mongodb.client.MongoClient.class)).isEmpty();
         }
     }
 

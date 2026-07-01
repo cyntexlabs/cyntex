@@ -65,3 +65,12 @@ lifecycle.illegal-transition:
 role.unsupported:
   message: "Unsupported --role value '{role}'."
   solution: "L1 runs the whole platform in one process; use --role=all (the default)."
+store.unreachable:
+  message: "Cannot reach the store at {target}."
+  solution: "Check the store is running and the connection settings are correct, then restart."
+store.not-replica-set:
+  message: "The store at {target} is not a replica-set."
+  solution: "Start MongoDB as a single-node replica-set; the checkpoint transaction requires one."
+store.invalid-uri:
+  message: "The store connection string is not a valid MongoDB URI."
+  solution: "Check the store URI setting; it must start with mongodb:// or mongodb+srv://."

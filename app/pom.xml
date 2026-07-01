@@ -88,6 +88,13 @@
       <artifactId>assertj-core</artifactId>
       <scope>test</scope>
     </dependency>
+    <!-- Spring Boot test harness (ApplicationContextRunner) to assert the store connection is wired
+         into startup and that a failure surfaces as a coded diagnostic. -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-test</artifactId>
+      <scope>test</scope>
+    </dependency>
   </dependencies>
 
   <build>

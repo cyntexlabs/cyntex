@@ -22,3 +22,6 @@ dsl.unknown-field
 dsl.unsupported-mode
 lifecycle.illegal-transition
 role.unsupported
+store.invalid-uri
+store.not-replica-set
+store.unreachable

@@ -37,6 +37,15 @@
          modules at one version) and are allowlisted to the cli module only (rule R6). -->
     <picocli.version>4.7.7</picocli.version>
     <jline.version>3.26.3</jline.version>
+    <!-- MongoDB sync driver: the store adapter's backing driver (rule R3 locks it to
+         adapter-mongo-store). Aligned with the Spring Boot 3.4.x platform's managed driver so the
+         service tree carries one Mongo driver version, even though the adapters ring draws it here
+         (it must not import spring-boot-dependencies). -->
+    <mongodb.driver.version>5.2.1</mongodb.driver.version>
+    <!-- Testcontainers: brings up a throwaway Mongo replica-set in tests so the storage CAS
+         contract is witnessed against a real Mongo, not only the pure in-memory contract. Test scope
+         only, in adapter-mongo-store. -->
+    <testcontainers.version>1.20.4</testcontainers.version>
     <junit.version>5.11.4</junit.version>
     <assertj.version>3.26.3</assertj.version>
     <archunit.version>1.3.0</archunit.version>
@@ -111,6 +120,22 @@
         <groupId>org.jline</groupId>
         <artifactId>jline</artifactId>
         <version>${jline.version}</version>
+      </dependency>
+      <!-- MongoDB sync driver, locked to adapter-mongo-store by rule R3. -->
+      <dependency>
+        <groupId>org.mongodb</groupId>
+        <artifactId>mongodb-driver-sync</artifactId>
+        <version>${mongodb.driver.version}</version>
+      </dependency>
+      <!-- Testcontainers module set (aligns testcontainers-core + mongodb + junit-jupiter). Its own
+           third-party transitives (jackson / slf4j / commons-compress) still resolve against the
+           pins above, so the reactor's dependencyConvergence stays green. -->
+      <dependency>
+        <groupId>org.testcontainers</groupId>
+        <artifactId>testcontainers-bom</artifactId>
+        <version>${testcontainers.version}</version>
+        <type>pom</type>
+        <scope>import</scope>
       </dependency>
       <!-- Spring Boot dependency management. The pins above keep precedence on overlap (jackson-bom
            is imported first; snakeyaml is a direct managed pin), so this import is placed last as the

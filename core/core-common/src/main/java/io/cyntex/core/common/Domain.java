@@ -23,7 +23,9 @@ public enum Domain {
     LIFECYCLE,
     // service assembly root: role selection and startup-fatal failures (app)
     ROLE,
-    BOOT;
+    BOOT,
+    // storage connectivity: reaching the backing store and its replica-set requirement (adapters)
+    STORE;
 
     /** The lower-case identifier used as the {@code <domain>} segment of a canonical code. */
     public String id() {

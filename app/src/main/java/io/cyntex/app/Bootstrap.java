@@ -7,6 +7,7 @@ import io.cyntex.core.common.Severity;
 import io.cyntex.messages.MessageCatalog;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.boot.autoconfigure.mongo.MongoAutoConfiguration;
 
 import java.util.List;
 
@@ -19,8 +20,12 @@ import java.util.List;
  * <p>This is the only non-adapter module permitted to depend on the adapters ring (rule R7): the
  * assembly root is where the adapter bridges are bound into the runtime. At L1 the bridges are
  * placeholders, so {@link #adapterBridges()} records the wiring surface without engaging it.
+ *
+ * <p>Spring Boot's Mongo auto-configuration is excluded: the Mongo driver is on the classpath
+ * (through the store adapter), but the only store client is the controlled {@link StoreConfiguration}
+ * connection — the framework must not stand up its own, unmanaged one.
  */
-@SpringBootApplication
+@SpringBootApplication(exclude = MongoAutoConfiguration.class)
 public class Bootstrap {
 
     /** Exit code when a coded diagnostic was reported (matches the CLI's convention). */
