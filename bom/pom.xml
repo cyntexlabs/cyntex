@@ -20,28 +20,35 @@
   <name>Cyntex :: BOM</name>
 
   <properties>
-    <jackson.version>2.18.2</jackson.version>
-    <snakeyaml.version>2.4</snakeyaml.version>
+    <!-- The core ring serializes with Jackson 2 (annotations + YAML dataformat) and must not depend
+         on spring-boot-dependencies, so jackson is pinned here and imported first (below) to win over
+         the platform's managed version. Spring Boot 4.1 defaults to Jackson 3, but the service exposes
+         no HTTP wire codec yet, so Jackson 2 is retained and aligned to the platform's managed Jackson-2
+         line; the move to Jackson 3 lands when the web layer is introduced. -->
+    <jackson.version>2.21.4</jackson.version>
+    <snakeyaml.version>2.6</snakeyaml.version>
     <cel.version>0.10.1</cel.version>
-    <!-- Spring Boot is the service runtime substrate (assembly root + control ring). It is a
-         working-assumption baseline (full framework decision pending). The version (spring.boot.version)
-         is the single source of truth defined in the root POM and inherited here, so the
-         spring-boot-dependencies import below and the spring-boot-maven-plugin that repackages the app
-         fat-jar always move together. The repo's own pins still win over Spring Boot's managed versions:
-         jackson is imported via jackson-bom FIRST (competing imported BOMs resolve first-import-wins),
-         and snakeyaml is a direct managed pin (a direct entry always overrides any imported BOM, order-
-         independent). The spring-boot-dependencies import is placed last only to read as the
-         lowest-priority substrate, not as the cause of that precedence. -->
+    <!-- Spring Boot is the service runtime substrate (assembly root + control ring): Spring Boot 4.1.x
+         on Spring Framework 7 (Jakarta EE 11 / Jackson 3 default), running on JDK 21. The version
+         (spring.boot.version) is the single source of truth defined in the root POM and inherited here,
+         so the spring-boot-dependencies import below and the spring-boot-maven-plugin that repackages
+         the app fat-jar always move together. The repo's own pins still win over Spring Boot's managed
+         versions: jackson is imported via jackson-bom FIRST (competing imported BOMs resolve
+         first-import-wins), and snakeyaml is a direct managed pin (a direct entry always overrides any
+         imported BOM, order-independent). The spring-boot-dependencies import is placed last only to
+         read as the lowest-priority substrate, not as the cause of that precedence. -->
     <!-- CLI facade libraries (surface ring): the command framework and the REPL line reader.
          Both are self-contained (picocli has no transitive deps; jline aggregates its own
          modules at one version) and are allowlisted to the cli module only (rule R6). -->
     <picocli.version>4.7.7</picocli.version>
     <jline.version>3.26.3</jline.version>
-    <!-- MongoDB sync driver: the store adapter's backing driver (rule R3 locks it to
-         adapter-mongo-store). Aligned with the Spring Boot 3.4.x platform's managed driver so the
-         service tree carries one Mongo driver version, even though the adapters ring draws it here
-         (it must not import spring-boot-dependencies). -->
-    <mongodb.driver.version>5.2.1</mongodb.driver.version>
+    <!-- MongoDB driver stack (sync + core + bson + bson-record-codec): the store adapter's backing
+         driver (rule R3 locks it to adapter-mongo-store). The family must resolve to one version — the
+         sync driver calls into core/bson internals and core pulls bson-record-codec, so a split version
+         skews the classpath and fails at runtime. The platform's dependency management (imported below)
+         also manages these, so all four are pinned here to a single version aligned with the platform's
+         managed Mongo line; the stack moves as a unit and cannot skew. -->
+    <mongodb.driver.version>5.8.0</mongodb.driver.version>
     <!-- Testcontainers: brings up a throwaway Mongo replica-set in tests so the storage CAS
          contract is witnessed against a real Mongo, not only the pure in-memory contract. Test scope
          only, in adapter-mongo-store. -->
@@ -121,10 +128,29 @@
         <artifactId>jline</artifactId>
         <version>${jline.version}</version>
       </dependency>
-      <!-- MongoDB sync driver, locked to adapter-mongo-store by rule R3. -->
+      <!-- MongoDB driver stack, locked to adapter-mongo-store by rule R3. core + bson +
+           bson-record-codec are pinned alongside sync so the whole family stays on one version: the
+           platform manages them too, and pinning them here keeps them from skewing against each other
+           on a version bump (core hard-depends on bson-record-codec; a split stack throws
+           NoClassDefFoundError at runtime). -->
       <dependency>
         <groupId>org.mongodb</groupId>
         <artifactId>mongodb-driver-sync</artifactId>
+        <version>${mongodb.driver.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>org.mongodb</groupId>
+        <artifactId>mongodb-driver-core</artifactId>
+        <version>${mongodb.driver.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>org.mongodb</groupId>
+        <artifactId>bson</artifactId>
+        <version>${mongodb.driver.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>org.mongodb</groupId>
+        <artifactId>bson-record-codec</artifactId>
         <version>${mongodb.driver.version}</version>
       </dependency>
       <!-- Testcontainers module set (aligns testcontainers-core + mongodb + junit-jupiter). Its own

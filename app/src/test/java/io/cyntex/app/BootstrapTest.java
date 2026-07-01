@@ -3,6 +3,7 @@ package io.cyntex.app;
 import io.cyntex.adapters.mongostore.MongoStoreAdapter;
 import io.cyntex.adapters.pdk.PdkAdapter;
 import org.junit.jupiter.api.Test;
+import org.springframework.boot.SpringBootVersion;
 import org.springframework.boot.WebApplicationType;
 import org.springframework.boot.builder.SpringApplicationBuilder;
 import org.springframework.context.ConfigurableApplicationContext;
@@ -11,10 +12,18 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * The assembly root: the Spring application context starts and stops cleanly (validating Spring Boot
- * on JDK 21), and the root records the adapter bridges it wires — the R7 exemption made real, since
- * the app is the only non-adapter module permitted to reference the adapters ring.
+ * 4.1 on JDK 21), and the root records the adapter bridges it wires — the R7 exemption made real,
+ * since the app is the only non-adapter module permitted to reference the adapters ring.
  */
 class BootstrapTest {
+
+    @Test
+    void runsOnSpringBoot41() {
+        // The service framework platform is Spring Boot 4.1.x. Pinning the running platform version
+        // here fails the build on a silent downgrade or a stale pin. (Co-existence with the embedded
+        // Hazelcast member is witnessed once the Jet engine is wired into the assembly root.)
+        assertThat(SpringBootVersion.getVersion()).startsWith("4.1");
+    }
 
     @Test
     void springApplicationContextStartsAndStops() {

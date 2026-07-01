@@ -52,8 +52,9 @@
 
     <!-- Spring Boot platform version: single source of truth for both the spring-boot-dependencies
          import (declared in bom/, which inherits this property from here) and the
-         spring-boot-maven-plugin that repackages the app fat-jar. A bump moves both together. -->
-    <spring.boot.version>3.4.8</spring.boot.version>
+         spring-boot-maven-plugin that repackages the app fat-jar. A bump moves both together.
+         4.1.x rides Spring Framework 7 (Jakarta EE 11 / Jackson 3 default) and runs on JDK 21. -->
+    <spring.boot.version>4.1.0</spring.boot.version>
 
     <!-- All plugin versions pinned (enforced by requirePluginVersions) -->
     <plugin.assembly.version>3.7.1</plugin.assembly.version>
