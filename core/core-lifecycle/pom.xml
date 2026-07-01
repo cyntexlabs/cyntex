@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Core ring lifecycle module. Pure data / pure functions, zero third-party (held to the core
+  ring R1 allowlist): the
+  pipeline lifecycle state machine (state set + verb-keyed transition table + preconditions)
+  and the persistence contract (checkpoint doc shape + compare-and-swap on a monotonic fencing
+  epoch). The real Mongo transaction that executes the CAS lives in an adapter, not here — this
+  module only defines the contract so it is single-sourced and unit-testable without a store.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>io.cyntex</groupId>
+    <artifactId>core</artifactId>
+    <version>${revision}</version>
+  </parent>
+
+  <artifactId>core-lifecycle</artifactId>
+  <name>Cyntex :: Core :: Lifecycle</name>
+  <description>Pipeline lifecycle state machine + checkpoint CAS / fencing-epoch contract; pure data, zero third-party</description>
+
+  <dependencies>
+    <!-- compile scope: the error-code contract (CyntexException / CyntexErrorCode) — an illegal
+         lifecycle transition is a user-facing, diagnosable error carried through the error-code
+         system; the lifecycle domain is its first consumer -->
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>core-common</artifactId>
+      <version>${revision}</version>
+    </dependency>
+
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.assertj</groupId>
+      <artifactId>assertj-core</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+</project>

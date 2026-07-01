@@ -19,6 +19,8 @@ public enum Domain {
     CORE,
     CATALOG,
     SCHEMA,
+    // core ring: pipeline lifecycle state machine (illegal transitions)
+    LIFECYCLE,
     // service assembly root: role selection and startup-fatal failures (app)
     ROLE,
     BOOT;

@@ -59,6 +59,9 @@ dsl.invalid-config-value:
 dsl.malformed-yaml:
   message: "Malformed YAML: {detail}."
   solution: "Fix the YAML syntax; the line and column point at the problem."
+lifecycle.illegal-transition:
+  message: "Cannot {verb} a pipeline in state {from}."
+  solution: "Only certain actions are valid from each state; check the pipeline's current state first."
 role.unsupported:
   message: "Unsupported --role value '{role}'."
   solution: "L1 runs the whole platform in one process; use --role=all (the default)."
