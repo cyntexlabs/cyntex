@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Operational logging for the Cyntex server.
+
+  This is the operator-facing diagnostic stream (process health, lifecycle, troubleshooting), and it
+  is deliberately separate from the coded error-code system. The two do not mix: the error-code
+  system carries user-facing, diagnosable errors as stable symbolic codes rendered from a catalog for
+  each locale; operational logs carry free-form English text for whoever runs the process. A code
+  never flows through this framework, and this framework never becomes the contract an error code is.
+
+  The format is Spring Boot's console/file layout with three reserved MDC attribution slots spliced
+  in — role, runtime component, pipeline — so a line can later be traced to who/what emitted it. The
+  slots are reserved now and render empty until later runtime work populates them; reserving them up
+  front means the format never has to change to gain them.
+
+  Two destinations: the console and a rolling file. The file location and the rolling/retention caps
+  are overridable from the distribution's conf/ and from the environment via cyntex.log.* (build
+  once, run anywhere); log levels use Spring Boot's own logging.level.* keys.
+-->
+<configuration>
+
+    <!-- Reserved MDC attribution slots. Empty-safe (":-" yields an empty default) until populated. -->
+    <property name="LOG_MDC_PATTERN" value="[%X{role:-}] [%X{component:-}] [%X{pipeline_id:-}]"/>
+
+    <!-- Operator log format: timestamp, level, pid, the MDC slots, thread, logger, message, and the
+         exception. Set before the Boot includes below so their ${...:-default} fallbacks resolve to
+         these. The console keeps Boot's colour conversion words; the file is plain text. -->
+    <property name="CONSOLE_LOG_PATTERN"
+              value="%clr(%d{${LOG_DATEFORMAT_PATTERN:-yyyy-MM-dd'T'HH:mm:ss.SSSXXX}}){faint} %clr(${LOG_LEVEL_PATTERN:-%5p}){} %clr(${PID:-}){magenta} %clr(---){faint} %clr(${LOG_MDC_PATTERN}){faint} %clr([%15.15t]){faint} %clr(%-40.40logger{39}){cyan} %clr(:){faint} %m%n${LOG_EXCEPTION_CONVERSION_WORD:-%wEx}"/>
+    <property name="FILE_LOG_PATTERN"
+              value="%d{${LOG_DATEFORMAT_PATTERN:-yyyy-MM-dd'T'HH:mm:ss.SSSXXX}} ${LOG_LEVEL_PATTERN:-%5p} ${PID:-} --- ${LOG_MDC_PATTERN} [%t] %-40.40logger{39} : %m%n${LOG_EXCEPTION_CONVERSION_WORD:-%wEx}"/>
+
+    <!-- Log file destination: a directory holding the active file. Overridable from conf/ and env. -->
+    <springProperty scope="context" name="LOG_DIR"  source="cyntex.log.dir"  defaultValue="logs"/>
+    <springProperty scope="context" name="LOG_NAME" source="cyntex.log.name" defaultValue="cyntex-server"/>
+    <property name="LOG_FILE" value="${LOG_DIR}/${LOG_NAME}.log"/>
+
+    <!-- Rolling + retention caps: roll by size and by day, keep a bounded window, cap total on disk.
+         Overridable from conf/ and env; consumed by Boot's file-appender include below. -->
+    <springProperty scope="context" name="LOGBACK_ROLLINGPOLICY_MAX_FILE_SIZE"  source="cyntex.log.max-file-size"  defaultValue="50MB"/>
+    <springProperty scope="context" name="LOGBACK_ROLLINGPOLICY_MAX_HISTORY"    source="cyntex.log.max-history"    defaultValue="14"/>
+    <springProperty scope="context" name="LOGBACK_ROLLINGPOLICY_TOTAL_SIZE_CAP" source="cyntex.log.total-size-cap" defaultValue="1GB"/>
+
+    <!-- Boot's logback support: conversion rules (%clr, %wEx) + level/date properties, then the
+         console and rolling-file appenders driven by the properties set above. -->
+    <include resource="org/springframework/boot/logging/logback/defaults.xml"/>
+    <include resource="org/springframework/boot/logging/logback/console-appender.xml"/>
+    <include resource="org/springframework/boot/logging/logback/file-appender.xml"/>
+
+    <root level="INFO">
+        <appender-ref ref="CONSOLE"/>
+        <appender-ref ref="FILE"/>
+    </root>
+
+</configuration>

@@ -14,6 +14,12 @@ JAVA_BIN="${JAVA_HOME:+$JAVA_HOME/bin/}java"
 # the single runnable fat-jar shipped in lib/
 JAR="$(ls "$APP_HOME"/lib/*.jar | head -1)"
 
+# Run from the installation directory so relative paths resolve deterministically under the install
+# home rather than the caller's working directory — in particular the default operational log
+# directory (cyntex.log.dir=logs). Operator overrides (conf/, environment, --flags) keep their normal
+# Spring precedence, so this only pins the default; it does not clobber a configured path.
+cd "$APP_HOME"
+
 # JAVA_OPTS is intentionally word-split so multiple flags can be passed in one variable.
 exec "$JAVA_BIN" ${JAVA_OPTS:-} -jar "$JAR" \
   --spring.config.additional-location="file:$APP_HOME/conf/" \

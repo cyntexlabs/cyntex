@@ -10,8 +10,12 @@
 # JVM counterpart of the CLI's native-smoke.sh).
 #
 # "Boots" at L1 means the application context starts and the process exits cleanly (code 0): the
-# server has no keep-alive plane yet (Hz / Jet / Mongo land in later tasks), so a non-web context
-# starts, logs "Started Bootstrap", and returns. Long-running + SIGTERM behaviour is a later task.
+# server has no keep-alive plane yet (Hz / Jet land in later tasks), so a non-web context starts,
+# logs "Started Bootstrap", and returns. Long-running + SIGTERM behaviour is a later task.
+#
+# The store connection is disabled for the boot checks (--cyntex.store.mongo.enabled=false): this is
+# a black-box test of packaging + operational logging, not of store connectivity (which has its own
+# unit test and a testcontainers integration test), so it must not depend on a reachable replica-set.
 #
 # Usage:
 #   app/dist-smoke.sh [--build]
@@ -116,10 +120,15 @@ if [[ -z "$BOOT_JAR" || ! -f "$BOOT_JAR" ]]; then
   FAIL=$((FAIL + 1))
 else
   set +e
-  run_capped 90 "$JAVA" -jar "$BOOT_JAR" --role=all >"$WORK/boot-all.txt" 2>&1; RC=$?
+  run_capped 90 "$JAVA" -jar "$BOOT_JAR" --role=all --cyntex.store.mongo.enabled=false --cyntex.log.dir="$WORK/logs-boot" >"$WORK/boot-all.txt" 2>&1; RC=$?
   set -e
   check     "exit 0 (clean boot)"             test "$RC" -eq 0
   check     "logged 'Started Bootstrap'"      grep -q "Started Bootstrap" "$WORK/boot-all.txt"
+  # Operational logging: the file appender writes to the configured directory, and every line carries
+  # the reserved MDC attribution slots ("[] [] []" while unpopulated) — proof the shipped format is
+  # live end to end, which a JVM unit test asserting the logback context cannot cover.
+  check     "wrote an operational log file"    test -f "$WORK/logs-boot/cyntex-server.log"
+  check     "log format carries the MDC slots" grep -qE '\-\-\- \[\] \[\] \[\]' "$WORK/logs-boot/cyntex-server.log"
 fi
 
 bold "2. fat-jar rejects an unsupported role with a coded diagnostic"
@@ -145,10 +154,11 @@ else
   check     "lib/ holds the server jar"       bash -c 'ls "$1"/lib/*.jar >/dev/null 2>&1' _ "$ROOT"
   if [[ -x "$ROOT/bin/cyntex-server" ]]; then
     set +e
-    run_capped 90 "$ROOT/bin/cyntex-server" --role=all >"$WORK/dist-all.txt" 2>&1; RC=$?
+    run_capped 90 "$ROOT/bin/cyntex-server" --role=all --cyntex.store.mongo.enabled=false --cyntex.log.dir="$WORK/logs-dist" >"$WORK/dist-all.txt" 2>&1; RC=$?
     set -e
     check   "launcher exit 0 (clean boot)"    test "$RC" -eq 0
     check   "launcher logged 'Started Bootstrap'" grep -q "Started Bootstrap" "$WORK/dist-all.txt"
+    check   "launcher wrote an operational log file" test -f "$WORK/logs-dist/cyntex-server.log"
 
     # Prove the launcher's conf/ search-path wiring is load-bearing, not decorative: with the shipped
     # comment-only conf the Spring banner prints (control); writing a boot-time property into conf/
@@ -157,7 +167,7 @@ else
     check   "default conf prints the Spring banner (control)" grep -q ":: Spring Boot ::" "$WORK/dist-all.txt"
     printf 'spring.main.banner-mode=off\n' >"$ROOT/conf/application.properties"
     set +e
-    run_capped 90 "$ROOT/bin/cyntex-server" --role=all >"$WORK/dist-conf.txt" 2>&1; RC=$?
+    run_capped 90 "$ROOT/bin/cyntex-server" --role=all --cyntex.store.mongo.enabled=false --cyntex.log.dir="$WORK/logs-dist2" >"$WORK/dist-conf.txt" 2>&1; RC=$?
     set -e
     check     "conf override still boots"      grep -q "Started Bootstrap" "$WORK/dist-conf.txt"
     check_not "conf override reaches the context (banner suppressed via conf/)" grep -q ":: Spring Boot ::" "$WORK/dist-conf.txt"
