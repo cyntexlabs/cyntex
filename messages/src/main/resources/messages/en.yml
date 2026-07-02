@@ -8,6 +8,9 @@
 #
 # Values are double-quoted single-line scalars; colons, apostrophes and backticks inside the quotes
 # are fine. Keep literal double-quotes out of values (use backticks for inline code).
+boot.hazelcast-unavailable:
+  message: "The embedded Hazelcast member could not start."
+  solution: "Another process may already be using the member port on loopback; stop it or set a different port, then restart."
 cli.artifact-exists:
   message: "An artifact already exists at {path}."
   solution: "Choose a different id or --out, or pass --force to overwrite."

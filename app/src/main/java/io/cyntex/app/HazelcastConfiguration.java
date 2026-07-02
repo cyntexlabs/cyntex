@@ -3,10 +3,15 @@ package io.cyntex.app;
 import com.hazelcast.config.Config;
 import com.hazelcast.config.JoinConfig;
 import com.hazelcast.core.Hazelcast;
+import com.hazelcast.core.HazelcastException;
 import com.hazelcast.core.HazelcastInstance;
+import io.cyntex.core.common.CyntexException;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+
+import java.util.Map;
+import java.util.function.Supplier;
 
 /**
  * Wires the embedded Hazelcast member into the assembly root: exactly one full member per process,
@@ -27,7 +32,23 @@ class HazelcastConfiguration {
 
     @Bean(destroyMethod = "shutdown")
     HazelcastInstance hazelcastMember(HazelcastProperties properties) {
-        return Hazelcast.newHazelcastInstance(memberConfig(properties));
+        Config config = memberConfig(properties);
+        return startMember(() -> Hazelcast.newHazelcastInstance(config));
+    }
+
+    /**
+     * Starts the member, translating a Hazelcast startup failure — typically the loopback member
+     * port being already in use — into a coded diagnostic so the operator sees a clean message
+     * instead of a bare stack trace. Anything that is not a {@link HazelcastException} (a programmer
+     * error while assembling the config) propagates unchanged: it must crash bare, not be laundered
+     * into a code that hides the defect. The factory is a seam so the translation is unit-testable.
+     */
+    static HazelcastInstance startMember(Supplier<HazelcastInstance> factory) {
+        try {
+            return factory.get();
+        } catch (HazelcastException cause) {
+            throw new CyntexException(BootError.HAZELCAST_UNAVAILABLE, Map.of(), cause);
+        }
     }
 
     /** Builds the single-member config; pure function, exposed for direct assertion. */

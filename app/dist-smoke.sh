@@ -11,9 +11,9 @@
 #
 # "Boots" means: the application context starts, the process STAYS UP (the embedded Hazelcast
 # member + Jet engine are the keep-alive plane), and SIGTERM brings it down cleanly — the member
-# logs an orderly SHUTDOWN and the JVM exits with the default TERM disposition (143 = 128+15).
-# A dedicated exit-0 graceful-stop contract (ordered Jet stop → member leave → store close) is the
-# shutdown task's to land; this suite will be tightened to exit 0 then.
+# logs an orderly SHUTDOWN and the process exits 0. The server installs its own termination hook:
+# it closes the context in order (member leaves, store closes) then forces exit 0, rather than the
+# JVM's default disposition for a signal-terminated run (143 = 128+15).
 #
 # The store connection is disabled for the boot checks (--cyntex.store.mongo.enabled=false): this is
 # a black-box test of packaging + operational logging, not of store connectivity (which has its own
@@ -73,9 +73,9 @@ PY
 
 # Boot a server command that is expected to stay up: wait (≤$1 s) for "Started Bootstrap" in its
 # output (written to $2), then send SIGTERM and wait (≤30 s) for exit. Exit code: the process's own
-# exit code — the JVM's default disposition for a TERM-terminated run (with shutdown hooks executed)
-# is 143 — or 124 if the marker never appeared, 125 if the process exited by itself before TERM
-# (no keep-alive plane), 126 if TERM was ignored (shutdown wedged; the process is then killed).
+# exit code — the server's termination hook forces 0 after an orderly stop — or 124 if the marker
+# never appeared, 125 if the process exited by itself before TERM (no keep-alive plane), 126 if TERM
+# was ignored (shutdown wedged; the process is then killed).
 serve_then_term() {
   python3 - "$@" <<'PY'
 import subprocess, sys, time
@@ -165,7 +165,7 @@ else
   set +e
   serve_then_term 90 "$WORK/boot-all.txt" "$JAVA" -jar "$BOOT_JAR" --role=all --cyntex.store.mongo.enabled=false --cyntex.log.dir="$WORK/logs-boot"; RC=$?
   set -e
-  check     "stays up; SIGTERM exits 143 (keep-alive plane + orderly stop)" test "$RC" -eq 143
+  check     "stays up; SIGTERM exits 0 (orderly stop → forced exit 0)" test "$RC" -eq 0
   check     "logged 'Started Bootstrap'"      grep -q "Started Bootstrap" "$WORK/boot-all.txt"
   # The embedded member left in an orderly fashion under SIGTERM (shutdown hooks ran), rather than
   # the process being torn down mid-flight.
@@ -205,11 +205,11 @@ else
     set +e
     serve_then_term 90 "$WORK/dist-all.txt" "$ROOT/bin/cyntex-server" --role=all --cyntex.store.mongo.enabled=false --cyntex.log.dir="$WORK/logs-dist"; RC=$?
     set -e
-    check   "launcher stays up; SIGTERM exits 143" test "$RC" -eq 143
+    check   "launcher stays up; SIGTERM exits 0" test "$RC" -eq 0
     check   "launcher logged 'Started Bootstrap'" grep -q "Started Bootstrap" "$WORK/dist-all.txt"
-    # Exit 143 alone cannot distinguish an orderly hooked exit from the launcher wrapper being
-    # killed with the JVM orphaned (e.g. a launcher edit dropping `exec`): the member's own
-    # SHUTDOWN line is the discriminator.
+    # Exit 0 alone cannot distinguish an orderly hooked exit from the launcher wrapper being killed
+    # with the JVM orphaned (e.g. a launcher edit dropping `exec`, which would surface as the
+    # wrapper's own non-zero signal disposition): the member's own SHUTDOWN line is the discriminator.
     check   "launcher member shut down cleanly on SIGTERM" grep -q "is SHUTDOWN" "$WORK/dist-all.txt"
     check   "launcher wrote an operational log file" test -f "$WORK/logs-dist/cyntex-server.log"
 

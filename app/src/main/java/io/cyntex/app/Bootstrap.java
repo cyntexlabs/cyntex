@@ -7,6 +7,7 @@ import io.cyntex.core.common.Severity;
 import io.cyntex.messages.MessageCatalog;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.context.ConfigurableApplicationContext;
 
 import java.util.List;
 
@@ -43,7 +44,14 @@ public class Bootstrap {
             System.exit(e.code().severity() == Severity.ERROR ? EXIT_CODED_DIAGNOSTIC : 0);
             return;
         }
-        SpringApplication.run(Bootstrap.class, args);
+        SpringApplication app = new SpringApplication(Bootstrap.class);
+        // The server owns process termination. Spring's own shutdown hook would close the context on
+        // SIGTERM but leave the JVM to exit with the signal's default disposition (128+15 = 143);
+        // disabling it and installing our own hook lets the orderly stop finish and then force
+        // exit 0, which is what an operator asking the process to stop expects.
+        app.setRegisterShutdownHook(false);
+        ConfigurableApplicationContext context = app.run(args);
+        new GracefulShutdown(context::close, Runtime.getRuntime()::halt).install();
     }
 
     /**
