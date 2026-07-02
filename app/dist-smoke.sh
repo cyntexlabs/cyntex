@@ -9,9 +9,11 @@
 # only the produced artifacts can — so this script is the executable spec for service packaging (the
 # JVM counterpart of the CLI's native-smoke.sh).
 #
-# "Boots" at L1 means the application context starts and the process exits cleanly (code 0): the
-# server has no keep-alive plane yet (Hz / Jet land in later tasks), so a non-web context starts,
-# logs "Started Bootstrap", and returns. Long-running + SIGTERM behaviour is a later task.
+# "Boots" means: the application context starts, the process STAYS UP (the embedded Hazelcast
+# member + Jet engine are the keep-alive plane), and SIGTERM brings it down cleanly — the member
+# logs an orderly SHUTDOWN and the JVM exits with the default TERM disposition (143 = 128+15).
+# A dedicated exit-0 graceful-stop contract (ordered Jet stop → member leave → store close) is the
+# shutdown task's to land; this suite will be tightened to exit 0 then.
 #
 # The store connection is disabled for the boot checks (--cyntex.store.mongo.enabled=false): this is
 # a black-box test of packaging + operational logging, not of store connectivity (which has its own
@@ -69,6 +71,47 @@ except subprocess.TimeoutExpired as e:
 PY
 }
 
+# Boot a server command that is expected to stay up: wait (≤$1 s) for "Started Bootstrap" in its
+# output (written to $2), then send SIGTERM and wait (≤30 s) for exit. Exit code: the process's own
+# exit code — the JVM's default disposition for a TERM-terminated run (with shutdown hooks executed)
+# is 143 — or 124 if the marker never appeared, 125 if the process exited by itself before TERM
+# (no keep-alive plane), 126 if TERM was ignored (shutdown wedged; the process is then killed).
+serve_then_term() {
+  python3 - "$@" <<'PY'
+import subprocess, sys, time
+cap = int(sys.argv[1]); outpath = sys.argv[2]; cmd = sys.argv[3:]
+with open(outpath, "w") as out:
+    p = subprocess.Popen(cmd, stdout=out, stderr=subprocess.STDOUT)
+    deadline = time.time() + cap
+    started = False
+    while time.time() < deadline:
+        if p.poll() is not None:
+            sys.exit(125)
+        with open(outpath, errors="replace") as f:
+            if "Started Bootstrap" in f.read():
+                started = True
+                break
+        time.sleep(0.5)
+    p.terminate()
+    if not started:
+        # Reap the child before reporting: a wedged startup must not leak a live JVM past the
+        # suite's cleanup trap.
+        try:
+            p.wait(10)
+        except subprocess.TimeoutExpired:
+            p.kill()
+            p.wait()
+        sys.exit(124)
+    try:
+        rc = p.wait(30)
+    except subprocess.TimeoutExpired:
+        p.kill()
+        p.wait()
+        sys.exit(126)
+    sys.exit(rc if rc >= 0 else 128 - rc)
+PY
+}
+
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
@@ -120,10 +163,16 @@ if [[ -z "$BOOT_JAR" || ! -f "$BOOT_JAR" ]]; then
   FAIL=$((FAIL + 1))
 else
   set +e
-  run_capped 90 "$JAVA" -jar "$BOOT_JAR" --role=all --cyntex.store.mongo.enabled=false --cyntex.log.dir="$WORK/logs-boot" >"$WORK/boot-all.txt" 2>&1; RC=$?
+  serve_then_term 90 "$WORK/boot-all.txt" "$JAVA" -jar "$BOOT_JAR" --role=all --cyntex.store.mongo.enabled=false --cyntex.log.dir="$WORK/logs-boot"; RC=$?
   set -e
-  check     "exit 0 (clean boot)"             test "$RC" -eq 0
+  check     "stays up; SIGTERM exits 143 (keep-alive plane + orderly stop)" test "$RC" -eq 143
   check     "logged 'Started Bootstrap'"      grep -q "Started Bootstrap" "$WORK/boot-all.txt"
+  # The embedded member left in an orderly fashion under SIGTERM (shutdown hooks ran), rather than
+  # the process being torn down mid-flight.
+  check     "member shut down cleanly on SIGTERM" grep -q "is SHUTDOWN" "$WORK/boot-all.txt"
+  # The listen socket is loopback-only (the member port also serves the unauthenticated client
+  # protocol); the picked member address proves the bind posture end to end.
+  check     "member bound to loopback only"   grep -qE '\[127\.0\.0\.1\]:[0-9]+ is STARTED' "$WORK/boot-all.txt"
   # Operational logging: the file appender writes to the configured directory, and every line carries
   # the reserved MDC attribution slots ("[] [] []" while unpopulated) — proof the shipped format is
   # live end to end, which a JVM unit test asserting the logback context cannot cover.
@@ -154,10 +203,14 @@ else
   check     "lib/ holds the server jar"       bash -c 'ls "$1"/lib/*.jar >/dev/null 2>&1' _ "$ROOT"
   if [[ -x "$ROOT/bin/cyntex-server" ]]; then
     set +e
-    run_capped 90 "$ROOT/bin/cyntex-server" --role=all --cyntex.store.mongo.enabled=false --cyntex.log.dir="$WORK/logs-dist" >"$WORK/dist-all.txt" 2>&1; RC=$?
+    serve_then_term 90 "$WORK/dist-all.txt" "$ROOT/bin/cyntex-server" --role=all --cyntex.store.mongo.enabled=false --cyntex.log.dir="$WORK/logs-dist"; RC=$?
     set -e
-    check   "launcher exit 0 (clean boot)"    test "$RC" -eq 0
+    check   "launcher stays up; SIGTERM exits 143" test "$RC" -eq 143
     check   "launcher logged 'Started Bootstrap'" grep -q "Started Bootstrap" "$WORK/dist-all.txt"
+    # Exit 143 alone cannot distinguish an orderly hooked exit from the launcher wrapper being
+    # killed with the JVM orphaned (e.g. a launcher edit dropping `exec`): the member's own
+    # SHUTDOWN line is the discriminator.
+    check   "launcher member shut down cleanly on SIGTERM" grep -q "is SHUTDOWN" "$WORK/dist-all.txt"
     check   "launcher wrote an operational log file" test -f "$WORK/logs-dist/cyntex-server.log"
 
     # Prove the launcher's conf/ search-path wiring is load-bearing, not decorative: with the shipped
@@ -167,7 +220,7 @@ else
     check   "default conf prints the Spring banner (control)" grep -q ":: Spring Boot ::" "$WORK/dist-all.txt"
     printf 'spring.main.banner-mode=off\n' >"$ROOT/conf/application.properties"
     set +e
-    run_capped 90 "$ROOT/bin/cyntex-server" --role=all --cyntex.store.mongo.enabled=false --cyntex.log.dir="$WORK/logs-dist2" >"$WORK/dist-conf.txt" 2>&1; RC=$?
+    serve_then_term 90 "$WORK/dist-conf.txt" "$ROOT/bin/cyntex-server" --role=all --cyntex.store.mongo.enabled=false --cyntex.log.dir="$WORK/logs-dist2"; RC=$?
     set -e
     check     "conf override still boots"      grep -q "Started Bootstrap" "$WORK/dist-conf.txt"
     check_not "conf override reaches the context (banner suppressed via conf/)" grep -q ":: Spring Boot ::" "$WORK/dist-conf.txt"

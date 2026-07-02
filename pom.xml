@@ -201,6 +201,20 @@
                 <requireUpperBoundDeps/>
                 <banDuplicatePomDependencyVersions/>
                 <requirePluginVersions/>
+                <bannedDependencies>
+                  <excludes>
+                    <exclude>com.hazelcast:hazelcast-sql</exclude>
+                    <exclude>com.hazelcast:hazelcast-spring*</exclude>
+                    <exclude>com.hazelcast:hazelcast-enterprise*</exclude>
+                  </excludes>
+                  <message>
+Forbidden Hazelcast artifact. Only the official Apache-2.0 core artifact
+(com.hazelcast:hazelcast) may be used: hazelcast-sql and the hazelcast-spring
+XSD resources carry the Hazelcast Community License, and enterprise artifacts
+are commercial. Everything this platform needs (member + Jet) ships inside the
+core artifact.
+                  </message>
+                </bannedDependencies>
               </rules>
             </configuration>
           </execution>

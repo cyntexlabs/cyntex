@@ -49,6 +49,12 @@
          also manages these, so all four are pinned here to a single version aligned with the platform's
          managed Mongo line; the stack moves as a unit and cannot skew. -->
     <mongodb.driver.version>5.8.0</mongodb.driver.version>
+    <!-- Hazelcast: the distributed-coordination substrate and the Jet execution engine (Jet ships
+         inside the core artifact). The official Maven Central artifact is used as-is — it is pure
+         Apache-2.0 (the HCL-licensed pieces live in separate artifacts, which are banned by the
+         global enforcer rule); the runtime ring and the app assembly root are the only consumers
+         (rule R4 / R7). -->
+    <hazelcast.version>5.7.0</hazelcast.version>
     <!-- Testcontainers: brings up a throwaway Mongo replica-set in tests so the storage CAS
          contract is witnessed against a real Mongo, not only the pure in-memory contract. Test scope
          only, in adapter-mongo-store. -->
@@ -152,6 +158,14 @@
         <groupId>org.mongodb</groupId>
         <artifactId>bson-record-codec</artifactId>
         <version>${mongodb.driver.version}</version>
+      </dependency>
+      <!-- Hazelcast core artifact (member + Jet in one jar, no compile-scope transitives). Only the
+           official Apache-2.0 core artifact is managed here; hazelcast-sql / hazelcast-spring / EE
+           artifacts carry a different license and are banned by the global enforcer rule. -->
+      <dependency>
+        <groupId>com.hazelcast</groupId>
+        <artifactId>hazelcast</artifactId>
+        <version>${hazelcast.version}</version>
       </dependency>
       <!-- Testcontainers module set (aligns testcontainers-core + mongodb + junit-jupiter). Its own
            third-party transitives (jackson / slf4j / commons-compress) still resolve against the

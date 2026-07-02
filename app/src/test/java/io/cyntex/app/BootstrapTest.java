@@ -21,7 +21,7 @@ class BootstrapTest {
     void runsOnSpringBoot41() {
         // The service framework platform is Spring Boot 4.1.x. Pinning the running platform version
         // here fails the build on a silent downgrade or a stale pin. (Co-existence with the embedded
-        // Hazelcast member is witnessed once the Jet engine is wired into the assembly root.)
+        // Hazelcast member is witnessed by HazelcastMemberTest, which boots the same context.)
         assertThat(SpringBootVersion.getVersion()).startsWith("4.1");
     }
 

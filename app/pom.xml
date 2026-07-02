@@ -50,6 +50,13 @@
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter</artifactId>
     </dependency>
+    <!-- The embedded Hazelcast member + Jet execution engine. The assembly root creates and owns
+         the one full member per process; join discovery is explicitly disabled so the member is
+         structurally undiscoverable. -->
+    <dependency>
+      <groupId>com.hazelcast</groupId>
+      <artifactId>hazelcast</artifactId>
+    </dependency>
 
     <!-- The error-code contract (CyntexException / Severity) for coded startup diagnostics. -->
     <dependency>
