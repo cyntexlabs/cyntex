@@ -1,0 +1,5 @@
+version: cyntex/v1
+kind: source
+id: tgt_sink
+connector: mysql
+config: { host: 10.30.0.21, username: writer, password: Snk_2026 }

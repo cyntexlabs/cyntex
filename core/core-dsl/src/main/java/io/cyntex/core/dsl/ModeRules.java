@@ -1,6 +1,7 @@
 package io.cyntex.core.dsl;
 
 import io.cyntex.core.model.PipelineResource;
+import io.cyntex.core.model.ReadMode;
 import io.cyntex.core.model.Resource;
 import io.cyntex.core.model.SourceMode;
 import io.cyntex.core.model.SourceResource;
@@ -10,18 +11,25 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
- * Mode × option compatibility (ADR-0016 §4 / X7 / X10) — the offline semantic half of the
- * capability matrix that needs no connector catalog (intra-DSL mode rules only; connector × mode
- * legality is plan task C3). Runs after reference closure as part of {@link Workspace#of}; the
- * first violation throws {@link DslError#MODE_MISMATCH}.
+ * Mode × read-axis compatibility — the offline semantic half of the capability matrix that needs no
+ * connector catalog (intra-DSL rules only; connector × mode legality is checked separately against
+ * the catalog). Runs after reference closure as part of {@link Workspace#of}; the first violation
+ * throws {@link DslError#MODE_MISMATCH}.
+ *
+ * <p>The read axis is pipeline-level: whether a pipeline's read has an <em>incremental tail</em>
+ * depends on the referenced source modes and the pipeline's {@code read_mode}. A tail exists when a
+ * pure stream source is referenced, or a cdc source is read with any {@code read_mode} other than
+ * {@code snapshot_only}. The rules:
  *
  * <ul>
- *   <li>an {@code srs} block is legal only for {@code mode: cdc} — SRS derives solely from
- *       unbounded + keyed change semantics;</li>
- *   <li>{@code options.start_from} is legal only for {@code mode: stream}, or {@code mode: cdc}
- *       with {@code snapshot_mode: never} (X10);</li>
- *   <li>{@code settings.schedule} is legal only when every referenced source mode is bounded — a
- *       continuous (cdc / stream) source has no re-run concept (X7).</li>
+ *   <li>an {@code srs} block is legal only for {@code mode: cdc} — SRS derives solely from unbounded
+ *       + keyed change semantics;</li>
+ *   <li>{@code settings.read_mode: snapshot_only} is illegal when a pure stream source is referenced
+ *       — an unbounded stream has no one-shot read;</li>
+ *   <li>{@code settings.start_from} is legal only when the read has an incremental tail to position a
+ *       consumer cursor into;</li>
+ *   <li>{@code settings.schedule} is legal only for a bounded read — a read with an incremental tail
+ *       has no re-run concept.</li>
  * </ul>
  */
 final class ModeRules {
@@ -40,7 +48,7 @@ final class ModeRules {
             if (r instanceof SourceResource s) {
                 checkSource(s);
             } else if (r instanceof PipelineResource p) {
-                checkSchedule(p, sources);
+                checkPipeline(p, sources);
             }
         }
     }
@@ -49,43 +57,82 @@ final class ModeRules {
         if (s.srs() != null && s.mode() != SourceMode.CDC) {
             throw modeMismatch("srs", "srs", s.mode());
         }
-        if (hasOption(s, "start_from") && !allowsStartFrom(s)) {
-            throw modeMismatch("start_from", "options.start_from", s.mode());
+    }
+
+    private static void checkPipeline(PipelineResource p, Map<String, SourceResource> sources) {
+        ReadMode readMode = readMode(p);
+        boolean referencesStream = referencesMode(p, sources, SourceMode.STREAM);
+        boolean referencesCdc = referencesMode(p, sources, SourceMode.CDC);
+
+        // snapshot_only means "read the current rows once"; a pure stream source can't be read once.
+        if (readMode == ReadMode.SNAPSHOT_ONLY && referencesStream) {
+            throw modeMismatch("read_mode", "settings.read_mode", SourceMode.STREAM);
+        }
+
+        boolean hasIncrementalTail = referencesStream
+                || (referencesCdc && readMode != ReadMode.SNAPSHOT_ONLY);
+
+        // start_from positions a consumer cursor into an incremental tail; without a tail it is meaningless.
+        if (startFrom(p) != null && !hasIncrementalTail) {
+            throw modeMismatch("start_from", "settings.start_from", boundednessReason(p, sources, readMode));
+        }
+
+        // schedule re-runs the whole pipeline; a read with a tail never terminates, so it has no re-run.
+        if (schedule(p) != null && hasIncrementalTail) {
+            SourceMode witness = referencesStream ? SourceMode.STREAM : SourceMode.CDC;
+            throw modeMismatch("schedule", "settings.schedule", witness);
         }
     }
 
-    private static boolean allowsStartFrom(SourceResource s) {
-        return s.mode() == SourceMode.STREAM
-                || (s.mode() == SourceMode.CDC && "never".equals(option(s, "snapshot_mode")));
-    }
-
-    private static void checkSchedule(PipelineResource p, Map<String, SourceResource> sources) {
-        if (p.settings() == null || p.settings().schedule() == null) {
-            return;
+    /**
+     * The token that best explains why a read is bounded, reported as the {@code mode} of a
+     * {@code start_from} mismatch: the {@code read_mode} that removed the tail when a cdc source is
+     * read {@code snapshot_only}, else a referenced bounded source mode.
+     */
+    private static String boundednessReason(PipelineResource p, Map<String, SourceResource> sources,
+                                            ReadMode readMode) {
+        if (readMode == ReadMode.SNAPSHOT_ONLY && referencesMode(p, sources, SourceMode.CDC)) {
+            return ReadMode.SNAPSHOT_ONLY.yaml();
         }
         for (String sid : p.sources()) {
-            SourceResource s = sources.get(sid);    // existence already proved by reference closure
-            if (s != null && isUnbounded(s.mode())) {
-                throw modeMismatch("schedule", "settings.schedule", s.mode());
+            SourceResource s = sources.get(sid);
+            if (s != null && s.mode() != null) {
+                return s.mode().yaml();
             }
         }
+        return "(bounded)";
     }
 
-    private static boolean isUnbounded(SourceMode mode) {
-        return mode == SourceMode.CDC || mode == SourceMode.STREAM;
+    private static boolean referencesMode(PipelineResource p, Map<String, SourceResource> sources,
+                                          SourceMode mode) {
+        for (String sid : p.sources()) {
+            SourceResource s = sources.get(sid);    // existence already proved by reference closure
+            if (s != null && s.mode() == mode) {
+                return true;
+            }
+        }
+        return false;
     }
 
-    private static boolean hasOption(SourceResource s, String key) {
-        return s.options() != null && s.options().containsKey(key);
+    private static ReadMode readMode(PipelineResource p) {
+        ReadMode rm = p.settings() == null ? null : p.settings().readMode();
+        return rm == null ? ReadMode.SNAPSHOT_AND_CDC : rm;
     }
 
-    private static String option(SourceResource s, String key) {
-        Object v = s.options() == null ? null : s.options().get(key);
-        return v == null ? null : v.toString();
+    private static String startFrom(PipelineResource p) {
+        return p.settings() == null ? null : p.settings().startFrom();
+    }
+
+    private static String schedule(PipelineResource p) {
+        return p.settings() == null ? null : p.settings().schedule();
     }
 
     private static DslException modeMismatch(String field, String path, SourceMode mode) {
+        return modeMismatch(field, path, mode == null ? "(none)" : mode.yaml());
+    }
+
+    private static DslException modeMismatch(String field, String path, String mode) {
         return new DslException(DslError.MODE_MISMATCH, path, 0, 0, null,
-                Map.of("field", field, "mode", mode == null ? "(none)" : mode.yaml()));
+                Map.of("field", field, "mode", mode));
     }
 }

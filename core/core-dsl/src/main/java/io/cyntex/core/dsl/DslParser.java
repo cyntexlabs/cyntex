@@ -15,6 +15,7 @@ import io.cyntex.core.model.PushElement;
 import io.cyntex.core.model.PushFormat;
 import io.cyntex.core.model.QueryElement;
 import io.cyntex.core.model.QueryType;
+import io.cyntex.core.model.ReadMode;
 import io.cyntex.core.model.RenameCase;
 import io.cyntex.core.model.RenameSpec;
 import io.cyntex.core.model.Resource;
@@ -74,7 +75,11 @@ public final class DslParser {
             "version", "kind", "id", "metadata", "source", "transforms", "view", "serve",
             "settings", "experimental");
     private static final Set<String> METADATA_KEYS = Set.of("labels", "description");
-    private static final Set<String> SRS_KEYS = Set.of("key", "retention", "schema_evolution", "queryable");
+    private static final Set<String> SRS_KEYS = Set.of("key", "retention", "schema_evolution", "queryable", "enabled");
+    // snapshot_mode / start_from moved from source options to pipeline settings (read_mode / start_from).
+    // options is otherwise a free connector map, so these two names are rejected explicitly instead of
+    // being silently passed through to the connector as no-ops when a stale artifact still carries them.
+    private static final List<String> RELOCATED_SOURCE_OPTIONS = List.of("snapshot_mode", "start_from");
     private static final Set<String> TABLE_SPEC_KEYS = Set.of("name", "filter", "pk", "options");
     private static final Set<String> STEP_BASE_KEYS = Set.of("id", "type", "from", "options", "experimental");
     private static final Set<String> STEP_USE_KEYS = Set.of("id", "use", "from", "options");
@@ -94,7 +99,8 @@ public final class DslParser {
     private static final Set<String> RENAME_KEYS = Set.of("map", "case", "prefix", "suffix");
     private static final Set<String> QUERY_KEYS = Set.of("type", "backend");
     private static final Set<String> PUSH_KEYS = Set.of("id", "source", "topic", "format", "options");
-    private static final Set<String> SETTINGS_KEYS = Set.of("error_policy", "batch_size", "parallelism", "schedule");
+    private static final Set<String> SETTINGS_KEYS = Set.of(
+            "error_policy", "batch_size", "parallelism", "schedule", "read_mode", "start_from");
     private static final Set<String> TRANSFORM_DEF_KEYS = Set.of(
             "version", "kind", "id", "metadata", "type", "options", "experimental");
     private static final Set<String> VIEW_DEF_KEYS = Set.of(
@@ -125,6 +131,8 @@ public final class DslParser {
 
     private SourceResource source(YamlMap m) {
         m.requireOnly(SOURCE_KEYS);
+        Map<String, Object> options = m.freeMap("options");
+        rejectRelocatedReadOptions(m, options);
         return new SourceResource(
                 idOf(m),
                 metadata(m),
@@ -132,9 +140,22 @@ public final class DslParser {
                 m.freeMap("config"),
                 mode(m, "mode"),
                 tables(m.seq("tables")),
-                m.freeMap("options"),
+                options,
                 srs(m.mapping("srs")),
                 m.freeMap("experimental"));
+    }
+
+    /** Rejects read options that have moved to pipeline settings (read_mode / start_from). */
+    private static void rejectRelocatedReadOptions(YamlMap m, Map<String, Object> options) {
+        if (options == null) {
+            return;
+        }
+        Node optionsNode = m.node("options");
+        for (String key : RELOCATED_SOURCE_OPTIONS) {
+            if (options.containsKey(key)) {
+                throw YamlMap.error(DslError.UNKNOWN_FIELD, "options." + key, optionsNode, Map.of("field", key));
+            }
+        }
     }
 
     private List<TableRef> tables(List<Node> items) {
@@ -167,7 +188,8 @@ public final class DslParser {
         r.requireOnly(SRS_KEYS);
         return new Srs(r.string("key"), r.string("retention"),
                 enumByYaml(SrsSchemaEvolution.values(), SrsSchemaEvolution::yaml, r, "schema_evolution"),
-                boolValue(r, "queryable"));
+                boolValue(r, "queryable"),
+                boolValue(r, "enabled"));
     }
 
     // ---- pipeline -----------------------------------------------------------------
@@ -499,7 +521,9 @@ public final class DslParser {
                 enumByYaml(ErrorPolicy.values(), ErrorPolicy::yaml, s, "error_policy"),
                 intValue(s, "batch_size"),
                 intValue(s, "parallelism"),
-                s.string("schedule"));
+                s.string("schedule"),
+                enumByYaml(ReadMode.values(), ReadMode::yaml, s, "read_mode"),
+                s.string("start_from"));
     }
 
     private Metadata metadata(YamlMap m) {

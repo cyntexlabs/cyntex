@@ -2,6 +2,7 @@ package io.cyntex.core.dsl;
 
 import io.cyntex.core.model.FieldRule;
 import io.cyntex.core.model.PipelineResource;
+import io.cyntex.core.model.ReadMode;
 import io.cyntex.core.model.Settings;
 import io.cyntex.core.model.SourceResource;
 import io.cyntex.core.model.Step;
@@ -164,6 +165,28 @@ class DslPipelineParserTest {
         assertThat(s.schedule()).isEqualTo("0 2 * * *");
         assertThat(s.errorPolicy().yaml()).isEqualTo("skip");
         // non-default settings survive the canonical round-trip
+        assertThat(writer.write(parser.parse(writer.write(p)))).isEqualTo(writer.write(p));
+    }
+
+    @Test
+    void readAxisSettings_parsedAndSurviveRoundTrip() {
+        // read amendment: read_mode / start_from are pipeline-level settings (parse-only, no validate).
+        String yaml = """
+                version: cyntex/v1
+                kind: pipeline
+                id: p
+                source: src
+                serve:
+                  from: /.*/
+                  sync: [ { id: s, source: tgt } ]
+                settings: { read_mode: cdc_only, start_from: earliest }
+                """;
+
+        PipelineResource p = (PipelineResource) parser.parse(yaml);
+        Settings s = p.settings();
+
+        assertThat(s.readMode()).isEqualTo(ReadMode.CDC_ONLY);
+        assertThat(s.startFrom()).isEqualTo("earliest");
         assertThat(writer.write(parser.parse(writer.write(p)))).isEqualTo(writer.write(p));
     }
 

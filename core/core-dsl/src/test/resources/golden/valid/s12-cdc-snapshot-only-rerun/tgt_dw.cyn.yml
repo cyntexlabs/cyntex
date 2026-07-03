@@ -1,0 +1,8 @@
+version: cyntex/v1
+kind: source
+id: tgt_dw
+connector: mysql
+config:
+  host: 10.30.0.20
+  password: Dw_2026
+  username: writer

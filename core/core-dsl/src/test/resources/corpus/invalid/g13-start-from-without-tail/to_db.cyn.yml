@@ -1,0 +1,10 @@
+# Invalid: start_from positions a consumer cursor into an incremental tail, but a bounded api source
+# (default read_mode, no cdc/stream) has no tail — mode-mismatch on settings.start_from (§1).
+version: cyntex/v1
+kind: pipeline
+id: to_db
+source: src_api
+settings: { start_from: earliest }
+serve:
+  from: issues
+  sync: [ { id: db, source: tgt_db, write_mode: upsert } ]

@@ -1,6 +1,6 @@
-# Invalid: start_from applies to mode: stream (consume position) and to
-# mode: cdc + snapshot_mode: never (mining start) only; any other combination
-# is meaningless (X10, §11.5 strict-rejection spirit).
+# Invalid: start_from is no longer a source option — the read/consume axis moved to the pipeline
+# (pipeline.settings.start_from, read_mode amendment §11.8). A stale artifact that still writes it
+# under source options is rejected as an unknown field, not silently passed to the connector (§11.5).
 version: cyntex/v1
 kind: source
 id: src_gh_sf

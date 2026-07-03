@@ -1,0 +1,9 @@
+# read_mode amendment (§1/§14.1): a cdc-capable source read as a one-shot full snapshot by the
+# pipeline (read_mode: snapshot_only) — the read terminates, so a nightly re-run is legal.
+version: cyntex/v1
+kind: source
+id: src_ledger
+connector: mysql
+config: { host: 10.10.0.20, username: cdc_user, password: Ldg_2026 }
+mode: cdc
+tables: [ ledger ]

@@ -1,0 +1,7 @@
+version: cyntex/v1
+kind: pipeline
+id: audit_mirror
+source: src_audit
+serve:
+  from: audit_log
+  sync: [ { id: sink, source: tgt_sink, write_mode: upsert } ]

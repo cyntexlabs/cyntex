@@ -1,4 +1,4 @@
-rule: mode-mismatch
-adr: "ADR-0016 §4 (X10)"
+rule: unknown-field
+adr: "ADR-0016 §4 / §11.8 (read_mode amendment)"
 path: options.start_from
-note: "start_from on mode: api; legal only for stream, or cdc with snapshot_mode: never"
+note: "start_from moved to pipeline.settings; a source-level options.start_from is now an unknown field"

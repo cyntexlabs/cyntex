@@ -1,4 +1,4 @@
-# ADR-0016 §14.5 — MySQL CDC -> Kafka (DB to event bus). Incremental only (snapshot never).
+# ADR-0016 §14.5 — MySQL CDC -> Kafka (DB to event bus). Incremental only = pipeline read_mode (§1).
 version: cyntex/v1
 kind: source
 id: src_my
@@ -6,4 +6,3 @@ connector: mysql
 config: { host: 10.10.0.3, username: cdc_user, password: My_2026 }
 mode: cdc
 tables: [ orders ]
-options: { snapshot_mode: never }

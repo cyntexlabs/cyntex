@@ -7,5 +7,3 @@ config:
   group_id: cyntex_orders
 mode: stream
 tables: [orders_topic]
-options:
-  start_from: earliest

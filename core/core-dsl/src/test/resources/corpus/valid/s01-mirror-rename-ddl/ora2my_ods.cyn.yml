@@ -3,6 +3,7 @@ version: cyntex/v1
 kind: pipeline
 id: ora2my_ods
 source: src_ora
+settings: { read_mode: snapshot_and_cdc }   # full snapshot then changes = the default (omittable), §1
 serve:
   from: /.*/
   sync:

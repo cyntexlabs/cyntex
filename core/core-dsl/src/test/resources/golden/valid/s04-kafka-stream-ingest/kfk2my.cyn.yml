@@ -15,3 +15,5 @@ serve:
     - id: my
       source: tgt_my
       write_mode: append
+settings:
+  start_from: earliest

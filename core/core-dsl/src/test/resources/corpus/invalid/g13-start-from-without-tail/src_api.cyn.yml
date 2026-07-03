@@ -1,0 +1,8 @@
+version: cyntex/v1
+kind: source
+id: src_api
+connector: quickapi
+config: { base_url: "https://api.example.com", token: tok_g13 }
+mode: api
+tables:
+  - { name: issues, pk: [id] }

@@ -9,3 +9,5 @@ serve:
     - id: push_1
       source: tgt_kfk
       topic: orders_events
+settings:
+  read_mode: cdc_only

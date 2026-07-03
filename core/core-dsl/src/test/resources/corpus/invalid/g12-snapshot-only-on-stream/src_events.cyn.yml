@@ -1,0 +1,7 @@
+version: cyntex/v1
+kind: source
+id: src_events
+connector: kafka
+config: { brokers: "k1:9092", group_id: cyntex_g12 }
+mode: stream
+tables: [ events_topic ]
