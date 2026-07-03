@@ -14,6 +14,7 @@ import io.cyntex.core.model.PushElement;
 import io.cyntex.core.model.PushFormat;
 import io.cyntex.core.model.QueryElement;
 import io.cyntex.core.model.QueryType;
+import io.cyntex.core.model.ReadMode;
 import io.cyntex.core.model.RenameCase;
 import io.cyntex.core.model.RenameSpec;
 import io.cyntex.core.model.ServeBlock;
@@ -66,8 +67,8 @@ class CanonicalWriterTest {
             config.put("username", "cdc_user");
             config.put("password", "Ora_2026");
             Map<String, Object> options = new LinkedHashMap<>();
-            options.put("snapshot_mode", "initial");
             options.put("include_ddl", true);
+            options.put("heartbeat_interval", "10s");
 
             SourceResource src = new SourceResource("src_ora", null, "oracle", config,
                     SourceMode.CDC,
@@ -89,8 +90,8 @@ class CanonicalWriterTest {
                     mode: cdc
                     tables: [ORDERS, ORDER_ITEMS, CUSTOMERS]
                     options:
+                      heartbeat_interval: 10s
                       include_ddl: true
-                      snapshot_mode: initial
                     """);
         }
 
@@ -119,12 +120,13 @@ class CanonicalWriterTest {
 
         @Test
         void writesSrsBlockInDeclaredKeyOrder() {
-            // §3: srs key order = key, retention, schema_evolution, queryable.
+            // §3: srs key order = key, retention, schema_evolution, queryable, enabled.
+            // enabled defaults true and is omitted here.
             SourceResource src = new SourceResource("src_ins", null, "oracle",
                     Map.of("host", "10.20.0.16"), SourceMode.CDC,
                     List.of(TableRef.literal("CUSTOMERS")),
                     null,
-                    new Srs(null, "30d", SrsSchemaEvolution.TRACK, true), null);
+                    new Srs(null, "30d", SrsSchemaEvolution.TRACK, true, null), null);
 
             assertThat(writer.write(src)).isEqualTo("""
                     version: cyntex/v1
@@ -139,6 +141,28 @@ class CanonicalWriterTest {
                       retention: 30d
                       schema_evolution: track
                       queryable: true
+                    """);
+        }
+
+        @Test
+        void writesSrsEnabledFalseAndOmitsDefaultTrue() {
+            // enabled: false is the SRS off switch (default true is omitted). It sits last, after queryable.
+            SourceResource off = new SourceResource("src_lite", null, "mysql",
+                    Map.of("host", "10.10.0.9"), SourceMode.CDC,
+                    List.of(TableRef.literal("orders")),
+                    null, new Srs(null, null, null, null, false), null);
+
+            assertThat(writer.write(off)).isEqualTo("""
+                    version: cyntex/v1
+                    kind: source
+                    id: src_lite
+                    connector: mysql
+                    config:
+                      host: 10.10.0.9
+                    mode: cdc
+                    tables: [orders]
+                    srs:
+                      enabled: false
                     """);
         }
 
@@ -531,7 +555,7 @@ class CanonicalWriterTest {
                     new ServeBlock.Inline(null, FromRef.regex(".*"),
                             List.of(new SyncElement(null, "tgt_b", null, null, null, null)),
                             null, null),
-                    new Settings(ErrorPolicy.FAIL, 1000, 1, null), null);
+                    new Settings(ErrorPolicy.FAIL, 1000, 1, null, ReadMode.SNAPSHOT_AND_CDC, "latest"), null);
 
             assertThat(writer.write(p)).isEqualTo("""
                     version: cyntex/v1
@@ -552,7 +576,7 @@ class CanonicalWriterTest {
                     new ServeBlock.Inline(null, FromRef.regex(".*"),
                             List.of(new SyncElement(null, "tgt_b", null, null, null, null)),
                             null, null),
-                    new Settings(ErrorPolicy.DEAD_LETTER, 1000, 4, "0 2 * * *"), null);
+                    new Settings(ErrorPolicy.DEAD_LETTER, 1000, 4, "0 2 * * *", null, null), null);
 
             assertThat(writer.write(p)).isEqualTo("""
                     version: cyntex/v1
@@ -567,6 +591,32 @@ class CanonicalWriterTest {
                       error_policy: dead_letter
                       parallelism: 4
                       schedule: 0 2 * * *
+                    """);
+        }
+
+        @Test
+        void writesReadAxisAfterCrossCuttingFieldsAndOmitsDefaults() {
+            // read axis renders after schedule; read_mode: snapshot_and_cdc and start_from: latest
+            // are the defaults and drop out — only the non-default read_mode / start_from survive.
+            PipelineResource p = new PipelineResource("p_read", null, List.of("src_a"),
+                    null, null,
+                    new ServeBlock.Inline(null, FromRef.regex(".*"),
+                            List.of(new SyncElement(null, "tgt_b", null, null, null, null)),
+                            null, null),
+                    new Settings(null, null, null, null, ReadMode.CDC_ONLY, "earliest"), null);
+
+            assertThat(writer.write(p)).isEqualTo("""
+                    version: cyntex/v1
+                    kind: pipeline
+                    id: p_read
+                    source: src_a
+                    serve:
+                      from: /.*/
+                      sync:
+                        - source: tgt_b
+                    settings:
+                      read_mode: cdc_only
+                      start_from: earliest
                     """);
         }
 

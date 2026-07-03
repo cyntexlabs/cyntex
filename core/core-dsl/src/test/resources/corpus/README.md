@@ -21,19 +21,25 @@ Each directory is an independently loadable workspace batch: every referenced id
 inside the directory (offline closure = the batch, ADR-0021 §3). Ids may repeat across
 directories — uniqueness is per batch.
 
+`s01`–`s11` are the original §14 scenarios; `s12`–`s13` are read_mode-amendment additions
+(§11.8) exercising grammar that amendment introduced — `read_mode: snapshot_only` bounding a
+cdc read, and `srs.enabled: false`.
+
 | Directory | ADR | Scenario | Notable grammar surface |
 |---|---|---|---|
 | `s01-mirror-rename-ddl` | §14.1 | Oracle → MySQL whole-source mirror | `serve.from: /.*/`, `sync[].rename` (map+case+prefix), `ddl: apply`, `auto_create_table` |
 | `s02-modeling-nest-rest` | §14.2 | Oracle → SRS → nest → view → REST | `srs` tuning, `map`, `nest` full tree (2-level embed), view tiers, `query: rest` |
 | `s03-shared-srs-es` | §14.3 | Second consumer of a shared source | shared SRS narrative, `filter` + CEL, literal table = frozen link |
-| `s04-kafka-stream-ingest` | §14.4 | Kafka → cleanse → MySQL | `mode: stream`, `start_from`, `js` escape hatch, `write_mode: append` |
-| `s05-cdc-to-kafka-push` | §14.5 | MySQL CDC → Kafka | `push` element (no `type`), `topic`, `snapshot_mode: never` |
+| `s04-kafka-stream-ingest` | §14.4 | Kafka → cleanse → MySQL | `mode: stream`, `settings.start_from` (pipeline-level), `js` escape hatch, `write_mode: append` |
+| `s05-cdc-to-kafka-push` | §14.5 | MySQL CDC → Kafka | `push` element (no `type`), `topic`, `settings.read_mode: cdc_only` |
 | `s06-api-poll-mongo` | §14.6 | GitHub API polling → MongoDB | `mode: api`, `poll_interval`/`cursor`, `tables[].pk`, whole-source regex |
 | `s07-csv-batch-import` | §14.7 | CSV batch import + cleanse | `mode: file`, literal-only `tables`, map computed value (`"=CEL"`) |
 | `s08-dual-source-join` | §14.8 | Cross-database dual-source join | `source:` id list, `join` (duckdb SQL + aggregation), view-only output |
 | `s09-filter-fanout-pipelines` | §14.9 | Conditional fan-out, v1 form | N pipelines × `filter` over one shared source (router is out of v1, X14) |
 | `s10-ddl-evolution-chain` | §14.10 | DDL / schema evolution five-hop chain | `include_ddl`, `srs.schema_evolution: track`, map passthrough, `view.schema`, sink `ddl: apply` |
 | `s11-reuse-assembly` | §14.11 | Definition bodies + pure-reference assembly | `kind: transform/view/serve` definitions, string = `use:` sugar, natural-order wiring (X19) |
+| `s12-cdc-snapshot-only-rerun` | §14.1 | cdc source read one-shot on a schedule | `settings.read_mode: snapshot_only` bounds a cdc read, so `settings.schedule` is legal (read amendment) |
+| `s13-srs-disabled-passthrough` | §4 | cdc with the Shared Record Store off | `srs.enabled: false` — D14 lightweight passthrough path (read amendment) |
 
 ## invalid/ — minimal self-contained violation batches
 
@@ -74,7 +80,7 @@ Cases (sNN ties the case to the valid/ scenario it mutates; gNN = general gramma
 | `s03-unknown-step-ref` | missing-reference | `serve.from` names a nonexistent step |
 | `s04-srs-on-stream` | mode-mismatch | `srs:` block on `mode: stream` |
 | `s05-push-with-type-field` | unknown-field | push element carries the removed `type` field |
-| `s06-start-from-on-api` | mode-mismatch | `start_from` on `mode: api` |
+| `s06-start-from-on-api` | unknown-field | source-level `options.start_from`, removed by the read amendment (moved to pipeline settings) |
 | `s07-pipeline-no-output` | composition | pipeline with neither view nor serve |
 | `s08-ambiguous-table-ref` | ambiguous-reference | bare table name present in two sources |
 | `s09-schedule-on-unbounded` | mode-mismatch | `settings.schedule` with a cdc source |
@@ -91,6 +97,8 @@ Cases (sNN ties the case to the valid/ scenario it mutates; gNN = general gramma
 | `g09-unsupported-mode-for-connector` | unsupported-mode | `connector: kafka` with `mode: cdc` (kafka declares only [stream]) |
 | `g10-config-type-mismatch` | config-type-mismatch | `mysql.masterSlaveAddress` (array field) given a scalar string |
 | `g11-config-enum-violation` | invalid-config-value | `mysql.deploymentMode` set to `cluster`, outside the declared enum |
+| `g12-snapshot-only-on-stream` | mode-mismatch | `settings.read_mode: snapshot_only` over a pure stream source (no one-shot read) |
+| `g13-start-from-without-tail` | mode-mismatch | `settings.start_from` on a bounded read (api source, no incremental tail) |
 
 Connector-dimension variants (capability matrix, config field checks) are validated against the
 bundled catalog by plan task C3. The catalog's mode signal is trusted only where it is reliable —

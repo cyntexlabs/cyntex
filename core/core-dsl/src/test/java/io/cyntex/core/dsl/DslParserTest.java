@@ -28,7 +28,7 @@ class DslParserTest {
                 config: { host: 10.20.0.15, port: 1521, service_name: ORCL }
                 mode: cdc
                 tables: [ ORDERS, ORDER_ITEMS, CUSTOMERS ]
-                options: { snapshot_mode: initial, include_ddl: true }
+                options: { include_ddl: true, heartbeat_interval: 10s }
                 """;
 
         Resource r = parser.parse(yaml);
@@ -45,8 +45,71 @@ class DslParserTest {
                 .containsEntry("port", 1521)
                 .containsEntry("service_name", "ORCL");
         assertThat(s.options())
-                .containsEntry("snapshot_mode", "initial")
-                .containsEntry("include_ddl", true);
+                .containsEntry("include_ddl", true)
+                .containsEntry("heartbeat_interval", "10s");
+    }
+
+    @Test
+    void rejectsRelocatedSourceReadOption() {
+        // read_mode / start_from moved to pipeline settings; the old source-level option names are
+        // rejected as unknown fields rather than silently passed through the free options map.
+        String yaml = """
+                version: cyntex/v1
+                kind: source
+                id: src_ora
+                connector: oracle
+                config: { host: 10.20.0.15 }
+                mode: cdc
+                tables: [ ORDERS ]
+                options: { snapshot_mode: initial, include_ddl: true }
+                """;
+
+        Throwable t = catchThrowable(() -> parser.parse(yaml));
+
+        assertThat(t).isInstanceOf(DslException.class);
+        DslException ex = (DslException) t;
+        assertThat(ex.code()).isEqualTo(DslError.UNKNOWN_FIELD);
+        assertThat(ex.path()).isEqualTo("options.snapshot_mode");
+        assertThat(ex.args()).containsEntry("field", "snapshot_mode");
+    }
+
+    @Test
+    void rejectsRelocatedStartFromOption() {
+        String yaml = """
+                version: cyntex/v1
+                kind: source
+                id: src_kfk
+                connector: kafka
+                config: { brokers: k1:9092 }
+                mode: stream
+                tables: [ orders_topic ]
+                options: { start_from: earliest }
+                """;
+
+        Throwable t = catchThrowable(() -> parser.parse(yaml));
+
+        assertThat(t).isInstanceOf(DslException.class);
+        DslException ex = (DslException) t;
+        assertThat(ex.code()).isEqualTo(DslError.UNKNOWN_FIELD);
+        assertThat(ex.path()).isEqualTo("options.start_from");
+    }
+
+    @Test
+    void parsesSrsEnabledFalse() {
+        // read amendment: srs.enabled: false is the SRS off switch (default true).
+        String yaml = """
+                version: cyntex/v1
+                kind: source
+                id: src
+                connector: mysql
+                mode: cdc
+                tables: [ orders ]
+                srs: { enabled: false }
+                """;
+
+        SourceResource s = (SourceResource) parser.parse(yaml);
+
+        assertThat(s.srs().enabled()).isFalse();
     }
 
     @Test

@@ -1,0 +1,10 @@
+# Invalid: read_mode: snapshot_only asks to read the current rows once, but the only source is a
+# pure stream (unbounded) with no one-shot read — mode-mismatch on settings.read_mode (§1/§4).
+version: cyntex/v1
+kind: pipeline
+id: to_wh
+source: src_events
+settings: { read_mode: snapshot_only }
+serve:
+  from: events_topic
+  sync: [ { id: wh, source: tgt_wh, write_mode: append } ]

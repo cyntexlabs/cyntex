@@ -10,6 +10,7 @@ import io.cyntex.core.model.PipelineResource;
 import io.cyntex.core.model.PushElement;
 import io.cyntex.core.model.PushFormat;
 import io.cyntex.core.model.QueryElement;
+import io.cyntex.core.model.ReadMode;
 import io.cyntex.core.model.RenameSpec;
 import io.cyntex.core.model.Resource;
 import io.cyntex.core.model.ServeBlock;
@@ -67,7 +68,7 @@ public final class CanonicalWriter {
         if (s.tables() != null) {
             b.put("tables", tables(s.tables()));
         }
-        b.freeMap("options", dropDefault(s.options(), "start_from", "latest"));
+        b.freeMap("options", s.options());
         if (s.srs() != null) {
             b.put("srs", srs(s.srs()));
         }
@@ -179,6 +180,9 @@ public final class CanonicalWriter {
             b.scalar("schema_evolution", srs.schemaEvolution().yaml());
         }
         b.scalar("queryable", srs.queryable());
+        if (Boolean.FALSE.equals(srs.enabled())) {
+            b.scalar("enabled", false);     // default true -> omit; only the off switch is written
+        }
         return b.build();
     }
 
@@ -428,6 +432,12 @@ public final class CanonicalWriter {
             b.scalar("parallelism", s.parallelism());
         }
         b.scalar("schedule", s.schedule());
+        if (s.readMode() != null && s.readMode() != ReadMode.SNAPSHOT_AND_CDC) {
+            b.scalar("read_mode", s.readMode().yaml());
+        }
+        if (s.startFrom() != null && !"latest".equals(s.startFrom())) {
+            b.scalar("start_from", s.startFrom());
+        }
         return b.build();
     }
 

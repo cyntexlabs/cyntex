@@ -343,6 +343,24 @@
         }
       ]
     },
+    "ReadMode": {
+      "type": "string",
+      "description": "Pipeline read mode: what a pipeline consumes from a cdc source, along snapshot x change-tail.",
+      "oneOf": [
+        {
+          "const": "snapshot_and_cdc",
+          "description": "Full initial snapshot, then continuously apply the incremental change tail (the default)."
+        },
+        {
+          "const": "cdc_only",
+          "description": "Skip the initial snapshot and read only the incremental change tail."
+        },
+        {
+          "const": "snapshot_only",
+          "description": "Read the current rows once as a bounded pass and stop; no incremental tail."
+        }
+      ]
+    },
     "RenameCase": {
       "type": "string",
       "description": "Case conversion applied to the source name before any prefix or suffix is added.",
@@ -540,7 +558,7 @@
     },
     "Settings": {
       "type": "object",
-      "description": "Task-level cross-cutting settings shared across all resources in a task.",
+      "description": "Task-level settings shared across a task: cross-cutting knobs plus the read axis.",
       "properties": {
         "error_policy": {
           "description": "How the task reacts to record-level errors during processing.",
@@ -558,8 +576,18 @@
           "default": 1
         },
         "schedule": {
-          "description": "Cron-style schedule for running the task; only valid for bounded tasks.",
+          "description": "Cron-style schedule for running the task; only valid for a bounded read.",
           "type": "string"
+        },
+        "read_mode": {
+          "description": "What the pipeline reads from a cdc source: full snapshot then changes, changes only, or a one-shot snapshot.",
+          "$ref": "#/$defs/ReadMode",
+          "default": "snapshot_and_cdc"
+        },
+        "start_from": {
+          "description": "Where to start consuming an incremental tail: earliest, latest, or an ISO-8601 timestamp.",
+          "type": "string",
+          "default": "latest"
         }
       },
       "additionalProperties": false
@@ -631,7 +659,7 @@
           }
         },
         "options": {
-          "description": "Source-level options such as the change-stream start position.",
+          "description": "Connector-specific source options; the read mode and start position live in pipeline settings.",
           "type": "object",
           "additionalProperties": true
         },
@@ -672,6 +700,11 @@
         "queryable": {
           "description": "Whether the replay store can be queried directly.",
           "type": "boolean"
+        },
+        "enabled": {
+          "description": "Whether the replay store is provisioned; false streams cdc straight to the single consumer with no shared buffering.",
+          "type": "boolean",
+          "default": true
         }
       },
       "additionalProperties": false

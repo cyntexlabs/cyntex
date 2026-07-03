@@ -29,7 +29,7 @@ public record SourceResource(
         SourceMode mode,
         @Doc("Tables to read: bare names, /regex/ patterns, or per-table objects.")
         List<TableRef> tables,
-        @Doc("Source-level options such as the change-stream start position.")
+        @Doc("Connector-specific source options; the read mode and start position live in pipeline settings.")
         Map<String, Object> options,
         @Doc("Shared Record Store configuration; only valid on cdc sources.")
         Srs srs,

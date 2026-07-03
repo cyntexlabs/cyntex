@@ -1,0 +1,10 @@
+version: cyntex/v1
+kind: pipeline
+id: audit_mirror
+source: src_audit
+serve:
+  id: serve
+  from: audit_log
+  sync:
+    - id: sink
+      source: tgt_sink

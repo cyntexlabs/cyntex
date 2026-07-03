@@ -3,6 +3,7 @@ version: cyntex/v1
 kind: pipeline
 id: kfk2my
 source: src_kfk
+settings: { start_from: earliest }   # stream consume position (pipeline-level, read amendment §1)
 transforms:
   - id: parse
     from: [orders_topic]

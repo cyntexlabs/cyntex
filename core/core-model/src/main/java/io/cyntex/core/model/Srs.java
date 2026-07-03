@@ -14,5 +14,8 @@ public record Srs(
         @Doc("Schema-evolution policy applied as upstream table structures change.")
         SrsSchemaEvolution schemaEvolution,
         @Doc("Whether the replay store can be queried directly.")
-        Boolean queryable) {
+        Boolean queryable,
+        @Doc(value = "Whether the replay store is provisioned; false streams cdc straight to the "
+                + "single consumer with no shared buffering.", def = "true")
+        Boolean enabled) {
 }

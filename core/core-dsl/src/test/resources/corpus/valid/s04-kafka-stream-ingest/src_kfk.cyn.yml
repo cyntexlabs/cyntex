@@ -1,5 +1,5 @@
 # ADR-0016 §14.4 — Kafka -> cleanse -> MySQL (stream ingestion).
-# topic <-> table addressing (§4 per-table streams); start_from = consume position (X10).
+# topic <-> table addressing (§4 per-table streams); consume position = pipeline start_from (§1).
 version: cyntex/v1
 kind: source
 id: src_kfk
@@ -7,4 +7,3 @@ connector: kafka
 config: { brokers: "k1:9092,k2:9092", group_id: cyntex_orders }
 mode: stream
 tables: [ orders_topic ]
-options: { start_from: earliest }

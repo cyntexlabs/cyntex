@@ -1,0 +1,13 @@
+version: cyntex/v1
+kind: pipeline
+id: ledger_nightly
+source: src_ledger
+serve:
+  id: serve
+  from: ledger
+  sync:
+    - id: dw
+      source: tgt_dw
+settings:
+  schedule: 0 3 * * *
+  read_mode: snapshot_only

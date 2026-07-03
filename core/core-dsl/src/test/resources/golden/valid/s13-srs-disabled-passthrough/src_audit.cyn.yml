@@ -1,0 +1,12 @@
+version: cyntex/v1
+kind: source
+id: src_audit
+connector: mysql
+config:
+  host: 10.10.0.21
+  password: Adt_2026
+  username: cdc_user
+mode: cdc
+tables: [audit_log]
+srs:
+  enabled: false

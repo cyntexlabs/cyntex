@@ -4,6 +4,7 @@ version: cyntex/v1
 kind: pipeline
 id: my2kfk
 source: src_my
+settings: { read_mode: cdc_only }   # incremental only: skip the initial snapshot (§1)
 serve:
   from: orders
   push:

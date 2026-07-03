@@ -1,5 +1,5 @@
 # ADR-0016 §14.1 — Oracle multi-table -> MySQL mirror (rename + three read modes + DDL).
-# CDC source: initial snapshot then incremental (snapshot is a phase inside cdc, §4).
+# CDC source; what to read (snapshot then incremental) is set on the pipeline (read_mode, §1/§4).
 version: cyntex/v1
 kind: source
 id: src_ora
@@ -8,4 +8,4 @@ config: { host: 10.20.0.15, port: 1521, service_name: ORCL,
           username: cdc_user, password: Ora_2026 }
 mode: cdc
 tables: [ ORDERS, ORDER_ITEMS, CUSTOMERS ]
-options: { snapshot_mode: initial, include_ddl: true }
+options: { include_ddl: true }

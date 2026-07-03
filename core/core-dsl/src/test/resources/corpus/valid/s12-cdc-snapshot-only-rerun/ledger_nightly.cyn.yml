@@ -1,0 +1,9 @@
+# snapshot_only bounds the read, so settings.schedule (nightly full re-run) is legal (§1).
+version: cyntex/v1
+kind: pipeline
+id: ledger_nightly
+source: src_ledger
+settings: { read_mode: snapshot_only, schedule: "0 3 * * *" }
+serve:
+  from: ledger
+  sync: [ { id: dw, source: tgt_dw, write_mode: upsert } ]
