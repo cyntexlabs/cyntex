@@ -1,0 +1,92 @@
+# No-CJK gate.
+# cyntex is a public, English-only codebase. Source, build files, scripts, docs,
+# and commit messages must contain zero CJK characters: Chinese/Japanese/Korean
+# ideographs, CJK punctuation, and full-width / half-width forms. No directory is
+# exempt by default — this includes tests, data fixtures, and locale resource
+# bundles.
+#
+# Escape hatch: list explicit path patterns in .cjk-allowlist at the repo root
+# (git pathspec syntax, one per line). It ships empty on purpose; adding a path
+# is a reviewed decision, not a default.
+#
+# Like no-agent-footprint, this is meant to be a required status check on main
+# (branch protection); a workflow that merely runs is not a gate until merges
+# depend on it.
+name: no-cjk
+
+on:
+  push:
+    branches:
+      - main
+      - "ws/**"
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  no-cjk:
+    runs-on: ubuntu-latest
+    # A UTF-8 locale is required so PCRE treats the pattern as code points, not bytes.
+    env:
+      LC_ALL: C.UTF-8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history for the commit-message scan
+
+      - name: No CJK in tracked files
+        run: |
+          set -euo pipefail
+          # CJK Unified Ideographs + Ext-A + Ext-B, CJK symbols/punctuation, and
+          # full-width / half-width forms (catches full-width punctuation too).
+          cjk='[\x{3000}-\x{303f}\x{3400}-\x{4dbf}\x{4e00}-\x{9fff}\x{ff00}-\x{ffef}\x{20000}-\x{2a6df}]'
+
+          # Build pathspec exclusions from the allowlist; ignore comments / blanks.
+          pathspec=(':(top)')
+          if [ -f .cjk-allowlist ]; then
+            while IFS= read -r line; do
+              line="${line%%#*}"
+              line="$(printf '%s' "$line" | tr -d '[:space:]')"
+              [ -z "$line" ] && continue
+              pathspec+=(":(top,exclude)$line")
+            done < .cjk-allowlist
+          fi
+
+          if git grep -nP "$cjk" -- "${pathspec[@]}"; then
+            echo "::error::CJK character(s) found in an English-only repo (matches above)."
+            echo "cyntex is English-only. If a file legitimately needs CJK, add its path to .cjk-allowlist."
+            exit 1
+          fi
+          echo "clean: no CJK in tracked files."
+
+      - name: No CJK in commit messages or PR body
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          set -euo pipefail
+          cjk='[\x{3000}-\x{303f}\x{3400}-\x{4dbf}\x{4e00}-\x{9fff}\x{ff00}-\x{ffef}\x{20000}-\x{2a6df}]'
+          fail=0
+
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            base="origin/${{ github.base_ref }}"
+            git rev-parse --verify --quiet "$base" >/dev/null 2>&1 \
+              || git fetch --quiet --no-tags origin "${{ github.base_ref }}" || true
+            range="$base..HEAD"
+          else
+            range="${{ github.event.before }}..${{ github.sha }}"
+          fi
+
+          msgs="$(git log --format='%H %B' "$range" 2>/dev/null || true)"
+          if [ -n "$msgs" ] && printf '%s' "$msgs" | grep -qP "$cjk"; then
+            echo "::error::CJK found in commit message(s):"
+            printf '%s' "$msgs" | grep -nP "$cjk" || true
+            fail=1
+          fi
+
+          if [ -n "${PR_BODY:-}" ] && printf '%s' "$PR_BODY" | grep -qP "$cjk"; then
+            echo "::error::CJK found in the PR body."
+            fail=1
+          fi
+
+          if [ "$fail" -ne 0 ]; then exit 1; fi
+          echo "clean: no CJK in commit messages or PR body."

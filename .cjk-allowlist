@@ -1,0 +1,14 @@
+# CJK allowlist for the no-cjk CI gate.
+#
+# cyntex is English-only: the gate rejects any CJK character (Chinese/Japanese/
+# Korean ideographs, CJK punctuation, full-width / half-width forms) in tracked
+# files. This file is the ONLY escape hatch.
+#
+# Each non-comment line is a git pathspec (relative to the repo root) that is
+# excluded from the scan. Examples (do not enable without review):
+#   some/module/src/test/resources/fixtures/cjk-sample.json
+#   */messages_zh.properties
+#
+# It ships EMPTY on purpose. No directory — tests, data fixtures, or locale
+# resource bundles included — is exempt by default. Adding a path here is a
+# reviewed decision.
