@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Core ring event module. The standard event envelope (the change event every transform sees) as
+  pure data, zero third-party (held to the core ring R1 allowlist). It is the common currency of
+  the capture / transform / sink ports, kept apart from the authoring resource model so the ports
+  depend on the event shape without dragging in the authoring machinery. Mapping a connector's
+  native change event onto this shape lives in an adapter, not here — this module only defines the
+  in-memory shape and its invariants, single-sourced and testable without any runtime.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>io.cyntex</groupId>
+    <artifactId>core</artifactId>
+    <version>${revision}</version>
+  </parent>
+
+  <artifactId>core-event</artifactId>
+  <name>Cyntex :: Core :: Event</name>
+  <description>Standard event envelope (op / ts / src / before / after / schema); pure data, zero third-party</description>
+
+  <dependencies>
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.assertj</groupId>
+      <artifactId>assertj-core</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+</project>
