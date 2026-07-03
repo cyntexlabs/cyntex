@@ -1,7 +1,6 @@
 /**
- * Source capture port: the read-side extraction contract (batch / CDC).
- *
- * <p>Placeholder package reserving the port; the capture contract is filled in when the
- * read-side runtime lands. Rule R2: this module depends only on the core ring.
+ * Source capture port: the read-side extraction contract. A pure interface over the standard event
+ * envelope — bounded snapshot reads, an unbounded CDC stream, a connection test and schema
+ * discovery. Rule R2: this module depends only on the core ring.
  */
 package io.cyntex.spi.capture;

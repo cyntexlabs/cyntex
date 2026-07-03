@@ -12,5 +12,27 @@
 
   <artifactId>spi-capture</artifactId>
   <name>Cyntex :: SPI :: Capture</name>
-  <description>Source capture port (read-side batch / CDC extraction contract); placeholder, methods land later</description>
+  <description>Source capture port: the read-side extraction contract (bounded snapshot, unbounded CDC,
+    connection test, schema discovery). Pure interface over the standard event envelope; zero
+    third-party (rule R2: the port depends on the core ring only).</description>
+
+  <dependencies>
+    <!-- The standard event envelope is the currency the read side yields (rule R2: core only). -->
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>core-event</artifactId>
+      <version>${revision}</version>
+    </dependency>
+
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.assertj</groupId>
+      <artifactId>assertj-core</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
 </project>
