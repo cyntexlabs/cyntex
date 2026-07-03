@@ -12,5 +12,27 @@
 
   <artifactId>spi-sink</artifactId>
   <name>Cyntex :: SPI :: Sink</name>
-  <description>Sink port (write-side delivery contract); placeholder, methods land later</description>
+  <description>Sink port: the write-side delivery contract (asynchronous batch write, append/upsert
+    write mode, DDL policy). Pure interface over the standard event envelope; zero third-party
+    (rule R2: the port depends on the core ring only).</description>
+
+  <dependencies>
+    <!-- The standard event envelope is the currency the write side accepts (rule R2: core only). -->
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>core-event</artifactId>
+      <version>${revision}</version>
+    </dependency>
+
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.assertj</groupId>
+      <artifactId>assertj-core</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
 </project>
