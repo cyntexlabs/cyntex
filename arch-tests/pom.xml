@@ -58,10 +58,101 @@
       <version>${revision}</version>
       <scope>test</scope>
     </dependency>
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>core-lifecycle</artifactId>
+      <version>${revision}</version>
+      <scope>test</scope>
+    </dependency>
+    <!-- shared presentation catalog: registered so its dependency rule scans the renderer classes
+         and the D5-3 / D5-4 catalog gates read the bundled messages/en.yml it now owns -->
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>messages</artifactId>
+      <version>${revision}</version>
+      <scope>test</scope>
+    </dependency>
     <!-- surface ring: registered so the R6 rule actually scans the cli classes -->
     <dependency>
       <groupId>io.cyntex</groupId>
       <artifactId>cli</artifactId>
+      <version>${revision}</version>
+      <scope>test</scope>
+    </dependency>
+
+    <!-- spi ring: registered so the R2 rule scans the port classes -->
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>spi-capture</artifactId>
+      <version>${revision}</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>spi-sink</artifactId>
+      <version>${revision}</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>spi-store</artifactId>
+      <version>${revision}</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>spi-transform</artifactId>
+      <version>${revision}</version>
+      <scope>test</scope>
+    </dependency>
+
+    <!-- adapters ring: registered so the R3 rule scans the adapter classes -->
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>adapter-pdk</artifactId>
+      <version>${revision}</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>adapter-mongo-store</artifactId>
+      <version>${revision}</version>
+      <scope>test</scope>
+    </dependency>
+
+    <!-- runtime ring: registered so the R4 rule scans the runtime classes -->
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>engine</artifactId>
+      <version>${revision}</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>scheduler</artifactId>
+      <version>${revision}</version>
+      <scope>test</scope>
+    </dependency>
+
+    <!-- control ring: registered so the R5 rule scans the control classes -->
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>control-core</artifactId>
+      <version>${revision}</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>rest-api</artifactId>
+      <version>${revision}</version>
+      <scope>test</scope>
+    </dependency>
+
+    <!-- assembly root: registered so the R7 rule scans the app classes and the error-code gates
+         scan its role-domain codes -->
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>app</artifactId>
       <version>${revision}</version>
       <scope>test</scope>
     </dependency>

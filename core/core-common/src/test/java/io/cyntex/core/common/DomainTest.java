@@ -13,15 +13,19 @@ class DomainTest {
     }
 
     @Test
-    void registryHoldsTheInitialFiveDomains() {
+    void registryHoldsTheRegisteredDomains() {
         assertThat(Domain.ids())
-                .containsExactlyInAnyOrder("dsl", "cli", "core", "catalog", "schema");
+                .containsExactlyInAnyOrder("dsl", "cli", "core", "catalog", "schema", "lifecycle", "role", "boot", "store");
     }
 
     @Test
     void registeredAcceptsKnownDomains() {
         assertThat(Domain.isRegistered("dsl")).isTrue();
         assertThat(Domain.isRegistered("schema")).isTrue();
+        assertThat(Domain.isRegistered("lifecycle")).isTrue();
+        assertThat(Domain.isRegistered("role")).isTrue();
+        assertThat(Domain.isRegistered("boot")).isTrue();
+        assertThat(Domain.isRegistered("store")).isTrue();
     }
 
     @Test

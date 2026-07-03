@@ -1,0 +1,30 @@
+# Local development MongoDB for the Cyntex server.
+#
+# A single-node replica-set, not a standalone: the checkpoint compare-and-swap runs inside a
+# multi-document transaction, which MongoDB only offers on a replica-set. The healthcheck initiates
+# the set on first start (rs.status() throws until initiated, so the catch initiates it once), so a
+# plain `docker compose up` yields a ready-to-use rs0.
+#
+# The server runs on the host (a JVM fat-jar) and connects to the published port, so the set member
+# advertises itself as localhost:27017 — reachable from the host. This file is for local
+# development only; it is not the production deployment.
+services:
+  mongo:
+    image: mongo:7.0
+    container_name: cyntex-mongo-rs
+    command: ["--replSet", "rs0", "--bind_ip_all"]
+    ports:
+      - "27017:27017"
+    healthcheck:
+      test: >
+        mongosh --quiet --eval
+        "try { rs.status().ok } catch (e) { rs.initiate({ _id: 'rs0', members: [{ _id: 0, host: 'localhost:27017' }] }).ok }"
+      interval: 5s
+      timeout: 10s
+      retries: 30
+      start_period: 3s
+    volumes:
+      - cyntex-mongo-data:/data/db
+
+volumes:
+  cyntex-mongo-data:

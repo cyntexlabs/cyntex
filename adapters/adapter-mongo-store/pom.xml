@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>io.cyntex</groupId>
+    <artifactId>adapters</artifactId>
+    <version>${revision}</version>
+  </parent>
+
+  <artifactId>adapter-mongo-store</artifactId>
+  <name>Cyntex :: Adapters :: Mongo Store</name>
+  <!-- The only module allowed to depend on the Mongo driver (rule R3). At L1 it carries the
+       connection substrate: opening a client, verifying the target is reachable and is a replica
+       set (the compare-and-swap transaction requires one), and translating driver failures into
+       coded diagnostics. The production compare-and-swap store implementation lands later. -->
+  <description>MongoDB storage adapter: the connection substrate (reach + replica-set check + coded diagnostics); the CAS store implementation lands later</description>
+
+  <dependencies>
+    <!-- The error-code contract: this module raises coded diagnostics (store.* domain) when the
+         store is unreachable or is not a replica set, translated from driver exceptions here so no
+         driver type escapes the module (rule R3). -->
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>core-common</artifactId>
+      <version>${revision}</version>
+    </dependency>
+    <!-- The Mongo sync driver. Rule R3: this is the only module permitted to depend on it. -->
+    <dependency>
+      <groupId>org.mongodb</groupId>
+      <artifactId>mongodb-driver-sync</artifactId>
+    </dependency>
+
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.assertj</groupId>
+      <artifactId>assertj-core</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <!-- The checkpoint CAS contract (pure), witnessed against a real Mongo replica-set in the
+         Testcontainers test so the contract cannot drift from real findOneAndUpdate behavior. -->
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>core-lifecycle</artifactId>
+      <version>${revision}</version>
+      <scope>test</scope>
+    </dependency>
+    <!-- Testcontainers: a throwaway Mongo replica-set (and a standalone, to witness the
+         not-a-replica-set diagnostic). Skipped automatically where Docker is absent. -->
+    <dependency>
+      <groupId>org.testcontainers</groupId>
+      <artifactId>mongodb</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.testcontainers</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <!-- Testcontainers-backed witness tests (*IT) run in the integration-test phase, so `mvn test`
+           stays fast and `mvn verify` exercises them. Each is annotated to skip automatically where
+           Docker is unavailable, so a Docker-less build stays green. -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-failsafe-plugin</artifactId>
+        <executions>
+          <execution>
+            <goals>
+              <goal>integration-test</goal>
+              <goal>verify</goal>
+            </goals>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
+</project>

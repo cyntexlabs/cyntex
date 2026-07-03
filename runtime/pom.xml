@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Runtime ring aggregate parent.
+  Ring rule R4: the runtime ring depends on core + spi (and the Hazelcast fork) only. It must
+  NOT depend on any adapter (those are injected by the app assembly root, rule R7), nor on the
+  control ring or the surface ring. The coarse enforcer gate below bans adapters, control
+  modules, and the PDK / Mongo driver families; Hazelcast is deliberately allowed. The precise
+  package-level check is the ArchUnit R4 rule.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>io.cyntex</groupId>
+    <artifactId>cyntex</artifactId>
+    <version>${revision}</version>
+  </parent>
+
+  <artifactId>runtime</artifactId>
+  <packaging>pom</packaging>
+  <name>Cyntex :: Runtime Ring</name>
+
+  <modules>
+    <module>engine</module>
+    <module>scheduler</module>
+  </modules>
+
+  <dependencyManagement>
+    <dependencies>
+      <dependency>
+        <groupId>io.cyntex</groupId>
+        <artifactId>bom</artifactId>
+        <version>${revision}</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
+
+  <build>
+    <plugins>
+      <!-- Coarse ring gate (R4): the runtime ring must not depend on any adapter, on the control
+           ring, or on the PDK / Mongo driver. Hazelcast is allowed (it is the runtime's execution
+           substrate). The precise package-level check is the ArchUnit R4 rule. -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-enforcer-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>enforce-runtime-ring-blacklist</id>
+            <goals>
+              <goal>enforce</goal>
+            </goals>
+            <configuration>
+              <rules>
+                <bannedDependencies>
+                  <excludes>
+                    <exclude>io.cyntex:adapter-*</exclude>
+                    <exclude>io.cyntex:control-core</exclude>
+                    <exclude>io.cyntex:rest-api</exclude>
+                    <exclude>io.tapdata*</exclude>
+                    <exclude>org.mongodb*</exclude>
+                    <exclude>org.springframework*</exclude>
+                  </excludes>
+                  <message>
+Forbidden dependency in the Runtime ring (rule R4). The runtime depends on core + spi (and
+the Hazelcast fork) only; it must not depend on any adapter (adapters are injected by the app
+assembly root, rule R7), on the control ring, or on the PDK / Mongo driver. Hazelcast is the
+one allowed substrate. The precise check is the ArchUnit R4 rule.
+                  </message>
+                </bannedDependencies>
+              </rules>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
+</project>

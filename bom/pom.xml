@@ -20,14 +20,45 @@
   <name>Cyntex :: BOM</name>
 
   <properties>
-    <jackson.version>2.18.2</jackson.version>
-    <snakeyaml.version>2.4</snakeyaml.version>
+    <!-- The core ring serializes with Jackson 2 (annotations + YAML dataformat) and must not depend
+         on spring-boot-dependencies, so jackson is pinned here and imported first (below) to win over
+         the platform's managed version. Spring Boot 4.1 defaults to Jackson 3, but the service exposes
+         no HTTP wire codec yet, so Jackson 2 is retained and aligned to the platform's managed Jackson-2
+         line; the move to Jackson 3 lands when the web layer is introduced. -->
+    <jackson.version>2.21.4</jackson.version>
+    <snakeyaml.version>2.6</snakeyaml.version>
     <cel.version>0.10.1</cel.version>
+    <!-- Spring Boot is the service runtime substrate (assembly root + control ring): Spring Boot 4.1.x
+         on Spring Framework 7 (Jakarta EE 11 / Jackson 3 default), running on JDK 21. The version
+         (spring.boot.version) is the single source of truth defined in the root POM and inherited here,
+         so the spring-boot-dependencies import below and the spring-boot-maven-plugin that repackages
+         the app fat-jar always move together. The repo's own pins still win over Spring Boot's managed
+         versions: jackson is imported via jackson-bom FIRST (competing imported BOMs resolve
+         first-import-wins), and snakeyaml is a direct managed pin (a direct entry always overrides any
+         imported BOM, order-independent). The spring-boot-dependencies import is placed last only to
+         read as the lowest-priority substrate, not as the cause of that precedence. -->
     <!-- CLI facade libraries (surface ring): the command framework and the REPL line reader.
          Both are self-contained (picocli has no transitive deps; jline aggregates its own
          modules at one version) and are allowlisted to the cli module only (rule R6). -->
     <picocli.version>4.7.7</picocli.version>
     <jline.version>3.26.3</jline.version>
+    <!-- MongoDB driver stack (sync + core + bson + bson-record-codec): the store adapter's backing
+         driver (rule R3 locks it to adapter-mongo-store). The family must resolve to one version — the
+         sync driver calls into core/bson internals and core pulls bson-record-codec, so a split version
+         skews the classpath and fails at runtime. The platform's dependency management (imported below)
+         also manages these, so all four are pinned here to a single version aligned with the platform's
+         managed Mongo line; the stack moves as a unit and cannot skew. -->
+    <mongodb.driver.version>5.8.0</mongodb.driver.version>
+    <!-- Hazelcast: the distributed-coordination substrate and the Jet execution engine (Jet ships
+         inside the core artifact). The official Maven Central artifact is used as-is — it is pure
+         Apache-2.0 (the HCL-licensed pieces live in separate artifacts, which are banned by the
+         global enforcer rule); the runtime ring and the app assembly root are the only consumers
+         (rule R4 / R7). -->
+    <hazelcast.version>5.7.0</hazelcast.version>
+    <!-- Testcontainers: brings up a throwaway Mongo replica-set in tests so the storage CAS
+         contract is witnessed against a real Mongo, not only the pure in-memory contract. Test scope
+         only, in adapter-mongo-store. -->
+    <testcontainers.version>1.20.4</testcontainers.version>
     <junit.version>5.11.4</junit.version>
     <assertj.version>3.26.3</assertj.version>
     <archunit.version>1.3.0</archunit.version>
@@ -102,6 +133,60 @@
         <groupId>org.jline</groupId>
         <artifactId>jline</artifactId>
         <version>${jline.version}</version>
+      </dependency>
+      <!-- MongoDB driver stack, locked to adapter-mongo-store by rule R3. core + bson +
+           bson-record-codec are pinned alongside sync so the whole family stays on one version: the
+           platform manages them too, and pinning them here keeps them from skewing against each other
+           on a version bump (core hard-depends on bson-record-codec; a split stack throws
+           NoClassDefFoundError at runtime). -->
+      <dependency>
+        <groupId>org.mongodb</groupId>
+        <artifactId>mongodb-driver-sync</artifactId>
+        <version>${mongodb.driver.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>org.mongodb</groupId>
+        <artifactId>mongodb-driver-core</artifactId>
+        <version>${mongodb.driver.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>org.mongodb</groupId>
+        <artifactId>bson</artifactId>
+        <version>${mongodb.driver.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>org.mongodb</groupId>
+        <artifactId>bson-record-codec</artifactId>
+        <version>${mongodb.driver.version}</version>
+      </dependency>
+      <!-- Hazelcast core artifact (member + Jet in one jar, no compile-scope transitives). Only the
+           official Apache-2.0 core artifact is managed here; hazelcast-sql / hazelcast-spring / EE
+           artifacts carry a different license and are banned by the global enforcer rule. -->
+      <dependency>
+        <groupId>com.hazelcast</groupId>
+        <artifactId>hazelcast</artifactId>
+        <version>${hazelcast.version}</version>
+      </dependency>
+      <!-- Testcontainers module set (aligns testcontainers-core + mongodb + junit-jupiter). Its own
+           third-party transitives (jackson / slf4j / commons-compress) still resolve against the
+           pins above, so the reactor's dependencyConvergence stays green. -->
+      <dependency>
+        <groupId>org.testcontainers</groupId>
+        <artifactId>testcontainers-bom</artifactId>
+        <version>${testcontainers.version}</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+      <!-- Spring Boot dependency management. The pins above keep precedence on overlap (jackson-bom
+           is imported first; snakeyaml is a direct managed pin), so this import is placed last as the
+           lowest-priority substrate. Only the service modules (the app assembly root, and the control
+           ring later) draw Spring artifacts from it. -->
+      <dependency>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-dependencies</artifactId>
+        <version>${spring.boot.version}</version>
+        <type>pom</type>
+        <scope>import</scope>
       </dependency>
     </dependencies>
   </dependencyManagement>

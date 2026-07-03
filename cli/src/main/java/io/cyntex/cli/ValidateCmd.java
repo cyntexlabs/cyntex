@@ -4,6 +4,7 @@ import io.cyntex.core.common.CyntexErrorCode;
 import io.cyntex.core.dsl.DslException;
 import io.cyntex.core.dsl.Workspace;
 import io.cyntex.core.dsl.WorkspaceLoader;
+import io.cyntex.messages.MessageCatalog;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Mixin;

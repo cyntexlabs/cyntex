@@ -11,6 +11,7 @@ import io.cyntex.core.model.SourceResource;
 import io.cyntex.core.model.TableRef;
 import io.cyntex.core.model.TransformResource;
 import io.cyntex.core.model.ViewResource;
+import io.cyntex.messages.MessageCatalog;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Mixin;

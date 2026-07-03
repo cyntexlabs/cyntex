@@ -71,6 +71,13 @@
       <artifactId>core-common</artifactId>
       <version>${revision}</version>
     </dependency>
+    <!-- The shared error-code message catalog + renderer (presentation layer); the CLI renders
+         coded diagnostics through it rather than carrying its own catalog. -->
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>messages</artifactId>
+      <version>${revision}</version>
+    </dependency>
 
     <!-- Surface-ring facade libraries (R6 allowlist). -->
     <dependency>
@@ -151,6 +158,8 @@
                     <include>io.cyntex:core-dsl</include>
                     <include>io.cyntex:core-schema</include>
                     <include>io.cyntex:core-catalog</include>
+                    <!-- the shared presentation catalog + renderer (zero third-party itself) -->
+                    <include>io.cyntex:messages</include>
                     <include>info.picocli:picocli</include>
                     <!-- jline aggregates its own modules under one version -->
                     <include>org.jline:*</include>

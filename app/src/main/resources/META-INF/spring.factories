@@ -1,0 +1,4 @@
+# Register the coded startup-failure analyzer so Spring Boot renders a coded CyntexException that
+# aborts startup (e.g. the store is unreachable) as a clean diagnostic instead of a raw stack trace.
+org.springframework.boot.diagnostics.FailureAnalyzer=\
+io.cyntex.app.CodedFailureAnalyzer
