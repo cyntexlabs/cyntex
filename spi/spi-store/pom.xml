@@ -12,5 +12,33 @@
 
   <artifactId>spi-store</artifactId>
   <name>Cyntex :: SPI :: Store</name>
-  <description>Storage port (artifact / state persistence contract; CAS executes here); placeholder, methods land later</description>
+  <description>Storage port: the persistence contract — artifact truth layer, the pipeline state
+    store (epoch-fencing compare-and-swap), and the connection catalog. Pure interfaces over the
+    core ring; zero third-party (rule R2: the port depends on the core ring only).</description>
+
+  <dependencies>
+    <!-- The resource model is the currency of the artifact truth layer (rule R2: core only). -->
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>core-model</artifactId>
+      <version>${revision}</version>
+    </dependency>
+    <!-- The checkpoint + fencing-CAS contract the state store persists (rule R2: core only). -->
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>core-lifecycle</artifactId>
+      <version>${revision}</version>
+    </dependency>
+
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.assertj</groupId>
+      <artifactId>assertj-core</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
 </project>

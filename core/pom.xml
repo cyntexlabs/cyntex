@@ -32,6 +32,8 @@
     <module>core-schema</module>
     <module>core-catalog</module>
     <module>core-lifecycle</module>
+    <!-- the standard event envelope: the change-event currency of the capture/transform/sink ports -->
+    <module>core-event</module>
   </modules>
 
   <dependencyManagement>

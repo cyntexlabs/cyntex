@@ -1,8 +1,7 @@
 /**
- * Storage port: the persistence contract (artifact / state).
- *
- * <p>Placeholder package reserving the port; the storage contract — including the
- * compare-and-swap write path that the lifecycle persistence contract relies on — is
- * filled in when a store backend lands. Rule R2: this module depends only on the core ring.
+ * Storage port: the persistence contract. One store surface with three concerns — the artifact
+ * truth layer (canonical resources; save / get / list), the pipeline state store whose transitions
+ * land only through the epoch-fencing compare-and-swap, and the connection catalog. Pure interfaces over the
+ * core ring; a database adapter implements them. Rule R2: this module depends only on the core ring.
  */
 package io.cyntex.spi.store;
