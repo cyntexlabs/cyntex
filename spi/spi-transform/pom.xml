@@ -12,5 +12,29 @@
 
   <artifactId>spi-transform</artifactId>
   <name>Cyntex :: SPI :: Transform</name>
-  <description>Transform execution port (native vs embedded-OLAP split point); placeholder, methods land later</description>
+  <description>Transform port: the in-pipeline row-level transform contract (a stateless map of one
+    event into zero-or-more events) plus the closed set of transform node kinds. Pure interface over
+    the standard event envelope; zero third-party (rule R2: the port depends on the core ring only).
+    The stateful (nest/join) and fan-in (union) node execution contracts land with the execution
+    engine; this module predeclares the seam.</description>
+
+  <dependencies>
+    <!-- The standard event envelope is the currency the row-level transform maps (rule R2: core only). -->
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>core-event</artifactId>
+      <version>${revision}</version>
+    </dependency>
+
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.assertj</groupId>
+      <artifactId>assertj-core</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
 </project>
