@@ -12,7 +12,30 @@
 
   <artifactId>adapter-pdk</artifactId>
   <name>Cyntex :: Adapters :: PDK</name>
-  <!-- The only module allowed to import the PDK API (rule R3). The third-party PDK dependency
-       is intentionally NOT declared yet; it is introduced when the PDK bridge lands. -->
-  <description>PDK runtime bridge (capture + sink adapter); placeholder, the PDK dependency and bridge land later</description>
+  <!-- The only module allowed to import the PDK API (rule R3). It compiles against the frozen PDK
+       contract (tapdata-pdk-api) — the shared layer the isolated connector class loaders delegate to.
+       The PDK runtime and the connector plugins are NOT compile dependencies: they load at runtime
+       inside per-connector class loaders, so their heavy transitive tree stays off the host classpath. -->
+  <description>PDK runtime bridge: isolated per-connector class loading over the frozen PDK contract (capture + sink adapter)</description>
+
+  <dependencies>
+    <!-- The frozen PDK contract surface (rule R3 locks it to this module). Compile scope: it is the
+         shared API the per-connector class loaders expose to connectors, so it must sit on the host
+         classpath as the one contract every connector binds to. -->
+    <dependency>
+      <groupId>io.tapdata</groupId>
+      <artifactId>tapdata-pdk-api</artifactId>
+    </dependency>
+
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.assertj</groupId>
+      <artifactId>assertj-core</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
 </project>

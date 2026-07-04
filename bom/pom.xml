@@ -55,6 +55,26 @@
          global enforcer rule); the runtime ring and the app assembly root are the only consumers
          (rule R4 / R7). -->
     <hazelcast.version>5.7.0</hazelcast.version>
+    <!-- PDK API: the frozen connector contract surface (TapConnector / TapEvent / ConnectorFunctions
+         and the tapdata-api entity types they reference). It is the single shared layer the isolated
+         connector class loaders delegate to, so every connector binds to the same contract types; rule
+         R3 locks it to adapter-pdk. Only this small contract tree enters the reactor — the heavy PDK
+         runtime (TapRuntime and its transitive libraries) and the connector jars themselves load at
+         runtime inside per-connector class loaders and never reach the host classpath.
+
+         Tracks the 2.0.8 working baseline as a snapshot. There is deliberately NO byte-level pin: an
+         upstream snapshot cannot be reproducibly pinned from the POM. The nexus retains only the most
+         recent snapshot builds, so naming an older timestamped build fails once it is purged; the base
+         -SNAPSHOT always resolves whatever build the nexus currently serves. That drift is accepted —
+         compatibility is judged by version/level, not by byte content, and a same-version rebuild is
+         treated as contract-equivalent; a byte-level content / drift gate is a later hardening step.
+         These artifacts are published only to the tapdata nexus (a public, anonymously readable
+         snapshot repository declared in the root POM), not to Maven Central. This property is also the
+         home of the version -> API-level mapping the compatibility check reads (the level table lands
+         with the resolver). The contract (tapdata-api) and its error-code libraries carry a different
+         base version, so both are set. -->
+    <pdk-api.version>2.0.8-SNAPSHOT</pdk-api.version>
+    <pdk-errorcode.version>2.8-SNAPSHOT</pdk-errorcode.version>
     <!-- Testcontainers: brings up a throwaway Mongo replica-set in tests so the storage CAS
          contract is witnessed against a real Mongo, not only the pure in-memory contract. Test scope
          only, in adapter-mongo-store. -->
@@ -166,6 +186,32 @@
         <groupId>com.hazelcast</groupId>
         <artifactId>hazelcast</artifactId>
         <version>${hazelcast.version}</version>
+      </dependency>
+      <!-- PDK API contract, locked to adapter-pdk by rule R3. Only the small contract tree is managed
+           into the reactor (tapdata-pdk-api + the tapdata-api entity types it exposes + the error-code
+           libraries they pull); the transitive io.tapdata versions are managed explicitly so the whole
+           contract tree tracks one snapshot line together. The PDK runtime and the connector plugins
+           load in isolation at runtime and are deliberately NOT managed here, so their heavy transitive
+           tree never enters the host classpath or the reactor's convergence gates. -->
+      <dependency>
+        <groupId>io.tapdata</groupId>
+        <artifactId>tapdata-pdk-api</artifactId>
+        <version>${pdk-api.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>io.tapdata</groupId>
+        <artifactId>tapdata-api</artifactId>
+        <version>${pdk-api.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>io.tapdata</groupId>
+        <artifactId>error-code-scanner</artifactId>
+        <version>${pdk-errorcode.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>io.tapdata</groupId>
+        <artifactId>error-code-core</artifactId>
+        <version>${pdk-errorcode.version}</version>
       </dependency>
       <!-- Testcontainers module set (aligns testcontainers-core + mongodb + junit-jupiter). Its own
            third-party transitives (jackson / slf4j / commons-compress) still resolve against the
