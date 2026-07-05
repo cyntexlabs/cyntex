@@ -190,9 +190,11 @@
       <!-- PDK API contract, locked to adapter-pdk by rule R3. Only the small contract tree is managed
            into the reactor (tapdata-pdk-api + the tapdata-api entity types it exposes + the error-code
            libraries they pull); the transitive io.tapdata versions are managed explicitly so the whole
-           contract tree tracks one snapshot line together. The PDK runtime and the connector plugins
-           load in isolation at runtime and are deliberately NOT managed here, so their heavy transitive
-           tree never enters the host classpath or the reactor's convergence gates. -->
+           contract tree tracks one snapshot line together. The connector plugins load in isolation at
+           runtime and are deliberately NOT managed here. The PDK runtime is likewise unmanaged here: the
+           default reactor build never carries it, so its heavy transitive tree stays out of the default
+           convergence gate; adapter-pdk pulls it (test scope, its version pinned in that module) only
+           under its pdk-it profile, where a connector's base class needs the runtime host-reachable. -->
       <dependency>
         <groupId>io.tapdata</groupId>
         <artifactId>tapdata-pdk-api</artifactId>
