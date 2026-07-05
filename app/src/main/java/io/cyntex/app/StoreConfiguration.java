@@ -23,7 +23,8 @@ class StoreConfiguration {
     @ConditionalOnProperty(prefix = "cyntex.store.mongo", name = "enabled", matchIfMissing = true)
     MongoConnection storeConnection(MongoProperties properties) {
         MongoConnection connection = new MongoConnection(new MongoConnectionSettings(
-                properties.getUri(), properties.isTls(), properties.getServerSelectionTimeout()));
+                properties.getUri(), properties.isAllowInsecure(), properties.getTlsCaFile(),
+                properties.getServerSelectionTimeout()));
         // Fail fast at startup: a coded diagnostic surfaces through CodedFailureAnalyzer if the
         // store is unreachable or is not a replica-set, rather than a bare driver stack trace.
         connection.verify();

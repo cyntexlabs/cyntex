@@ -28,7 +28,21 @@ public enum StoreError implements CyntexErrorCode {
      * The configured connection string is not a valid Mongo URI. Carries no placeholder on purpose:
      * echoing the raw URI back could leak an embedded credential.
      */
-    INVALID_URI("store.invalid-uri", Set.of());
+    INVALID_URI("store.invalid-uri", Set.of()),
+
+    /**
+     * The connection settings would reach the store insecurely — plaintext (TLS turned off) or with
+     * certificate/hostname verification disabled — without an explicit insecure downgrade. A secure
+     * TLS connection is mandatory; an insecure one is refused up front rather than silently allowed.
+     * {@code target} is the connection target.
+     */
+    TLS_REQUIRED("store.tls-required", Set.of("target")),
+
+    /**
+     * The configured TLS CA certificate file could not be read or parsed. {@code path} is the CA
+     * file path (a filesystem path, not a credential, so it is safe to echo back).
+     */
+    TLS_CA_UNREADABLE("store.tls-ca-unreadable", Set.of("path"));
 
     private final String code;
     private final Set<String> placeholders;

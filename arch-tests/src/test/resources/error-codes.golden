@@ -31,4 +31,6 @@ lifecycle.illegal-transition
 role.unsupported
 store.invalid-uri
 store.not-replica-set
+store.tls-ca-unreadable
+store.tls-required
 store.unreachable
