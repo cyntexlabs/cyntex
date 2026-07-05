@@ -1,0 +1,42 @@
+[
+  {
+    "op": "i",
+    "ts": 1000,
+    "src": "orders",
+    "before": null,
+    "after": {"id": 1, "region": "eu"},
+    "schema": null
+  },
+  {
+    "op": "u",
+    "ts": 1000,
+    "src": "orders",
+    "before": {"id": 1, "region": "eu"},
+    "after": {"id": 1, "region": "us"},
+    "schema": null
+  },
+  {
+    "op": "d",
+    "ts": 1000,
+    "src": "orders",
+    "before": {"id": 1},
+    "after": null,
+    "schema": null
+  },
+  {
+    "op": "r",
+    "ts": 1000,
+    "src": "orders",
+    "before": null,
+    "after": {"id": 7},
+    "schema": null
+  },
+  {
+    "op": "ddl",
+    "ts": 1000,
+    "src": "orders",
+    "before": null,
+    "after": null,
+    "schema": {"origin": "ALTER TABLE orders ADD note VARCHAR(64)"}
+  }
+]

@@ -27,6 +27,15 @@
       <artifactId>tapdata-pdk-api</artifactId>
     </dependency>
 
+    <!-- The event envelope this bridge projects PDK TapEvents to and from — the shared currency the
+         spi ports carry (core ring, zero third-party). Compile scope: the codec's signatures are in
+         terms of it. -->
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>core-event</artifactId>
+      <version>${revision}</version>
+    </dependency>
+
     <!-- Test scope only: the regression checks that the ids the live harness reads back map to the
          same catalog modes the offline build recorded, so it reuses the catalog's derivation model
          (DerivedCapability / ModeResolver). Not a compile dependency — the bridge reports raw ids and
