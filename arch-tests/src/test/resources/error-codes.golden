@@ -8,6 +8,12 @@ cli.artifact-exists
 cli.kind-dir-mismatch
 cli.resource-not-found
 cli.unknown-connector
+connector.api-level-incompatible
+connector.capture-failed
+connector.class-not-found
+connector.load-failed
+connector.projection-failed
+connector.write-failed
 dsl.ambiguous-reference
 dsl.composition
 dsl.config-type-mismatch

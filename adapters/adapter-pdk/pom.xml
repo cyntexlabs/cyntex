@@ -36,6 +36,29 @@
       <version>${revision}</version>
     </dependency>
 
+    <!-- The error-code contract (core ring, zero third-party): the bridge raises its diagnosable
+         load / level / projection failures as coded exceptions in the connector domain. Compile
+         scope: the throw sites reference the code enum and the exception carrier directly. -->
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>core-common</artifactId>
+      <version>${revision}</version>
+    </dependency>
+
+    <!-- The read/write port contracts this bridge implements (spi ring, over the event envelope).
+         adapter -> spi is the port-adapter direction: the bridge is the PDK implementation of these
+         ports, so runtime/control depend on the ports, never on this module. -->
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>spi-capture</artifactId>
+      <version>${revision}</version>
+    </dependency>
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>spi-sink</artifactId>
+      <version>${revision}</version>
+    </dependency>
+
     <!-- Test scope only: the regression checks that the ids the live harness reads back map to the
          same catalog modes the offline build recorded, so it reuses the catalog's derivation model
          (DerivedCapability / ModeResolver). Not a compile dependency — the bridge reports raw ids and
