@@ -13,10 +13,10 @@
   <artifactId>adapter-mongo-store</artifactId>
   <name>Cyntex :: Adapters :: Mongo Store</name>
   <!-- The only module allowed to depend on the Mongo driver (rule R3). At L1 it carries the
-       connection substrate: opening a client, verifying the target is reachable and is a replica
-       set (the compare-and-swap transaction requires one), and translating driver failures into
-       coded diagnostics. The production compare-and-swap store implementation lands later. -->
-  <description>MongoDB storage adapter: the connection substrate (reach + replica-set check + coded diagnostics); the CAS store implementation lands later</description>
+       connection substrate (reach + replica-set check), the three storage-port sub-stores (artifact
+       truth layer, epoch-fencing CAS state, connection catalog), and the single point that
+       translates driver failures into coded diagnostics, so no driver type escapes the module. -->
+  <description>MongoDB storage adapter: the connection substrate (reach + replica-set check + coded diagnostics), the artifact truth-layer store (canonical save / get / list), the CAS state store (epoch-fencing compare-and-swap on the pipeline checkpoint), and the connection catalog store (structured connection configs), with driver failures translated into io-domain coded diagnostics</description>
 
   <dependencies>
     <!-- The error-code contract: this module raises coded diagnostics (store.* domain) when the
@@ -25,6 +25,25 @@
     <dependency>
       <groupId>io.cyntex</groupId>
       <artifactId>core-common</artifactId>
+      <version>${revision}</version>
+    </dependency>
+    <!-- The storage port this adapter implements: the artifact truth layer (save / get / list). -->
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>spi-store</artifactId>
+      <version>${revision}</version>
+    </dependency>
+    <!-- The resource model and its canonical serializer: an artifact is stored in canonical form. -->
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>core-model</artifactId>
+      <version>${revision}</version>
+    </dependency>
+    <!-- The canonical parser (the inverse of the canonical writer): reconstructs a stored resource
+         from its canonical form on read, so the store keeps a single serialization contract. -->
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>core-dsl</artifactId>
       <version>${revision}</version>
     </dependency>
     <!-- The Mongo sync driver. Rule R3: this is the only module permitted to depend on it. -->
@@ -43,13 +62,13 @@
       <artifactId>assertj-core</artifactId>
       <scope>test</scope>
     </dependency>
-    <!-- The checkpoint CAS contract (pure), witnessed against a real Mongo replica-set in the
-         Testcontainers test so the contract cannot drift from real findOneAndUpdate behavior. -->
+    <!-- The checkpoint + fencing-CAS contract (pure) the state store persists and returns
+         (CheckpointDoc / CasOutcome). The Testcontainers witness also runs the pure contract beside a
+         real Mongo replica-set so the two cannot drift from real findOneAndUpdate behavior. -->
     <dependency>
       <groupId>io.cyntex</groupId>
       <artifactId>core-lifecycle</artifactId>
       <version>${revision}</version>
-      <scope>test</scope>
     </dependency>
     <!-- Testcontainers: a throwaway Mongo replica-set (and a standalone, to witness the
          not-a-replica-set diagnostic). Skipped automatically where Docker is absent. -->

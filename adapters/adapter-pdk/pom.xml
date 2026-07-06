@@ -12,7 +12,117 @@
 
   <artifactId>adapter-pdk</artifactId>
   <name>Cyntex :: Adapters :: PDK</name>
-  <!-- The only module allowed to import the PDK API (rule R3). The third-party PDK dependency
-       is intentionally NOT declared yet; it is introduced when the PDK bridge lands. -->
-  <description>PDK runtime bridge (capture + sink adapter); placeholder, the PDK dependency and bridge land later</description>
+  <!-- The only module allowed to import the PDK API (rule R3). It compiles against the frozen PDK
+       contract (tapdata-pdk-api) — the shared layer the isolated connector class loaders delegate to.
+       The connector plugins are never compile dependencies (they load at runtime inside per-connector
+       class loaders). The PDK runtime is not a compile dependency either, but it cannot live inside the
+       isolated connector loader: a connector's base class bootstraps the runtime through the host class
+       loader, so the runtime must be host-reachable. The default build stays PDK-runtime-free; the
+       runtime is provided on the host test classpath only under the pdk-it profile (real-connector
+       regression) below. -->
+  <description>PDK runtime bridge: isolated per-connector class loading over the frozen PDK contract (capture + sink adapter)</description>
+
+  <properties>
+    <!-- The Tapdata PDK runtime (TapRuntime and the error-code types a connector base class reaches
+         through the host class loader). Declared here, not in the BOM: the BOM manages only the frozen
+         contract tree, keeping this heavy, intentionally non-converging tree out of the default build. -->
+    <pdk-runner.version>2.8-SNAPSHOT</pdk-runner.version>
+  </properties>
+
+  <dependencies>
+    <!-- The frozen PDK contract surface (rule R3 locks it to this module). Compile scope: it is the
+         shared API the per-connector class loaders expose to connectors, so it must sit on the host
+         classpath as the one contract every connector binds to. -->
+    <dependency>
+      <groupId>io.tapdata</groupId>
+      <artifactId>tapdata-pdk-api</artifactId>
+    </dependency>
+
+    <!-- The event envelope this bridge projects PDK TapEvents to and from — the shared currency the
+         spi ports carry (core ring, zero third-party). Compile scope: the codec's signatures are in
+         terms of it. -->
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>core-event</artifactId>
+      <version>${revision}</version>
+    </dependency>
+
+    <!-- The error-code contract (core ring, zero third-party): the bridge raises its diagnosable
+         load / level / projection failures as coded exceptions in the connector domain. Compile
+         scope: the throw sites reference the code enum and the exception carrier directly. -->
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>core-common</artifactId>
+      <version>${revision}</version>
+    </dependency>
+
+    <!-- The read/write port contracts this bridge implements (spi ring, over the event envelope).
+         adapter -> spi is the port-adapter direction: the bridge is the PDK implementation of these
+         ports, so runtime/control depend on the ports, never on this module. -->
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>spi-capture</artifactId>
+      <version>${revision}</version>
+    </dependency>
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>spi-sink</artifactId>
+      <version>${revision}</version>
+    </dependency>
+
+    <!-- Test scope only: the regression checks that the ids the live harness reads back map to the
+         same catalog modes the offline build recorded, so it reuses the catalog's derivation model
+         (DerivedCapability / ModeResolver). Not a compile dependency — the bridge reports raw ids and
+         leaves the cyntex-namespace mapping to the catalog. -->
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>core-catalog</artifactId>
+      <version>${revision}</version>
+      <scope>test</scope>
+    </dependency>
+
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.assertj</groupId>
+      <artifactId>assertj-core</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <profiles>
+    <!-- Real-connector regression. Activated by the same property the gated test keys on, so
+         `mvn -pl adapters/adapter-pdk test -Dcyntex.pdk.it.jarA=... -Dcyntex.pdk.it.classA=... -Dcyntex.pdk.it.idA=...`
+         both selects the test and puts the PDK runtime on the host classpath. A connector dist jar is a
+         thin plugin whose base class bootstraps the PDK runtime (TapRuntime, plus the error-code types it
+         references) via the host class loader, so the runtime must be host-reachable — it cannot ride in
+         the isolated connector loader. Test scope, so the default build never carries it and stays
+         PDK-runtime-free.
+
+         The runtime pulls its own transitive tree (ehcache, reflections, jaxb, jjwt, cglib, fastjson, the
+         tapdata error-code libraries). That tree resolves cleanly under the full enforcer — no rule is
+         relaxed for this profile: it converges, respects the upper-bound gate, and (crucially for rule
+         R3) carries no Spring and no Hazelcast, so the adapters-ring cross-ring blacklist stays fully in
+         force and green. The compile surface is unchanged (tapdata-pdk-api only), so the ArchUnit R3
+         import lock is untouched. -->
+    <profile>
+      <id>pdk-it</id>
+      <activation>
+        <property>
+          <name>cyntex.pdk.it.jarA</name>
+        </property>
+      </activation>
+      <dependencies>
+        <dependency>
+          <groupId>io.tapdata</groupId>
+          <artifactId>tapdata-pdk-runner</artifactId>
+          <version>${pdk-runner.version}</version>
+          <scope>test</scope>
+        </dependency>
+      </dependencies>
+    </profile>
+  </profiles>
 </project>

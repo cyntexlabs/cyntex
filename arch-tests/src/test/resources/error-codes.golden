@@ -8,6 +8,12 @@ cli.artifact-exists
 cli.kind-dir-mismatch
 cli.resource-not-found
 cli.unknown-connector
+connector.api-level-incompatible
+connector.capture-failed
+connector.class-not-found
+connector.load-failed
+connector.projection-failed
+connector.write-failed
 dsl.ambiguous-reference
 dsl.composition
 dsl.config-type-mismatch
@@ -21,8 +27,13 @@ dsl.missing-reference
 dsl.mode-mismatch
 dsl.unknown-field
 dsl.unsupported-mode
+io.document-unreadable
+io.store-unauthorized
+io.store-unavailable
 lifecycle.illegal-transition
 role.unsupported
 store.invalid-uri
 store.not-replica-set
+store.tls-ca-unreadable
+store.tls-required
 store.unreachable

@@ -5,11 +5,24 @@ import com.mongodb.MongoClientSettings;
 import com.mongodb.MongoException;
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoClients;
+import com.mongodb.client.MongoDatabase;
 import io.cyntex.core.common.CyntexException;
 
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.security.GeneralSecurityException;
+import java.security.KeyStore;
+import java.security.cert.Certificate;
+import java.security.cert.CertificateFactory;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.TimeUnit;
+
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.TrustManager;
+import javax.net.ssl.TrustManagerFactory;
 
 import org.bson.Document;
 
@@ -25,8 +38,12 @@ import org.bson.Document;
  */
 public final class MongoConnection implements AutoCloseable {
 
+    /** The database used when the connection URI names none. */
+    private static final String DEFAULT_DATABASE = "cyntex";
+
     private final MongoConnectionSettings settings;
     private MongoClient client;
+    private String databaseName;
 
     public MongoConnection(MongoConnectionSettings settings) {
         this.settings = Objects.requireNonNull(settings, "settings");
@@ -50,18 +67,21 @@ public final class MongoConnection implements AutoCloseable {
             // Carry no detail — the raw URI could embed a credential.
             throw new CyntexException(StoreError.INVALID_URI, Map.of(), e);
         }
+        // The store database is the one named in the URI, falling back to the default when it names
+        // none. Resolved here from the same URI the client uses, so database() reflects the target.
+        this.databaseName = resolveDatabaseName(connectionString);
         String target = String.join(",", connectionString.getHosts());
-        MongoClientSettings.Builder builder = MongoClientSettings.builder()
-                .applyConnectionString(connectionString)
-                .applyToClusterSettings(b ->
-                        b.serverSelectionTimeout(settings.serverSelectionTimeout().toMillis(), TimeUnit.MILLISECONDS));
-        // TLS is only turned on here, never off: a tls flag carried in the URI stays honored, and the
-        // settings flag forces it on where required; leaving the flag off must not silently disable a
-        // TLS request made through the URI.
-        if (settings.tls()) {
-            builder.applyToSslSettings(b -> b.enabled(true));
+        // A secure TLS connection to the store is mandatory: a URI that would reach it insecurely —
+        // plaintext (ssl=false), or with certificate/hostname verification disabled (tlsInsecure /
+        // tlsAllowInvalidHostnames) — is refused up front, before any connection attempt, unless the
+        // operator opted into an insecure connection with the explicit downgrade. This is what keeps
+        // an insecure store link from being made silently.
+        boolean plaintext = Boolean.FALSE.equals(connectionString.getSslEnabled());
+        boolean verificationDisabled = Boolean.TRUE.equals(connectionString.getSslInvalidHostnameAllowed());
+        if ((plaintext || verificationDisabled) && !settings.allowInsecure()) {
+            throw new CyntexException(StoreError.TLS_REQUIRED, Map.of("target", target), null);
         }
-        MongoClientSettings clientSettings = builder.build();
+        MongoClientSettings clientSettings = buildClientSettings(connectionString);
 
         MongoClient opened = MongoClients.create(clientSettings);
         Document hello;
@@ -77,6 +97,102 @@ public final class MongoConnection implements AutoCloseable {
             throw new CyntexException(StoreError.NOT_REPLICA_SET, Map.of("target", target), null);
         }
         this.client = opened;
+    }
+
+    /**
+     * The verified store database — the one named in the connection URI (falling back to the default
+     * when the URI names none). Package-private on purpose: the store adapter binds its collections on
+     * it, so a driver type stays inside the module and never reaches the module's public surface.
+     * Must be called after {@link #verify()} has opened the client.
+     */
+    MongoDatabase database() {
+        if (client == null) {
+            // Called before verify() opened the client: an assembly ordering error, i.e. a programmer
+            // bug. It crashes bare with a stack rather than being laundered into a coded diagnostic.
+            throw new IllegalStateException("store connection not verified");
+        }
+        return client.getDatabase(databaseName);
+    }
+
+    /** The database named in the connection string, or the default when it names none. */
+    static String resolveDatabaseName(ConnectionString connectionString) {
+        return connectionString.getDatabase() != null ? connectionString.getDatabase() : DEFAULT_DATABASE;
+    }
+
+    /**
+     * Builds the driver client settings, applying the mandatory-TLS policy: TLS is on by default and
+     * a TLS request carried in the URI is always honored; it is turned off only by the explicit
+     * insecure downgrade.
+     */
+    MongoClientSettings buildClientSettings(ConnectionString connectionString) {
+        MongoClientSettings.Builder builder = MongoClientSettings.builder()
+                .applyConnectionString(connectionString)
+                .applyToClusterSettings(b ->
+                        b.serverSelectionTimeout(settings.serverSelectionTimeout().toMillis(), TimeUnit.MILLISECONDS));
+        boolean useTls = Boolean.TRUE.equals(connectionString.getSslEnabled()) || !settings.allowInsecure();
+        if (useTls) {
+            builder.applyToSslSettings(b -> {
+                b.enabled(true);
+                // A URI must never quietly weaken the handshake: unless the operator opted into an
+                // insecure connection, certificate/hostname verification is forced on regardless of
+                // any tlsInsecure/tlsAllowInvalidHostnames the URI carried.
+                if (!settings.allowInsecure()) {
+                    b.invalidHostNameAllowed(false);
+                }
+                // An explicit CA file trusts a self-signed chain (the local development one); with no
+                // CA file the handshake falls back to the JVM default trust store.
+                if (settings.tlsCaFile() != null) {
+                    b.context(buildSslContext(settings.tlsCaFile()));
+                }
+            });
+        }
+        return builder.build();
+    }
+
+    /**
+     * Builds a TLS context trusting only the CA certificate(s) in {@code caFile} (a PEM file). This is
+     * how the local development self-signed chain is trusted without touching the JVM-wide trust store.
+     */
+    private static SSLContext buildSslContext(String caFile) {
+        try {
+            SSLContext context = SSLContext.getInstance("TLS");
+            context.init(null, buildTrustManagers(caFile), null);
+            return context;
+        } catch (GeneralSecurityException e) {
+            throw new CyntexException(StoreError.TLS_CA_UNREADABLE, Map.of("path", caFile), e);
+        }
+    }
+
+    /**
+     * Builds trust managers trusting only the CA certificate(s) in {@code caFile} (a PEM file) — the
+     * self-signed local development chain — kept out of the JVM-wide trust store.
+     */
+    static TrustManager[] buildTrustManagers(String caFile) {
+        try {
+            CertificateFactory factory = CertificateFactory.getInstance("X.509");
+            KeyStore trust = KeyStore.getInstance(KeyStore.getDefaultType());
+            trust.load(null, null);
+            int index = 0;
+            try (InputStream in = Files.newInputStream(Path.of(caFile))) {
+                for (Certificate certificate : factory.generateCertificates(in)) {
+                    trust.setCertificateEntry("ca-" + index++, certificate);
+                }
+            }
+            if (index == 0) {
+                // A readable but cert-less PEM parses to zero anchors without throwing; a trust store
+                // with nothing in it would silently distrust every server, so it is an unusable CA file.
+                throw new CyntexException(StoreError.TLS_CA_UNREADABLE, Map.of("path", caFile), null);
+            }
+            TrustManagerFactory trustManagers =
+                    TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
+            trustManagers.init(trust);
+            return trustManagers.getTrustManagers();
+        } catch (GeneralSecurityException | IOException e) {
+            // The CA file is operator-supplied config; an unreadable or malformed one is a
+            // diagnosable misconfiguration, not a programmer bug. The path is a filesystem path,
+            // not a credential, so it is safe to echo back.
+            throw new CyntexException(StoreError.TLS_CA_UNREADABLE, Map.of("path", caFile), e);
+        }
     }
 
     @Override

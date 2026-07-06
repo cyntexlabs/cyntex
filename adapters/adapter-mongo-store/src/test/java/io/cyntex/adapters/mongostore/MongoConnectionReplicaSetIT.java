@@ -46,8 +46,11 @@ class MongoConnectionReplicaSetIT {
 
     @Test
     void verifySucceedsAgainstARealReplicaSet() {
+        // The Testcontainers Mongo speaks plaintext, so the plaintext connection is opted into
+        // explicitly; the self-signed TLS trust chain itself is witnessed in MongoConnectionTest,
+        // and a real Mongo-over-TLS run is exercised by the deploy TLS profile.
         MongoConnectionSettings settings = new MongoConnectionSettings(
-                REPLICA_SET.getReplicaSetUrl(), false, Duration.ofSeconds(5));
+                REPLICA_SET.getReplicaSetUrl(), true, null, Duration.ofSeconds(5));
         try (MongoConnection connection = new MongoConnection(settings)) {
             connection.verify();
         }
@@ -58,7 +61,7 @@ class MongoConnectionReplicaSetIT {
         try (GenericContainer<?> standalone = new GenericContainer<>(MONGO_IMAGE).withExposedPorts(27017)) {
             standalone.start();
             String uri = "mongodb://" + standalone.getHost() + ":" + standalone.getMappedPort(27017) + "/cyntex";
-            MongoConnectionSettings settings = new MongoConnectionSettings(uri, false, Duration.ofSeconds(5));
+            MongoConnectionSettings settings = new MongoConnectionSettings(uri, true, null, Duration.ofSeconds(5));
             try (MongoConnection connection = new MongoConnection(settings)) {
                 CyntexException ex = catchThrowableOfType(connection::verify, CyntexException.class);
                 assertThat(ex).as("a standalone server fails the replica-set check").isNotNull();

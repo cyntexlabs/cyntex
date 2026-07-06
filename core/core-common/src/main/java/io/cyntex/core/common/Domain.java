@@ -25,7 +25,12 @@ public enum Domain {
     ROLE,
     BOOT,
     // storage connectivity: reaching the backing store and its replica-set requirement (adapters)
-    STORE;
+    STORE,
+    // pdk bridge: loading, level-gating, driving and projecting a connector (adapters)
+    CONNECTOR,
+    // storage data-plane: operating on the backing store at runtime and reading its stored documents
+    // back — distinct from STORE, which polices reaching the store at startup (adapters)
+    IO;
 
     /** The lower-case identifier used as the {@code <domain>} segment of a canonical code. */
     public String id() {
