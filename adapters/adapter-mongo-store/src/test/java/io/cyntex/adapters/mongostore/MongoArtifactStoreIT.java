@@ -3,6 +3,7 @@ package io.cyntex.adapters.mongostore;
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoClients;
 import com.mongodb.client.MongoCollection;
+import io.cyntex.core.common.CyntexException;
 import io.cyntex.core.dsl.DslParser;
 import io.cyntex.core.model.Resource;
 import io.cyntex.core.model.canonical.CanonicalWriter;
@@ -17,7 +18,7 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.catchThrowable;
 
 /**
  * Witnesses the artifact truth layer against a real Mongo replica-set: a written artifact reads
@@ -112,7 +113,10 @@ class MongoArtifactStoreIT {
             // it, and the scan must not leak its server-side cursor on the failure path.
             collection.insertOne(new Document("_id", "corrupt").append("kind", "source").append("canonical", "not: [valid"));
 
-            assertThatThrownBy(store::list).isInstanceOf(RuntimeException.class);
+            Throwable thrown = catchThrowable(store::list);
+            assertThat(thrown).isInstanceOf(CyntexException.class);
+            assertThat(((CyntexException) thrown).code()).isEqualTo(IoError.DOCUMENT_UNREADABLE);
+            assertThat(((CyntexException) thrown).args()).containsEntry("id", "corrupt");
         });
     }
 

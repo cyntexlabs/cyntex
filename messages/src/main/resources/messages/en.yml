@@ -83,6 +83,15 @@ store.tls-required:
 store.tls-ca-unreadable:
   message: "The store TLS CA certificate file at {path} could not be read."
   solution: "Check the path points at a readable PEM certificate for the store's TLS chain."
+io.store-unavailable:
+  message: "A store operation could not complete: {detail}."
+  solution: "Check the store is reachable and healthy, then retry."
+io.store-unauthorized:
+  message: "The store rejected the credentials for the operation."
+  solution: "Check the store username and password in the connection settings."
+io.document-unreadable:
+  message: "A stored document with id '{id}' could not be read back."
+  solution: "The stored document is corrupt or was written by a newer version; inspect or restore it."
 connector.load-failed:
   message: "Connector '{connector}' could not be loaded."
   solution: "Check the connector jar and its dependencies are present and readable."

@@ -67,9 +67,10 @@ class MongoStateStoreIT {
             store.create(PIPELINE, "{\"state\":\"NEW\"}", T0);
             store.compareAndSwap(PIPELINE, 0, "{\"state\":\"RUNNING\"}", T0.plusSeconds(1)); // epoch -> 1
 
-            // a second seed must be refused: overwriting would reset the fencing epoch back to 0.
+            // a second seed must be refused: overwriting would reset the fencing epoch back to 0. The
+            // collision is a caller ordering error, surfaced bare like the unseeded-swap ordering error.
             assertThatThrownBy(() -> store.create(PIPELINE, "{\"state\":\"RESET\"}", T0.plusSeconds(2)))
-                    .isInstanceOf(RuntimeException.class);
+                    .isInstanceOf(IllegalStateException.class);
 
             CheckpointDoc stored = store.read(PIPELINE).orElseThrow();
             assertThat(stored.epoch()).isEqualTo(1L);

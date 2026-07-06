@@ -1,14 +1,19 @@
 package io.cyntex.adapters.mongostore;
 
+import com.mongodb.ErrorCategory;
+import com.mongodb.MongoException;
+import com.mongodb.MongoWriteException;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.model.FindOneAndUpdateOptions;
 import com.mongodb.client.model.ReturnDocument;
+import io.cyntex.core.common.CyntexException;
 import io.cyntex.core.lifecycle.CasOutcome;
 import io.cyntex.core.lifecycle.CheckpointDoc;
 import io.cyntex.spi.store.StateStore;
 import org.bson.Document;
 
 import java.time.Instant;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 
@@ -22,9 +27,10 @@ import java.util.Optional;
  * ({@code touchMillis}). The epoch alone decides the swap; the state and the timestamp never do, so a
  * lagging clock or a stale state view cannot corrupt the fencing decision.
  *
- * <p>Driver IO failures during read / create / swap are not yet translated into coded diagnostics;
- * that lands with the storage IO error domain. A create that collides with an existing checkpoint and
- * a swap on an unseeded pipeline are caller ordering errors, left to surface as-is.
+ * <p>Driver IO failures during read / create / swap are translated into coded io diagnostics, so no
+ * driver type escapes the module (rule R3). A create that collides with an existing checkpoint and a
+ * swap on an unseeded pipeline are caller ordering errors — surfaced bare (an {@code
+ * IllegalStateException}), not laundered into an io code that would hide the defect.
  */
 public final class MongoStateStore implements StateStore {
 
@@ -40,7 +46,7 @@ public final class MongoStateStore implements StateStore {
     @Override
     public Optional<CheckpointDoc> read(String pipelineId) {
         Objects.requireNonNull(pipelineId, "pipelineId");
-        Document document = collection.find(new Document("_id", pipelineId)).first();
+        Document document = StoreIo.call(() -> collection.find(new Document("_id", pipelineId)).first());
         return document == null ? Optional.empty() : Optional.of(toCheckpoint(document));
     }
 
@@ -48,7 +54,25 @@ public final class MongoStateStore implements StateStore {
     public void create(String pipelineId, String stateJson, Instant touchTime) {
         // Insert-only: insertOne fails on a duplicate _id, so a checkpoint that already exists is never
         // overwritten — overwriting would reset the fencing epoch that compareAndSwap maintains.
-        collection.insertOne(toDocument(CheckpointDoc.initial(pipelineId, stateJson, touchTime)));
+        Document document = toDocument(CheckpointDoc.initial(pipelineId, stateJson, touchTime));
+        try {
+            collection.insertOne(document);
+        } catch (MongoException e) {
+            throw classifyInsertFailure(e, pipelineId);
+        }
+    }
+
+    /**
+     * Classifies a failed seed insert: a duplicate {@code _id} is a caller ordering error (the pipeline
+     * was already seeded), surfaced bare like the unseeded-swap ordering error — not laundered into an
+     * io code that would hide it; any other driver failure is a coded io diagnostic.
+     */
+    static RuntimeException classifyInsertFailure(MongoException e, String pipelineId) {
+        if (e instanceof MongoWriteException write && write.getError().getCategory() == ErrorCategory.DUPLICATE_KEY) {
+            return new IllegalStateException(
+                    "create on an already-seeded pipeline: " + pipelineId + " (create is insert-only)", e);
+        }
+        return StoreIo.coded(e);
     }
 
     @Override
@@ -62,19 +86,19 @@ public final class MongoStateStore implements StateStore {
         Document update = new Document("$set",
                 new Document("stateJson", nextStateJson).append("touchMillis", touchTime.toEpochMilli()))
                 .append("$inc", new Document("epoch", 1L));
-        Document applied = collection.findOneAndUpdate(filter, update, RETURN_AFTER);
+        Document applied = StoreIo.call(() -> collection.findOneAndUpdate(filter, update, RETURN_AFTER));
         if (applied != null) {
             return new CasOutcome.Applied(toCheckpoint(applied));
         }
         // No document matched the expected epoch. Read back to tell a fenced writer (a newer epoch
         // superseded it) from an ordering error (the pipeline was never seeded). The fence itself was
         // already decided by the atomic update above; this read only supplies the diagnostic epoch.
-        Document current = collection.find(new Document("_id", pipelineId)).first();
+        Document current = StoreIo.call(() -> collection.find(new Document("_id", pipelineId)).first());
         if (current == null) {
             throw new IllegalStateException(
                     "compareAndSwap on an unseeded pipeline: " + pipelineId + " (create must seed it first)");
         }
-        return new CasOutcome.Fenced(current.getLong("epoch"));
+        return new CasOutcome.Fenced(toCheckpoint(current).epoch());
     }
 
     /** Maps a checkpoint to its stored document: the pipeline id as {@code _id}, the rest as fields. */
@@ -87,10 +111,15 @@ public final class MongoStateStore implements StateStore {
 
     /** Reconstructs a checkpoint from its stored document. */
     static CheckpointDoc toCheckpoint(Document document) {
-        return new CheckpointDoc(
-                document.getString("_id"),
-                document.getString("stateJson"),
-                document.getLong("epoch"),
-                Instant.ofEpochMilli(document.getLong("touchMillis")));
+        String id = document.getString("_id");
+        String stateJson = document.getString("stateJson");
+        Long epoch = document.getLong("epoch");
+        Long touchMillis = document.getLong("touchMillis");
+        if (stateJson == null || epoch == null || touchMillis == null) {
+            // A stored checkpoint missing a field this version requires is store corruption, surfaced
+            // as a coded io diagnostic rather than a bare unboxing crash while reconstructing.
+            throw new CyntexException(IoError.DOCUMENT_UNREADABLE, Map.of("id", String.valueOf(id)), null);
+        }
+        return new CheckpointDoc(id, stateJson, epoch, Instant.ofEpochMilli(touchMillis));
     }
 }

@@ -1,5 +1,6 @@
 package io.cyntex.adapters.mongostore;
 
+import io.cyntex.core.common.CyntexException;
 import io.cyntex.core.dsl.DslParser;
 import io.cyntex.core.model.Resource;
 import io.cyntex.core.model.canonical.CanonicalWriter;
@@ -9,6 +10,7 @@ import org.junit.jupiter.api.Test;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.catchThrowable;
 
 /**
  * The artifact-document codec is the round-trip core of the artifact truth layer: a resource is
@@ -119,6 +121,33 @@ class MongoArtifactStoreTest {
                     .as("a stored %s reconstructs to the same canonical form", fixture.label())
                     .isEqualTo(canonical);
         }
+    }
+
+    @Test
+    void toResourceOnAMissingCanonicalBodyIsDocumentUnreadable() {
+        Document corrupt = new Document("_id", "orders").append("kind", "source");
+
+        Throwable thrown = catchThrowable(() -> MongoArtifactStore.toResource(corrupt));
+
+        assertThat(thrown).isInstanceOf(CyntexException.class);
+        CyntexException coded = (CyntexException) thrown;
+        assertThat(coded.code()).isEqualTo(IoError.DOCUMENT_UNREADABLE);
+        assertThat(coded.args()).containsEntry("id", "orders");
+    }
+
+    @Test
+    void toResourceOnACorruptCanonicalBodyIsDocumentUnreadable() {
+        // A stored body that no longer parses (corruption, or a newer grammar) surfaces as a storage io
+        // diagnostic — not a leaked authoring (dsl.*) code for a document the user never authored.
+        Document corrupt =
+                new Document("_id", "orders").append("kind", "source").append("canonical", "not: [valid");
+
+        Throwable thrown = catchThrowable(() -> MongoArtifactStore.toResource(corrupt));
+
+        assertThat(thrown).isInstanceOf(CyntexException.class);
+        CyntexException coded = (CyntexException) thrown;
+        assertThat(coded.code()).isEqualTo(IoError.DOCUMENT_UNREADABLE);
+        assertThat(coded.args()).containsEntry("id", "orders");
     }
 
     /** Normalizes raw YAML to its canonical form (the form the store persists). */

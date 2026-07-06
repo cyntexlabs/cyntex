@@ -13,10 +13,10 @@
   <artifactId>adapter-mongo-store</artifactId>
   <name>Cyntex :: Adapters :: Mongo Store</name>
   <!-- The only module allowed to depend on the Mongo driver (rule R3). At L1 it carries the
-       connection substrate: opening a client, verifying the target is reachable and is a replica
-       set (the compare-and-swap transaction requires one), and translating driver failures into
-       coded diagnostics. The production compare-and-swap store implementation lands later. -->
-  <description>MongoDB storage adapter: the connection substrate (reach + replica-set check + coded diagnostics), the artifact truth-layer store (canonical save / get / list), and the CAS state store (epoch-fencing compare-and-swap on the pipeline checkpoint)</description>
+       connection substrate (reach + replica-set check), the three storage-port sub-stores (artifact
+       truth layer, epoch-fencing CAS state, connection catalog), and the single point that
+       translates driver failures into coded diagnostics, so no driver type escapes the module. -->
+  <description>MongoDB storage adapter: the connection substrate (reach + replica-set check + coded diagnostics), the artifact truth-layer store (canonical save / get / list), the CAS state store (epoch-fencing compare-and-swap on the pipeline checkpoint), and the connection catalog store (structured connection configs), with driver failures translated into io-domain coded diagnostics</description>
 
   <dependencies>
     <!-- The error-code contract: this module raises coded diagnostics (store.* domain) when the

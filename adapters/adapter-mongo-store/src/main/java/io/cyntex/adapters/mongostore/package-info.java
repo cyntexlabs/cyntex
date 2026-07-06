@@ -1,9 +1,9 @@
 /**
  * MongoDB implementation of the storage port.
  *
- * <p>Placeholder package reserving the module. This is the only place allowed to depend on
- * the Mongo driver (rule R3); the driver dependency and the real compare-and-swap
- * transaction (the lifecycle persistence contract's backend) are added when the store
- * implementation lands.
+ * <p>This is the only place allowed to depend on the Mongo driver (rule R3). It carries the
+ * connection substrate and the three storage-port sub-stores — the artifact truth layer, the
+ * epoch-fencing CAS state store, and the connection catalog — plus the single point that translates
+ * driver failures into io-domain coded diagnostics, so no driver type escapes the package.
  */
 package io.cyntex.adapters.mongostore;
