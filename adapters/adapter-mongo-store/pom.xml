@@ -16,7 +16,7 @@
        connection substrate: opening a client, verifying the target is reachable and is a replica
        set (the compare-and-swap transaction requires one), and translating driver failures into
        coded diagnostics. The production compare-and-swap store implementation lands later. -->
-  <description>MongoDB storage adapter: the connection substrate (reach + replica-set check + coded diagnostics) and the artifact truth-layer store (canonical save / get / list); the CAS state store lands later</description>
+  <description>MongoDB storage adapter: the connection substrate (reach + replica-set check + coded diagnostics), the artifact truth-layer store (canonical save / get / list), and the CAS state store (epoch-fencing compare-and-swap on the pipeline checkpoint)</description>
 
   <dependencies>
     <!-- The error-code contract: this module raises coded diagnostics (store.* domain) when the
@@ -62,13 +62,13 @@
       <artifactId>assertj-core</artifactId>
       <scope>test</scope>
     </dependency>
-    <!-- The checkpoint CAS contract (pure), witnessed against a real Mongo replica-set in the
-         Testcontainers test so the contract cannot drift from real findOneAndUpdate behavior. -->
+    <!-- The checkpoint + fencing-CAS contract (pure) the state store persists and returns
+         (CheckpointDoc / CasOutcome). The Testcontainers witness also runs the pure contract beside a
+         real Mongo replica-set so the two cannot drift from real findOneAndUpdate behavior. -->
     <dependency>
       <groupId>io.cyntex</groupId>
       <artifactId>core-lifecycle</artifactId>
       <version>${revision}</version>
-      <scope>test</scope>
     </dependency>
     <!-- Testcontainers: a throwaway Mongo replica-set (and a standalone, to witness the
          not-a-replica-set diagnostic). Skipped automatically where Docker is absent. -->
