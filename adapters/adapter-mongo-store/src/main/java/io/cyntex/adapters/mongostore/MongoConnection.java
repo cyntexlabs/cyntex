@@ -5,6 +5,7 @@ import com.mongodb.MongoClientSettings;
 import com.mongodb.MongoException;
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoClients;
+import com.mongodb.client.MongoDatabase;
 import io.cyntex.core.common.CyntexException;
 
 import java.io.IOException;
@@ -37,8 +38,12 @@ import org.bson.Document;
  */
 public final class MongoConnection implements AutoCloseable {
 
+    /** The database used when the connection URI names none. */
+    private static final String DEFAULT_DATABASE = "cyntex";
+
     private final MongoConnectionSettings settings;
     private MongoClient client;
+    private String databaseName;
 
     public MongoConnection(MongoConnectionSettings settings) {
         this.settings = Objects.requireNonNull(settings, "settings");
@@ -62,6 +67,9 @@ public final class MongoConnection implements AutoCloseable {
             // Carry no detail — the raw URI could embed a credential.
             throw new CyntexException(StoreError.INVALID_URI, Map.of(), e);
         }
+        // The store database is the one named in the URI, falling back to the default when it names
+        // none. Resolved here from the same URI the client uses, so database() reflects the target.
+        this.databaseName = resolveDatabaseName(connectionString);
         String target = String.join(",", connectionString.getHosts());
         // A secure TLS connection to the store is mandatory: a URI that would reach it insecurely —
         // plaintext (ssl=false), or with certificate/hostname verification disabled (tlsInsecure /
@@ -89,6 +97,26 @@ public final class MongoConnection implements AutoCloseable {
             throw new CyntexException(StoreError.NOT_REPLICA_SET, Map.of("target", target), null);
         }
         this.client = opened;
+    }
+
+    /**
+     * The verified store database — the one named in the connection URI (falling back to the default
+     * when the URI names none). Package-private on purpose: the store adapter binds its collections on
+     * it, so a driver type stays inside the module and never reaches the module's public surface.
+     * Must be called after {@link #verify()} has opened the client.
+     */
+    MongoDatabase database() {
+        if (client == null) {
+            // Called before verify() opened the client: an assembly ordering error, i.e. a programmer
+            // bug. It crashes bare with a stack rather than being laundered into a coded diagnostic.
+            throw new IllegalStateException("store connection not verified");
+        }
+        return client.getDatabase(databaseName);
+    }
+
+    /** The database named in the connection string, or the default when it names none. */
+    static String resolveDatabaseName(ConnectionString connectionString) {
+        return connectionString.getDatabase() != null ? connectionString.getDatabase() : DEFAULT_DATABASE;
     }
 
     /**

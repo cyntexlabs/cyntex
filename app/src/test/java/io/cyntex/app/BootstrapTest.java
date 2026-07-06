@@ -1,6 +1,6 @@
 package io.cyntex.app;
 
-import io.cyntex.adapters.mongostore.MongoStoreAdapter;
+import io.cyntex.adapters.mongostore.MongoStorePort;
 import io.cyntex.adapters.pdk.PdkAdapter;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.SpringBootVersion;
@@ -51,7 +51,10 @@ class BootstrapTest {
 
     @Test
     void assemblyRootRecordsTheAdapterBridges() {
+        // The Mongo store bridge is now really engaged (StoreConfiguration wires a StorePort bean from
+        // MongoStorePort); the PDK bridge remains a placeholder marker until its runtime lands. Both are
+        // referenced here only from the assembly root — the R7 exemption made real.
         assertThat(Bootstrap.adapterBridges())
-                .containsExactly(PdkAdapter.class, MongoStoreAdapter.class);
+                .containsExactly(PdkAdapter.class, MongoStorePort.class);
     }
 }

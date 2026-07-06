@@ -3,6 +3,7 @@ package io.cyntex.app;
 import io.cyntex.adapters.mongostore.MongoConnection;
 import io.cyntex.adapters.mongostore.StoreError;
 import io.cyntex.core.common.CyntexException;
+import io.cyntex.spi.store.StorePort;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 
@@ -66,11 +67,13 @@ class StoreStartupTest {
     }
 
     @Test
-    void disabledStartsWithoutAStoreConnection() {
+    void disabledStartsWithoutAStoreConnectionOrPort() {
         runner.withPropertyValues("cyntex.store.mongo.enabled=false")
                 .run(context -> {
                     assertThat(context).hasNotFailed();
                     assertThat(context).doesNotHaveBean(MongoConnection.class);
+                    // The StorePort is gated on the same switch: no store means no port either.
+                    assertThat(context).doesNotHaveBean(StorePort.class);
                 });
     }
 

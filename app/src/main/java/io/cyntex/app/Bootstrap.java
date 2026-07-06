@@ -1,6 +1,6 @@
 package io.cyntex.app;
 
-import io.cyntex.adapters.mongostore.MongoStoreAdapter;
+import io.cyntex.adapters.mongostore.MongoStorePort;
 import io.cyntex.adapters.pdk.PdkAdapter;
 import io.cyntex.core.common.CyntexException;
 import io.cyntex.core.common.Severity;
@@ -18,8 +18,10 @@ import java.util.List;
  * conditional per-role wiring of the service rings lands later.
  *
  * <p>This is the only non-adapter module permitted to depend on the adapters ring (rule R7): the
- * assembly root is where the adapter bridges are bound into the runtime. At L1 the bridges are
- * placeholders, so {@link #adapterBridges()} records the wiring surface without engaging it.
+ * assembly root is where the adapter bridges are bound into the runtime. The store bridge is engaged
+ * here — {@link StoreConfiguration} wires a {@code StorePort} from {@link MongoStorePort}; the PDK
+ * bridge is still a placeholder marker until its runtime lands. {@link #adapterBridges()} records
+ * both, so the wiring surface is referenced only from the assembly root.
  *
  * <p>The Mongo driver is on the classpath (through the store adapter), but the framework must not
  * stand up its own, unmanaged store client — the only store client is the controlled
@@ -56,10 +58,11 @@ public class Bootstrap {
 
     /**
      * The adapter bridges the assembly root binds into the runtime under {@code --role=all}. The app
-     * is the only non-adapter module allowed to depend on the adapters ring (rule R7); the bridges
-     * are placeholders at L1, so this records the wiring surface without engaging it.
+     * is the only non-adapter module allowed to depend on the adapters ring (rule R7). The store
+     * bridge ({@link MongoStorePort}) is engaged through {@link StoreConfiguration}; the PDK bridge
+     * ({@link PdkAdapter}) is a placeholder marker until its runtime lands.
      */
     static List<Class<?>> adapterBridges() {
-        return List.of(PdkAdapter.class, MongoStoreAdapter.class);
+        return List.of(PdkAdapter.class, MongoStorePort.class);
     }
 }
