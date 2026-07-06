@@ -77,9 +77,6 @@ store.not-replica-set:
 store.invalid-uri:
   message: "The store connection string is not a valid MongoDB URI."
   solution: "Check the store URI setting; it must start with mongodb:// or mongodb+srv://."
-store.tls-required:
-  message: "A secure TLS connection to the store at {target} is required, but the connection settings would be insecure."
-  solution: "Use TLS with certificate verification, or set the explicit insecure downgrade if an insecure connection is truly intended."
 store.tls-ca-unreadable:
   message: "The store TLS CA certificate file at {path} could not be read."
   solution: "Check the path points at a readable PEM certificate for the store's TLS chain."

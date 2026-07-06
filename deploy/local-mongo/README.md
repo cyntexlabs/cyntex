@@ -27,15 +27,15 @@ docker compose -f deploy/local-mongo/docker-compose.yml down        # keep data
 docker compose -f deploy/local-mongo/docker-compose.yml down -v     # drop data
 ```
 
-This plaintext set is for convenience only. The store connection makes **TLS mandatory** — pointed at
-this set the server refuses to connect unless plaintext is explicitly opted into with
-`cyntex.store.mongo.allow-insecure=true`. Prefer the TLS set below for anything resembling a real run.
+This plaintext set is for local development convenience. **TLS is opt-in**: the server connects to
+this set over plaintext with no extra flag (it is the server's default store URI). For anything
+resembling a real run, use the TLS set below.
 
-## TLS set (mandatory-TLS path)
+## TLS set (opt-in TLS path)
 
-The store connection requires TLS by default; a plaintext connection is refused rather than silently
-allowed. `docker-compose.tls.yml` runs the same single-node replica-set with `requireTLS`, presenting
-a self-signed chain the client trusts explicitly — the local development analogue of a real TLS store.
+TLS is opt-in: the server connects in plaintext unless the URI asks for TLS with `ssl=true`.
+`docker-compose.tls.yml` runs the same single-node replica-set with `requireTLS`, presenting a
+self-signed chain the client trusts explicitly — the local development analogue of a real TLS store.
 
 ```sh
 deploy/local-mongo/tls/gen-certs.sh                                     # once: self-signed CN=localhost chain
@@ -43,11 +43,11 @@ docker compose -f deploy/local-mongo/docker-compose.tls.yml up -d
 docker inspect --format '{{.State.Health.Status}}' cyntex-mongo-rs-tls  # wait until healthy
 ```
 
-Point the server at it — TLS is on by default (no `allow-insecure`), and the self-signed CA is trusted
-via `tls-ca-file`:
+Point the server at it — ask for TLS in the URI with `ssl=true`, and trust the self-signed CA via
+`tls-ca-file`:
 
 ```
-cyntex.store.mongo.uri=mongodb://localhost:27017/cyntex?replicaSet=rs0
+cyntex.store.mongo.uri=mongodb://localhost:27017/cyntex?replicaSet=rs0&ssl=true
 cyntex.store.mongo.tls-ca-file=deploy/local-mongo/tls/ca.pem
 ```
 

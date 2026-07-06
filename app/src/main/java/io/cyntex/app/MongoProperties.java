@@ -15,20 +15,16 @@ public class MongoProperties {
     /** Whether to connect to the store at startup. Off only where the store is intentionally absent. */
     private boolean enabled = true;
 
-    /** A {@code mongodb://} connection string carrying the host(s), default database and replica-set. */
+    /**
+     * A {@code mongodb://} connection string carrying the host(s), default database and replica-set.
+     * TLS is opt-in: the connection is plaintext unless the URI asks for TLS with {@code ssl=true}.
+     */
     private String uri = "mongodb://localhost:27017/cyntex?replicaSet=rs0";
 
     /**
-     * The explicit downgrade permitting a plaintext store connection. Off by default: TLS to the
-     * store is mandatory, so a configuration that would reach it over plaintext is refused rather
-     * than silently allowed. Turn it on only to deliberately reach a plaintext store (a local
-     * development one, say).
-     */
-    private boolean allowInsecure = false;
-
-    /**
-     * An optional path to a PEM CA certificate to trust for the store's TLS handshake — the local
-     * development self-signed chain. Unset falls back to the JVM default trust store.
+     * An optional path to a PEM CA certificate to trust for the store's TLS handshake — a self-signed
+     * chain. Consulted only when TLS is enabled via the URI; unset falls back to the JVM default trust
+     * store.
      */
     private String tlsCaFile;
 
@@ -49,14 +45,6 @@ public class MongoProperties {
 
     public void setUri(String uri) {
         this.uri = uri;
-    }
-
-    public boolean isAllowInsecure() {
-        return allowInsecure;
-    }
-
-    public void setAllowInsecure(boolean allowInsecure) {
-        this.allowInsecure = allowInsecure;
     }
 
     public String getTlsCaFile() {

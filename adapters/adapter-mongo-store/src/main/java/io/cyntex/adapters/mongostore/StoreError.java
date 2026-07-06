@@ -31,16 +31,9 @@ public enum StoreError implements CyntexErrorCode {
     INVALID_URI("store.invalid-uri", Set.of()),
 
     /**
-     * The connection settings would reach the store insecurely — plaintext (TLS turned off) or with
-     * certificate/hostname verification disabled — without an explicit insecure downgrade. A secure
-     * TLS connection is mandatory; an insecure one is refused up front rather than silently allowed.
-     * {@code target} is the connection target.
-     */
-    TLS_REQUIRED("store.tls-required", Set.of("target")),
-
-    /**
      * The configured TLS CA certificate file could not be read or parsed. {@code path} is the CA
-     * file path (a filesystem path, not a credential, so it is safe to echo back).
+     * file path (a filesystem path, not a credential, so it is safe to echo back). Reached only when
+     * TLS is enabled (opt-in via the URI) and a CA file is configured.
      */
     TLS_CA_UNREADABLE("store.tls-ca-unreadable", Set.of("path"));
 

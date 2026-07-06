@@ -9,8 +9,8 @@
 # Bring it up with:
 #   ./tls/gen-certs.sh
 #   docker compose -f docker-compose.tls.yml up
-# then point the server at it (TLS is on by default, so no allow-insecure):
-#   cyntex.store.mongo.uri=mongodb://localhost:27017/cyntex?replicaSet=rs0
+# then point the server at it (TLS is opt-in, so ask for it with ssl=true):
+#   cyntex.store.mongo.uri=mongodb://localhost:27017/cyntex?replicaSet=rs0&ssl=true
 #   cyntex.store.mongo.tls-ca-file=deploy/local-mongo/tls/ca.pem
 #
 # Development only; not the production deployment.
