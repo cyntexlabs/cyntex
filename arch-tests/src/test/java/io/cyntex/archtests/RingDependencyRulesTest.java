@@ -70,7 +70,7 @@ class RingDependencyRulesTest {
     }
 
     @Test
-    @DisplayName("R2: spi ring depends only on core (placeholder; idle until spi modules exist)")
+    @DisplayName("R2: spi ring depends only on core")
     void r2_spiRingOnlyDependsOnCore() {
         classes().that().resideInAPackage("io.cyntex.spi..")
                 .should().onlyDependOnClassesThat().resideInAnyPackage(
