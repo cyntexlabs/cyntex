@@ -129,6 +129,23 @@
         <artifactId>error_prone_annotations</artifactId>
         <version>2.38.0</version>
       </dependency>
+      <!-- Convergence pins bridging the cel closure and the PDK/tapdata closure. The two are first
+           brought onto one graph at the app assembly root: the store adapter pulls cel through the
+           canonical parser (an artifact is reconstructed from its canonical form on read), while the
+           PDK adapter pulls the tapdata stack. Their transitive guava skews (33.4.8 via cel, 33.4.0
+           via the tapdata stack), as does jsr305 (3.0.2 via the PDK error-code scanner, 3.0.1 via
+           cel). Pin the higher of each so dependencyConvergence stays green — both are annotation /
+           utility libraries and the bump is patch-level, no runtime behavior change. -->
+      <dependency>
+        <groupId>com.google.guava</groupId>
+        <artifactId>guava</artifactId>
+        <version>33.4.8-jre</version>
+      </dependency>
+      <dependency>
+        <groupId>com.google.code.findbugs</groupId>
+        <artifactId>jsr305</artifactId>
+        <version>3.0.2</version>
+      </dependency>
       <dependency>
         <groupId>com.tngtech.archunit</groupId>
         <artifactId>archunit-junit5</artifactId>

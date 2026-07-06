@@ -16,7 +16,7 @@
        connection substrate: opening a client, verifying the target is reachable and is a replica
        set (the compare-and-swap transaction requires one), and translating driver failures into
        coded diagnostics. The production compare-and-swap store implementation lands later. -->
-  <description>MongoDB storage adapter: the connection substrate (reach + replica-set check + coded diagnostics); the CAS store implementation lands later</description>
+  <description>MongoDB storage adapter: the connection substrate (reach + replica-set check + coded diagnostics) and the artifact truth-layer store (canonical save / get / list); the CAS state store lands later</description>
 
   <dependencies>
     <!-- The error-code contract: this module raises coded diagnostics (store.* domain) when the
@@ -25,6 +25,25 @@
     <dependency>
       <groupId>io.cyntex</groupId>
       <artifactId>core-common</artifactId>
+      <version>${revision}</version>
+    </dependency>
+    <!-- The storage port this adapter implements: the artifact truth layer (save / get / list). -->
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>spi-store</artifactId>
+      <version>${revision}</version>
+    </dependency>
+    <!-- The resource model and its canonical serializer: an artifact is stored in canonical form. -->
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>core-model</artifactId>
+      <version>${revision}</version>
+    </dependency>
+    <!-- The canonical parser (the inverse of the canonical writer): reconstructs a stored resource
+         from its canonical form on read, so the store keeps a single serialization contract. -->
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>core-dsl</artifactId>
       <version>${revision}</version>
     </dependency>
     <!-- The Mongo sync driver. Rule R3: this is the only module permitted to depend on it. -->
