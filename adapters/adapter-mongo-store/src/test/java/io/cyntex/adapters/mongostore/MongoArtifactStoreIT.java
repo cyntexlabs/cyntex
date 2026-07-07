@@ -3,6 +3,7 @@ package io.cyntex.adapters.mongostore;
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoClients;
 import com.mongodb.client.MongoCollection;
+import com.mongodb.client.model.IndexOptions;
 import io.cyntex.core.common.CyntexException;
 import io.cyntex.core.dsl.DslParser;
 import io.cyntex.core.model.Resource;
@@ -24,7 +25,8 @@ import static org.assertj.core.api.Assertions.catchThrowable;
  * Witnesses the artifact truth layer against a real Mongo replica-set: a written artifact reads
  * back to the same canonical form, an absent id reads back empty, list returns every stored
  * artifact, a re-save of the same id replaces in place (last write wins) rather than accumulating
- * documents, and a stored document that cannot be reconstructed is surfaced (not silently skipped)
+ * documents, a batch write commits atomically and rolls the whole batch back on a mid-batch write
+ * failure, and a stored document that cannot be reconstructed is surfaced (not silently skipped)
  * without leaking the scan cursor. Skipped automatically where Docker is absent, so a Docker-less
  * build stays green.
  */
@@ -105,6 +107,42 @@ class MongoArtifactStoreIT {
     }
 
     @Test
+    void saveAllCommitsTheWholeBatchAtomically() {
+        withStore((store, collection) -> {
+            store.saveAll(List.of(PARSER.parse(ORDERS), PARSER.parse(ORDERS_SYNC)));
+
+            assertThat(store.list())
+                    .extracting(Resource::id)
+                    .containsExactlyInAnyOrder("orders", "orders_sync");
+        });
+    }
+
+    @Test
+    void saveAllRollsBackTheWholeBatchOnAWriteFailure() {
+        withStore((store, collection) -> {
+            // Force a genuine mid-transaction write error: a unique index on the (non-unique-in-reality)
+            // kind field makes the second same-kind upsert in the batch collide, so the driver fails the
+            // write inside the transaction. The whole batch must then roll back — not even the first,
+            // earlier-ordered resource is left behind.
+            collection.createIndex(new Document("kind", 1), new IndexOptions().unique(true));
+            String orders2 = """
+                    version: cyntex/v1
+                    kind: source
+                    id: orders2
+                    connector: mysql
+                    config:
+                      host: localhost
+                    """;
+
+            Throwable thrown = catchThrowable(() ->
+                    store.saveAll(List.of(PARSER.parse(ORDERS), PARSER.parse(orders2))));
+
+            assertThat(thrown).isInstanceOf(CyntexException.class);
+            assertThat(store.list()).as("the whole batch rolled back — nothing was stored").isEmpty();
+        });
+    }
+
+    @Test
     void listSurfacesAnUnreadableStoredDocument() {
         withStore((store, collection) -> {
             store.save(PARSER.parse(ORDERS));
@@ -129,7 +167,7 @@ class MongoArtifactStoreIT {
         try (MongoClient client = MongoClients.create(REPLICA_SET.getReplicaSetUrl())) {
             MongoCollection<Document> collection = client.getDatabase("cyntex").getCollection("artifacts");
             collection.drop();
-            test.run(new MongoArtifactStore(collection), collection);
+            test.run(new MongoArtifactStore(client, collection), collection);
         }
     }
 }

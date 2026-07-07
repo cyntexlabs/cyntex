@@ -298,8 +298,8 @@ class ApplyServiceTest {
     @Test
     void anInvalidResourceInTheBatchAbortsBeforeAnyWrite() {
         // Validation runs over the whole batch before any upsert, so an invalid member leaves the store
-        // untouched — no partial write. (Mid-batch write-failure atomicity is a later concern; this
-        // asserts only the validation-failure guarantee.)
+        // untouched — no partial write. This is the validation-failure half of atomic batch; the
+        // write-failure half is asserted by aWriteFailureMidBatchLeavesTheStoreUnchanged.
         String bad = TGT_MY + "bogus_field: 1\n";
 
         Throwable t = catchThrowable(() -> service.apply(List.of(draft(SRC_ORA), draft(bad))));
@@ -307,6 +307,57 @@ class ApplyServiceTest {
         assertThat(t).isInstanceOf(DslException.class);
         assertThat(store.saveCount).as("a validation failure writes nothing").isZero();
         assertThat(store.get("src_ora")).isEmpty();
+    }
+
+    // ---- atomic batch: a write failure mid-batch rolls the whole batch back ----
+
+    @Test
+    void aWriteFailureMidBatchLeavesTheStoreUnchanged() {
+        // Both resources are valid, so the batch reaches the write phase; the store then fails on the
+        // second write. Because apply hands the whole changed set to one atomic saveAll, the failure
+        // rolls the batch back and nothing is stored — not even the first, earlier-ordered resource.
+        store.failOnId = "tgt_my";
+
+        Throwable t = catchThrowable(() -> service.apply(List.of(draft(SRC_ORA), draft(TGT_MY))));
+
+        assertThat(t).isInstanceOf(RuntimeException.class);
+        assertThat(store.get("src_ora")).as("the earlier-ordered write is rolled back, not left partial").isEmpty();
+        assertThat(store.get("tgt_my")).isEmpty();
+        assertThat(store.list()).isEmpty();
+    }
+
+    @Test
+    void applyWritesTheChangedSetAsOneAtomicBatch() {
+        // Two new resources in one apply are written as a single atomic batch, not one write per
+        // artifact: the store records exactly one batch carrying both ids in submission order.
+        service.apply(List.of(draft(SRC_ORA), draft(TGT_MY)));
+
+        assertThat(store.saveAllBatches).containsExactly(List.of("src_ora", "tgt_my"));
+    }
+
+    @Test
+    void applyExcludesUnchangedResourcesFromTheWriteBatch() {
+        // Seed tgt_my, then apply [tgt_my unchanged, src_ora new]: the one atomic batch carries only the
+        // new resource — the unchanged one is not rewritten.
+        service.apply(List.of(draft(TGT_MY)));
+
+        service.apply(List.of(draft(TGT_MY), draft(SRC_ORA_STANDALONE)));
+
+        assertThat(store.saveAllBatches).containsExactly(List.of("tgt_my"), List.of("src_ora"));
+    }
+
+    @Test
+    void anAllNoOpBatchPerformsNoWrite() {
+        // A batch whose every member is unchanged writes nothing: the changed set is empty, so the one
+        // atomic batch apply performs carries no resources.
+        service.apply(List.of(draft(SRC_ORA), draft(TGT_MY)));
+        int writesAfterSeed = store.saveCount;
+
+        ApplyResult result = service.apply(List.of(draft(SRC_ORA), draft(TGT_MY)));
+
+        assertThat(result.outcomes()).extracting(ArtifactOutcome::change)
+                .containsOnly(ArtifactOutcome.Change.UNCHANGED);
+        assertThat(store.saveCount).as("a wholly-unchanged batch writes nothing further").isEqualTo(writesAfterSeed);
     }
 
     // ---- fixtures ----
@@ -343,20 +394,35 @@ class ApplyServiceTest {
 
     /**
      * An in-memory {@link ArtifactStore} that mirrors the Mongo store's canonical round-trip — it holds
-     * each artifact as its canonical text and reconstructs it on read through the parser — and counts
-     * writes so a test can assert the no-op performs no store write.
+     * each artifact as its canonical text and reconstructs it on read through the parser — and models
+     * the store's atomic batch write: {@code saveAll} stages the whole batch and commits it only if none
+     * of it is the injected poison id, so a mid-batch failure leaves nothing written, exactly as the
+     * real transaction does. It records each batch (by id) and counts resources written so a test can
+     * assert the write set and that a no-op performs no store write.
      */
     private static final class RecordingArtifactStore implements ArtifactStore {
 
         private final CanonicalWriter writer = new CanonicalWriter();
         private final DslParser parser = new DslParser();
         private final Map<String, String> byId = new LinkedHashMap<>();
+        private final List<List<String>> saveAllBatches = new ArrayList<>();
         private int saveCount = 0;
+        private String failOnId = null;
 
         @Override
-        public void save(Resource artifact) {
-            saveCount++;
-            byId.put(artifact.id(), writer.write(artifact));
+        public void saveAll(List<Resource> artifacts) {
+            // Atomic: stage the whole batch, then commit it in one step — but if any member is the
+            // injected poison, fail before committing anything, so no partial batch survives.
+            Map<String, String> staged = new LinkedHashMap<>();
+            for (Resource artifact : artifacts) {
+                if (artifact.id().equals(failOnId)) {
+                    throw new RuntimeException("simulated store write failure at " + failOnId);
+                }
+                staged.put(artifact.id(), writer.write(artifact));
+            }
+            byId.putAll(staged);
+            saveCount += artifacts.size();
+            saveAllBatches.add(artifacts.stream().map(Resource::id).toList());
         }
 
         @Override

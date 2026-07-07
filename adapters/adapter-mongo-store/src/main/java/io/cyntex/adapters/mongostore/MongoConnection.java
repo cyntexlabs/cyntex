@@ -104,6 +104,19 @@ public final class MongoConnection implements AutoCloseable {
         return client.getDatabase(databaseName);
     }
 
+    /**
+     * The verified store client — the source of the sessions a store opens for its multi-document
+     * transactions. Package-private on purpose, like {@link #database()}: a driver type stays inside the
+     * module and never reaches the module's public surface. Must be called after {@link #verify()} has
+     * opened the client.
+     */
+    MongoClient client() {
+        if (client == null) {
+            throw new IllegalStateException("store connection not verified");
+        }
+        return client;
+    }
+
     /** The database named in the connection string, or the default when it names none. */
     static String resolveDatabaseName(ConnectionString connectionString) {
         return connectionString.getDatabase() != null ? connectionString.getDatabase() : DEFAULT_DATABASE;

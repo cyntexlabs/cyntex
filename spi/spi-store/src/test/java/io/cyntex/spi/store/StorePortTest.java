@@ -78,6 +78,28 @@ class StorePortTest {
         assertThat(artifacts.list()).extracting(Resource::id).containsExactlyInAnyOrder("orders", "mdm");
     }
 
+    @Test
+    void artifactSaveAllUpsertsEveryResourceById() {
+        ArtifactStore artifacts = new InMemoryStore().artifacts();
+
+        artifacts.saveAll(List.of(source("orders", "mysql"), new ViewResource("mdm", null, null, null, null, null)));
+
+        assertThat(artifacts.list()).extracting(Resource::id).containsExactlyInAnyOrder("orders", "mdm");
+        // A second batch upserts by id in place rather than accumulating documents.
+        artifacts.saveAll(List.of(source("orders", "postgres")));
+        assertThat(((SourceResource) artifacts.get("orders").orElseThrow()).connector()).isEqualTo("postgres");
+        assertThat(artifacts.list()).hasSize(2);
+    }
+
+    @Test
+    void artifactSaveAllOfAnEmptyBatchWritesNothing() {
+        ArtifactStore artifacts = new InMemoryStore().artifacts();
+
+        artifacts.saveAll(List.of());
+
+        assertThat(artifacts.list()).isEmpty();
+    }
+
     // --- state (the epoch-fencing compare-and-swap) ---
 
     @Test
@@ -174,8 +196,12 @@ class StorePortTest {
         public ArtifactStore artifacts() {
             return new ArtifactStore() {
                 @Override
-                public void save(Resource artifact) {
-                    artifacts.put(artifact.id(), artifact);
+                public void saveAll(List<Resource> batch) {
+                    // atomic in spirit: the map puts cannot fail partway, so either the batch is applied
+                    // in full or (never, here) not at all.
+                    for (Resource artifact : batch) {
+                        artifacts.put(artifact.id(), artifact);
+                    }
                 }
 
                 @Override

@@ -34,8 +34,9 @@ public final class MongoStorePort implements StorePort {
      * one client and are closed with it when the connection closes.
      */
     public MongoStorePort(MongoConnection connection) {
-        MongoDatabase database = Objects.requireNonNull(connection, "connection").database();
-        this.artifacts = new MongoArtifactStore(database.getCollection(ARTIFACTS));
+        Objects.requireNonNull(connection, "connection");
+        MongoDatabase database = connection.database();
+        this.artifacts = new MongoArtifactStore(connection.client(), database.getCollection(ARTIFACTS));
         this.state = new MongoStateStore(database.getCollection(PIPELINE_STATE));
         this.catalog = new MongoCatalogStore(database.getCollection(CONNECTIONS));
     }

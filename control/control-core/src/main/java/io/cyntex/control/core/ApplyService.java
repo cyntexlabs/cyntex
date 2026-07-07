@@ -27,8 +27,9 @@ import java.util.Optional;
  * submitted set. The union with store-resident artifacts is layered in where the store is consulted.
  *
  * <p>The no-op is keyed by the content hash over the canonical form, so re-applying identical content
- * — even with different raw key order — writes nothing. Apply upserts each artifact independently;
- * all-or-nothing write-failure atomicity across a batch is a later concern, not modelled here.
+ * — even with different raw key order — writes nothing. Apply writes the changed set — the created and
+ * updated artifacts — as one atomic batch, so a mid-batch write failure rolls the whole batch back and
+ * no partial batch is stored, matching the validation-failure guarantee on the write side.
  */
 public final class ApplyService {
 
@@ -63,33 +64,34 @@ public final class ApplyService {
     }
 
     /**
-     * Validates the batch (via {@link #plan}) and then upserts each artifact into the store by its id,
-     * returning one outcome per artifact in submission order. An artifact whose stored content hash
-     * already equals the applied one is a no-op (no write). A validation failure throws the first
-     * {@link DslException} before any write, so nothing is stored on an invalid batch.
+     * Validates the batch (via {@link #plan}), then writes the changed set — created and updated
+     * artifacts — into the store as one atomic batch, returning one outcome per artifact in submission
+     * order. An artifact whose stored content hash already equals the applied one is a no-op and is left
+     * out of the batch. A validation failure throws the first {@link DslException} before any write, and
+     * a store write failure rolls the whole batch back, so nothing is stored on an invalid or a failed
+     * batch.
      */
     public ApplyResult apply(List<ArtifactDraft> drafts) {
         ApplyPlan plan = plan(drafts);
         List<ArtifactOutcome> outcomes = new ArrayList<>();
+        List<Resource> toWrite = new ArrayList<>();
         for (PreparedArtifact prepared : plan.artifacts()) {
-            outcomes.add(upsert(prepared));
+            Optional<Resource> existing = store.get(prepared.id());
+            ArtifactOutcome.Change change;
+            if (existing.isEmpty()) {
+                change = ArtifactOutcome.Change.CREATED;
+                toWrite.add(prepared.resource());
+            } else if (storedHash(existing.get()).equals(prepared.contentHash())) {
+                change = ArtifactOutcome.Change.UNCHANGED;
+            } else {
+                change = ArtifactOutcome.Change.UPDATED;
+                toWrite.add(prepared.resource());
+            }
+            outcomes.add(new ArtifactOutcome(prepared.id(), prepared.kind(), change, prepared.contentHash()));
         }
+        // One atomic batch for the whole changed set: all of it lands or, on a write failure, none does.
+        store.saveAll(toWrite);
         return new ApplyResult(outcomes);
-    }
-
-    private ArtifactOutcome upsert(PreparedArtifact prepared) {
-        Optional<Resource> existing = store.get(prepared.id());
-        ArtifactOutcome.Change change;
-        if (existing.isEmpty()) {
-            store.save(prepared.resource());
-            change = ArtifactOutcome.Change.CREATED;
-        } else if (storedHash(existing.get()).equals(prepared.contentHash())) {
-            change = ArtifactOutcome.Change.UNCHANGED;
-        } else {
-            store.save(prepared.resource());
-            change = ArtifactOutcome.Change.UPDATED;
-        }
-        return new ArtifactOutcome(prepared.id(), prepared.kind(), change, prepared.contentHash());
     }
 
     /** The content hash of a stored artifact, recomputed over its canonical form for the no-op check. */

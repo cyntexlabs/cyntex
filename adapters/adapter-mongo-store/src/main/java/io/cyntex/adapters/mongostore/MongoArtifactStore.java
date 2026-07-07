@@ -1,5 +1,7 @@
 package io.cyntex.adapters.mongostore;
 
+import com.mongodb.client.ClientSession;
+import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoCursor;
 import com.mongodb.client.model.ReplaceOptions;
@@ -24,8 +26,10 @@ import java.util.Optional;
  * the same canonical form.
  *
  * <p>The document carries the id (as {@code _id}) and the kind as structured fields, and the
- * canonical text as the body. Driver IO failures during save / get / list are translated into coded
- * io diagnostics, and a stored body that no longer reconstructs is surfaced as an io diagnostic
+ * canonical text as the body. A batch is written in one multi-document transaction, so a mid-batch
+ * write failure aborts the whole transaction and leaves no partial batch behind; the transaction is
+ * why the store binds a replica-set. Driver IO failures during save / get / list are translated into
+ * coded io diagnostics, and a stored body that no longer reconstructs is surfaced as an io diagnostic
  * rather than a leaked authoring code, so no driver type escapes the module (rule R3).
  */
 public final class MongoArtifactStore implements ArtifactStore {
@@ -33,19 +37,50 @@ public final class MongoArtifactStore implements ArtifactStore {
     private static final CanonicalWriter WRITER = new CanonicalWriter();
     private static final DslParser PARSER = new DslParser();
 
+    private final MongoClient client;
     private final MongoCollection<Document> collection;
 
-    public MongoArtifactStore(MongoCollection<Document> collection) {
+    public MongoArtifactStore(MongoClient client, MongoCollection<Document> collection) {
+        this.client = Objects.requireNonNull(client, "client");
         this.collection = Objects.requireNonNull(collection, "collection");
     }
 
     @Override
-    public void save(Resource artifact) {
-        Objects.requireNonNull(artifact, "artifact");
-        // Upsert by the top-level id (the document _id): the stored form is a full replacement, so a
-        // re-save of the same id overwrites in place rather than accumulating documents.
-        StoreIo.run(() -> collection.replaceOne(
-                new Document("_id", artifact.id()), toDocument(artifact), new ReplaceOptions().upsert(true)));
+    public void saveAll(List<Resource> artifacts) {
+        Objects.requireNonNull(artifacts, "artifacts");
+        if (artifacts.isEmpty()) {
+            // An empty batch writes nothing, and opens no transaction.
+            return;
+        }
+        // The batch is one atomic unit: every upsert runs inside a single multi-document transaction, so
+        // a failure on any one write aborts the whole transaction and no partial batch is stored. Each
+        // upsert is by the top-level id (the document _id) — a full replacement that overwrites in place
+        // rather than accumulating documents.
+        StoreIo.run(() -> {
+            try (ClientSession session = client.startSession()) {
+                session.startTransaction();
+                try {
+                    for (Resource artifact : artifacts) {
+                        collection.replaceOne(session, new Document("_id", artifact.id()), toDocument(artifact),
+                                new ReplaceOptions().upsert(true));
+                    }
+                } catch (RuntimeException e) {
+                    // A write failed before commit: roll the whole batch back and surface the write failure
+                    // (StoreIo codes it). If the abort itself fails, keep the original failure as the
+                    // surfaced error rather than letting the abort mask it.
+                    try {
+                        session.abortTransaction();
+                    } catch (RuntimeException abortFailure) {
+                        e.addSuppressed(abortFailure);
+                    }
+                    throw e;
+                }
+                // Commit stands outside the abort guard: once the writes have all succeeded, a commit-time
+                // driver failure must propagate to StoreIo to be coded — aborting after commit would throw
+                // and mask it. A dangling transaction on any exit path is closed with the session.
+                session.commitTransaction();
+            }
+        });
     }
 
     @Override
