@@ -15,7 +15,21 @@
   <description>Control core (the apply / export / run / delete verb layer, the single write entry); placeholder, verbs land later</description>
 
   <dependencies>
-    <!-- Test only. Production code stays framework-free and zero-third-party (R5); versions come from the reactor BOM. -->
+    <!-- The error-code contract (coded control diagnostics) — core ring, permitted by R5. -->
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>core-common</artifactId>
+      <version>${revision}</version>
+    </dependency>
+    <!-- The audit-log port the audit gate writes through; control-core reaches persistence only
+         through the storage port, never the runtime (R5). -->
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>spi-store</artifactId>
+      <version>${revision}</version>
+    </dependency>
+
+    <!-- Test only. Production code stays framework-free (no Spring); versions come from the reactor BOM. -->
     <dependency>
       <groupId>org.junit.jupiter</groupId>
       <artifactId>junit-jupiter</artifactId>
