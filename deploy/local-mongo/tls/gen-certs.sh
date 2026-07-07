@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Generate a throwaway self-signed TLS chain for the local development MongoDB.
 #
-# The store connection makes TLS mandatory, so the local replica-set must speak TLS. This produces a
+# Store TLS is opt-in; this chain is used only when the store URI asks for it (ssl=true), letting the
+# local replica-set speak TLS for that case. This produces a
 # single self-signed certificate (CN=localhost, SAN localhost/127.0.0.1) valid for ten years:
 #   ca.pem      the certificate, trusted by the client via cyntex.store.mongo.tls-ca-file
 #   server.pem  the private key concatenated with the certificate, presented by mongod
