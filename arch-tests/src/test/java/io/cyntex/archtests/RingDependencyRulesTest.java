@@ -177,7 +177,7 @@ class RingDependencyRulesTest {
     }
 
     @Test
-    @DisplayName("R5: control-core depends on core + the storage port only")
+    @DisplayName("R5: control-core depends on core + the storage port only (framework-free — no Spring)")
     void r5_controlCoreLayering() {
         classes().that().resideInAPackage("io.cyntex.control.core..")
                 .should().onlyDependOnClassesThat().resideInAnyPackage(
@@ -185,12 +185,13 @@ class RingDependencyRulesTest {
                         "io.cyntex.control.core..",
                         "io.cyntex.core..",
                         // control-core decouples from the runtime through the storage port
-                        "io.cyntex.spi.store..",
-                        // Spring is permitted in the control ring
-                        "org.springframework..")
+                        "io.cyntex.spi.store..")
                 .allowEmptyShould(true)
-                .because("control-core depends on the kernel and the storage port; it reaches the "
-                        + "runtime only through the store, never by a compile reference")
+                .because("control-core is the resource-type-agnostic verb layer: pure logic that "
+                        + "depends on the kernel and the storage port only. It stays framework-free "
+                        + "— Spring lives in rest-api (the HTTP presentation face), never here — so "
+                        + "the apply / registry logic is unit-testable without a container; it "
+                        + "reaches the runtime only through the store, never by a compile reference")
                 .check(cyntexClasses);
     }
 
