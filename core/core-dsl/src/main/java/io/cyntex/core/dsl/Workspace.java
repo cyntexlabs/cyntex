@@ -1,5 +1,6 @@
 package io.cyntex.core.dsl;
 
+import io.cyntex.core.catalog.CyntexCatalog;
 import io.cyntex.core.model.Resource;
 
 import java.util.Collection;
@@ -40,6 +41,19 @@ public final class Workspace {
         ReferenceClosure.validate(byId.values());
         ModeRules.validate(byId.values());
         return new Workspace(byId);
+    }
+
+    /**
+     * Builds a fully-validated workspace: the {@link #of(List)} batch layers plus the connector
+     * capability matrix ({@link CapabilityRules}: mode × connector legality, config field type /
+     * enum) judged against {@code catalog}. This is the filesystem-free full-semantic validation
+     * entry — the directory loader and the online apply path both run through it. The first
+     * violation throws a {@link DslException}.
+     */
+    public static Workspace of(List<Resource> resources, CyntexCatalog catalog) {
+        Workspace workspace = of(resources);
+        CapabilityRules.validate(resources, catalog);
+        return workspace;
     }
 
     /** The resource with the given top-level id, or {@code null} if absent. */

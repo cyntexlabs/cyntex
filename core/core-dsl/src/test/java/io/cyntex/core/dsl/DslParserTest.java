@@ -133,4 +133,38 @@ class DslParserTest {
         assertThat(ex.path()).isEqualTo("mod");
         assertThat(ex.line()).isEqualTo(6);
     }
+
+    @Test
+    void rejectsUnknownKind() {
+        // A top-level kind outside the closed set is a coded value error, not a bare crash.
+        String yaml = """
+                version: cyntex/v1
+                kind: bogus
+                id: x
+                """;
+
+        Throwable t = catchThrowable(() -> parser.parse(yaml));
+
+        assertThat(t).isInstanceOf(DslException.class);
+        DslException ex = (DslException) t;
+        assertThat(ex.code()).isEqualTo(DslError.ILLEGAL_VALUE);
+        assertThat(ex.path()).isEqualTo("kind");
+        assertThat(ex.args()).containsEntry("value", "bogus");
+    }
+
+    @Test
+    void rejectsMissingKind() {
+        // No kind: at all is likewise a coded value error, not an UnsupportedOperationException.
+        String yaml = """
+                version: cyntex/v1
+                id: x
+                """;
+
+        Throwable t = catchThrowable(() -> parser.parse(yaml));
+
+        assertThat(t).isInstanceOf(DslException.class);
+        DslException ex = (DslException) t;
+        assertThat(ex.code()).isEqualTo(DslError.ILLEGAL_VALUE);
+        assertThat(ex.path()).isEqualTo("kind");
+    }
 }
