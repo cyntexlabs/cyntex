@@ -13,4 +13,18 @@
   <artifactId>control-core</artifactId>
   <name>Cyntex :: Control :: Core</name>
   <description>Control core (the apply / export / run / delete verb layer, the single write entry); placeholder, verbs land later</description>
+
+  <dependencies>
+    <!-- Test only. Production code stays framework-free and zero-third-party (R5); versions come from the reactor BOM. -->
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.assertj</groupId>
+      <artifactId>assertj-core</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
 </project>
