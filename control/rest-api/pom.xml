@@ -12,5 +12,29 @@
 
   <artifactId>rest-api</artifactId>
   <name>Cyntex :: Control :: REST API</name>
-  <description>HTTP presentation adapter over control-core; placeholder, endpoints land later</description>
+  <description>HTTP presentation adapter over control-core: the Spring Boot Web MVC face that projects
+    the control verbs onto a single-context, single-port HTTP surface under the /api prefix.</description>
+
+  <dependencies>
+    <!-- The Web MVC substrate (Spring Boot 4.1.x on Spring Framework 7 / Jakarta EE 11): embedded
+         servlet container + the HTTP JSON wire codec. Versions come from the reactor BOM. This is the
+         only ring where Spring is admitted (R5); the control-core verb layer stays framework-free. -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-web</artifactId>
+    </dependency>
+
+    <!-- Test only. The web context is booted programmatically (SpringApplication, not the Spring
+         JUnit extension) so the module stays on the reactor's JUnit line; versions come from the BOM. -->
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.assertj</groupId>
+      <artifactId>assertj-core</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
 </project>
