@@ -14,6 +14,7 @@ connector.class-not-found
 connector.load-failed
 connector.projection-failed
 connector.write-failed
+control.audit-blocked
 dsl.ambiguous-reference
 dsl.composition
 dsl.config-type-mismatch
