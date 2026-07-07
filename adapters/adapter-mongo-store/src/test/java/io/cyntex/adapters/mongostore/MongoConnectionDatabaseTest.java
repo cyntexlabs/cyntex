@@ -30,7 +30,7 @@ class MongoConnectionDatabaseTest {
     @Test
     void databaseIsUnavailableBeforeTheConnectionIsVerified() {
         MongoConnection connection = new MongoConnection(new MongoConnectionSettings(
-                "mongodb://localhost:27017/cyntex", true, null, Duration.ofSeconds(5)));
+                "mongodb://localhost:27017/cyntex", null, Duration.ofSeconds(5)));
         assertThatThrownBy(connection::database).isInstanceOf(IllegalStateException.class);
     }
 }

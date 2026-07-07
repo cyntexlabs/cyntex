@@ -44,10 +44,10 @@ class MongoStorePortIT {
 
     @Test
     void aggregatesTheThreeSubStoresEachOnItsOwnCollection() {
-        // The Testcontainers Mongo speaks plaintext, so the plaintext connection is opted into
-        // explicitly; the TLS-required guard is covered by MongoConnectionTest / StoreStartupTest.
+        // The Testcontainers Mongo speaks plaintext; TLS is opt-in, so a plaintext URL connects with
+        // no flag. TLS wiring itself is covered by MongoConnectionTest.
         String uri = REPLICA_SET.getReplicaSetUrl();
-        MongoConnectionSettings settings = new MongoConnectionSettings(uri, true, null, Duration.ofSeconds(5));
+        MongoConnectionSettings settings = new MongoConnectionSettings(uri, null, Duration.ofSeconds(5));
         try (MongoConnection connection = new MongoConnection(settings)) {
             connection.verify();
             MongoStorePort port = new MongoStorePort(connection);

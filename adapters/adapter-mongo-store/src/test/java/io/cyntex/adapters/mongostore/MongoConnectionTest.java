@@ -14,17 +14,18 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.catchThrowableOfType;
 
 /**
- * The connection substrate's fast-fail behavior — no Docker required: pointed at a dead port, it
- * reports the store unreachable as a coded diagnostic (not a bare driver exception) within the
- * configured server-selection timeout. The replica-set check and the CAS witness against a real
- * Mongo live in {@code MongoConnectionReplicaSetIT} (Testcontainers).
+ * The connection substrate's fast-fail behavior and TLS wiring — no Docker required. TLS is opt-in:
+ * the connection is plaintext by default and uses TLS only when the URI asks for it ({@code ssl=true}
+ * / {@code tls=true}), with the URI's own settings honored as-is. Pointed at a dead port it reports
+ * the store unreachable as a coded diagnostic (not a bare driver exception). The replica-set check and
+ * the CAS witness against a real Mongo live in the Testcontainers integration tests.
  */
 class MongoConnectionTest {
 
     @Test
     void unreachableTargetIsReportedAsACodedDiagnostic() {
         MongoConnectionSettings settings = new MongoConnectionSettings(
-                "mongodb://localhost:1/cyntex", true, null, Duration.ofMillis(300));
+                "mongodb://localhost:1/cyntex", null, Duration.ofMillis(300));
         try (MongoConnection connection = new MongoConnection(settings)) {
             CyntexException ex = catchThrowableOfType(connection::verify, CyntexException.class);
             assertThat(ex).as("verify() against a dead port raises a coded diagnostic").isNotNull();
@@ -36,7 +37,7 @@ class MongoConnectionTest {
     @Test
     void malformedUriIsReportedAsACodedDiagnostic() {
         MongoConnectionSettings settings = new MongoConnectionSettings(
-                "not-a-mongodb-uri", true, null, Duration.ofMillis(300));
+                "not-a-mongodb-uri", null, Duration.ofMillis(300));
         try (MongoConnection connection = new MongoConnection(settings)) {
             CyntexException ex = catchThrowableOfType(connection::verify, CyntexException.class);
             assertThat(ex).as("verify() with a malformed URI raises a coded diagnostic, not a bare IAE").isNotNull();
@@ -45,72 +46,74 @@ class MongoConnectionTest {
     }
 
     @Test
-    void plaintextUriWithoutTheInsecureDowngradeIsRefusedUpFront() {
-        // ssl=false in the URI turns TLS off. TLS to the store is mandatory, so without the explicit
-        // insecure downgrade this is refused before any connection attempt (a dead port would report
-        // unreachable if we reached it — a TLS_REQUIRED here proves the guard runs first).
+    void aPlaintextUriConnectsByDefaultWithNoFlag() {
+        // TLS is opt-in: an unspecified URI is plaintext and reaches the connection with no downgrade
+        // flag, so a dead port reports unreachable (the guard that used to refuse plaintext is gone).
         MongoConnectionSettings settings = new MongoConnectionSettings(
-                "mongodb://localhost:1/cyntex?ssl=false", false, null, Duration.ofMillis(300));
+                "mongodb://localhost:1/cyntex", null, Duration.ofMillis(300));
         try (MongoConnection connection = new MongoConnection(settings)) {
             CyntexException ex = catchThrowableOfType(connection::verify, CyntexException.class);
-            assertThat(ex).as("plaintext URI without the insecure downgrade is refused").isNotNull();
-            assertThat(ex.code()).isEqualTo(StoreError.TLS_REQUIRED);
-            assertThat(ex.args()).containsKey("target");
-        }
-    }
-
-    @Test
-    void explicitInsecureDowngradeIsNotRefusedAndReachesTheConnection() {
-        // With the explicit downgrade the same plaintext URI is permitted: verify() gets past the
-        // TLS guard and actually attempts the connection, so a dead port reports unreachable.
-        MongoConnectionSettings settings = new MongoConnectionSettings(
-                "mongodb://localhost:1/cyntex?ssl=false", true, null, Duration.ofMillis(300));
-        try (MongoConnection connection = new MongoConnection(settings)) {
-            CyntexException ex = catchThrowableOfType(connection::verify, CyntexException.class);
-            assertThat(ex).as("the explicit downgrade permits plaintext, reaching the connection").isNotNull();
+            assertThat(ex).as("a plaintext URI reaches the connection with no flag").isNotNull();
             assertThat(ex.code()).isEqualTo(StoreError.UNREACHABLE);
         }
     }
 
     @Test
-    void tlsIsEnabledByDefaultWhenTheUriDoesNotSpecifyIt() {
-        MongoClientSettings clientSettings = clientSettingsFor("mongodb://localhost:27017/cyntex", false);
+    void tlsIsOffByDefaultWhenTheUriDoesNotAskForIt() {
+        MongoClientSettings clientSettings = clientSettingsFor("mongodb://localhost:27017/cyntex");
         assertThat(clientSettings.getSslSettings().isEnabled())
-                .as("an unspecified URI connects over TLS by default").isTrue();
+                .as("an unspecified URI connects in plaintext by default").isFalse();
     }
 
     @Test
-    void aTlsRequestInTheUriIsHonoredEvenWithTheInsecureDowngrade() {
-        MongoClientSettings clientSettings = clientSettingsFor("mongodb://localhost:27017/cyntex?ssl=true", true);
+    void aTlsRequestInTheUriEnablesTls() {
+        MongoClientSettings clientSettings = clientSettingsFor("mongodb://localhost:27017/cyntex?ssl=true");
         assertThat(clientSettings.getSslSettings().isEnabled())
-                .as("a TLS request carried in the URI is never turned off").isTrue();
+                .as("ssl=true in the URI enables TLS (opt-in)").isTrue();
     }
 
     @Test
-    void theInsecureDowngradeConnectsInPlaintext() {
-        MongoClientSettings clientSettings = clientSettingsFor("mongodb://localhost:27017/cyntex", true);
-        assertThat(clientSettings.getSslSettings().isEnabled())
-                .as("the explicit downgrade connects in plaintext").isFalse();
+    void aUriThatRelaxesHostnameVerificationIsHonoredWhenTlsIsOn() {
+        // The URI owns the TLS settings: asking to relax hostname verification is honored, not
+        // overridden — needed for a self-signed development chain whose CN may not match the host.
+        MongoClientSettings clientSettings =
+                clientSettingsFor("mongodb://localhost:27017/cyntex?tls=true&tlsAllowInvalidHostnames=true");
+        assertThat(clientSettings.getSslSettings().isEnabled()).isTrue();
+        assertThat(clientSettings.getSslSettings().isInvalidHostNameAllowed())
+                .as("the URI's hostname-verification setting is honored").isTrue();
     }
 
     @Test
-    void aTlsCaFileIsAppliedAsTheTrustContext() throws Exception {
-        String uri = "mongodb://localhost:27017/cyntex";
+    void aTlsCaFileIsAppliedAsTheTrustContextWhenTlsIsOn() throws Exception {
+        String uri = "mongodb://localhost:27017/cyntex?ssl=true";
         MongoConnectionSettings settings =
-                new MongoConnectionSettings(uri, false, caFixturePath(), Duration.ofMillis(300));
+                new MongoConnectionSettings(uri, caFixturePath(), Duration.ofMillis(300));
         MongoClientSettings clientSettings =
                 new MongoConnection(settings).buildClientSettings(new ConnectionString(uri));
         assertThat(clientSettings.getSslSettings().isEnabled()).isTrue();
         assertThat(clientSettings.getSslSettings().getContext())
-                .as("a custom CA file is applied as the TLS trust context (self-signed local chain)")
+                .as("a custom CA file is applied as the TLS trust context (self-signed chain)")
                 .isNotNull();
     }
 
     @Test
-    void anUnreadableTlsCaFileIsReportedAsACodedDiagnostic() {
+    void aTlsCaFileIsIgnoredWhenTlsIsOff() {
+        // A CA file is meaningful only when TLS is on. With a plaintext URI it is not consulted, so
+        // even an unreadable path raises nothing and the connection stays plaintext.
         String uri = "mongodb://localhost:27017/cyntex";
+        MongoConnectionSettings settings =
+                new MongoConnectionSettings(uri, "/no/such/directory/ca.pem", Duration.ofMillis(300));
+        MongoClientSettings clientSettings =
+                new MongoConnection(settings).buildClientSettings(new ConnectionString(uri));
+        assertThat(clientSettings.getSslSettings().isEnabled())
+                .as("a plaintext URI stays plaintext and the CA file is ignored").isFalse();
+    }
+
+    @Test
+    void anUnreadableTlsCaFileIsReportedAsACodedDiagnosticWhenTlsIsOn() {
+        String uri = "mongodb://localhost:27017/cyntex?ssl=true";
         MongoConnectionSettings settings = new MongoConnectionSettings(
-                uri, false, "/no/such/directory/ca.pem", Duration.ofMillis(300));
+                uri, "/no/such/directory/ca.pem", Duration.ofMillis(300));
         MongoConnection connection = new MongoConnection(settings);
         ConnectionString connectionString = new ConnectionString(uri);
         CyntexException ex = catchThrowableOfType(
@@ -121,48 +124,14 @@ class MongoConnectionTest {
     }
 
     @Test
-    void aUriThatDisablesCertificateVerificationWithoutTheDowngradeIsRefusedUpFront() {
-        // tlsInsecure / tlsAllowInvalidHostnames turn off certificate/hostname verification while
-        // leaving TLS nominally "on". That is an insecure connection, so without the explicit
-        // downgrade it is refused up front, exactly like a plaintext one.
-        MongoConnectionSettings settings = new MongoConnectionSettings(
-                "mongodb://localhost:1/cyntex?tlsInsecure=true", false, null, Duration.ofMillis(300));
-        try (MongoConnection connection = new MongoConnection(settings)) {
-            CyntexException ex = catchThrowableOfType(connection::verify, CyntexException.class);
-            assertThat(ex).as("a verification-disabling URI without the downgrade is refused").isNotNull();
-            assertThat(ex.code()).isEqualTo(StoreError.TLS_REQUIRED);
-        }
-    }
-
-    @Test
-    void certificateVerificationIsForcedOnWhenNotDowngraded() {
-        // Even if the URI asked to disable hostname verification, the secure path forces it back on —
-        // a URI can never quietly weaken the TLS handshake without the explicit downgrade.
-        MongoClientSettings clientSettings =
-                clientSettingsFor("mongodb://localhost:27017/cyntex?tlsInsecure=true", false);
-        assertThat(clientSettings.getSslSettings().isInvalidHostNameAllowed())
-                .as("certificate/hostname verification is not silently disabled").isFalse();
-    }
-
-    @Test
-    void theInsecureDowngradeHonorsDisabledVerification() {
-        // With the explicit downgrade the operator owns the risk, so a URI asking to disable
-        // verification is honored rather than forced back on.
-        MongoClientSettings clientSettings =
-                clientSettingsFor("mongodb://localhost:27017/cyntex?tlsInsecure=true", true);
-        assertThat(clientSettings.getSslSettings().isInvalidHostNameAllowed())
-                .as("the explicit downgrade honors disabled verification").isTrue();
-    }
-
-    @Test
-    void anEmptyCaFileIsReportedAsACodedDiagnostic() throws Exception {
+    void anEmptyCaFileIsReportedAsACodedDiagnosticWhenTlsIsOn() throws Exception {
         // A readable but cert-less CA file parses to zero trust anchors without throwing; left
         // unchecked it would build a trust-nothing context and surface an opaque unreachable. It is
         // an unusable CA file, so it is reported as the coded misconfiguration it is.
-        String uri = "mongodb://localhost:27017/cyntex";
+        String uri = "mongodb://localhost:27017/cyntex?ssl=true";
         String emptyCa = Path.of(MongoConnectionTest.class.getResource("/tls/empty-ca.pem").toURI()).toString();
         MongoConnectionSettings settings =
-                new MongoConnectionSettings(uri, false, emptyCa, Duration.ofMillis(300));
+                new MongoConnectionSettings(uri, emptyCa, Duration.ofMillis(300));
         MongoConnection connection = new MongoConnection(settings);
         ConnectionString connectionString = new ConnectionString(uri);
         CyntexException ex = catchThrowableOfType(
@@ -183,9 +152,9 @@ class MongoConnectionTest {
                 .contains("CN=localhost");
     }
 
-    private static MongoClientSettings clientSettingsFor(String uri, boolean allowInsecure) {
+    private static MongoClientSettings clientSettingsFor(String uri) {
         MongoConnectionSettings settings =
-                new MongoConnectionSettings(uri, allowInsecure, null, Duration.ofMillis(300));
+                new MongoConnectionSettings(uri, null, Duration.ofMillis(300));
         return new MongoConnection(settings).buildClientSettings(new ConnectionString(uri));
     }
 

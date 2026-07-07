@@ -71,16 +71,6 @@ public final class MongoConnection implements AutoCloseable {
         // none. Resolved here from the same URI the client uses, so database() reflects the target.
         this.databaseName = resolveDatabaseName(connectionString);
         String target = String.join(",", connectionString.getHosts());
-        // A secure TLS connection to the store is mandatory: a URI that would reach it insecurely —
-        // plaintext (ssl=false), or with certificate/hostname verification disabled (tlsInsecure /
-        // tlsAllowInvalidHostnames) — is refused up front, before any connection attempt, unless the
-        // operator opted into an insecure connection with the explicit downgrade. This is what keeps
-        // an insecure store link from being made silently.
-        boolean plaintext = Boolean.FALSE.equals(connectionString.getSslEnabled());
-        boolean verificationDisabled = Boolean.TRUE.equals(connectionString.getSslInvalidHostnameAllowed());
-        if ((plaintext || verificationDisabled) && !settings.allowInsecure()) {
-            throw new CyntexException(StoreError.TLS_REQUIRED, Map.of("target", target), null);
-        }
         MongoClientSettings clientSettings = buildClientSettings(connectionString);
 
         MongoClient opened = MongoClients.create(clientSettings);
@@ -120,31 +110,21 @@ public final class MongoConnection implements AutoCloseable {
     }
 
     /**
-     * Builds the driver client settings, applying the mandatory-TLS policy: TLS is on by default and
-     * a TLS request carried in the URI is always honored; it is turned off only by the explicit
-     * insecure downgrade.
+     * Builds the driver client settings. TLS is opt-in: it is used only when the URI asks for it
+     * ({@code ssl=true} / {@code tls=true}), and its settings are then taken from the URI as-is; the
+     * default is a plaintext connection. An explicit CA file trusts a self-signed chain when TLS is on.
      */
     MongoClientSettings buildClientSettings(ConnectionString connectionString) {
         MongoClientSettings.Builder builder = MongoClientSettings.builder()
                 .applyConnectionString(connectionString)
                 .applyToClusterSettings(b ->
                         b.serverSelectionTimeout(settings.serverSelectionTimeout().toMillis(), TimeUnit.MILLISECONDS));
-        boolean useTls = Boolean.TRUE.equals(connectionString.getSslEnabled()) || !settings.allowInsecure();
-        if (useTls) {
-            builder.applyToSslSettings(b -> {
-                b.enabled(true);
-                // A URI must never quietly weaken the handshake: unless the operator opted into an
-                // insecure connection, certificate/hostname verification is forced on regardless of
-                // any tlsInsecure/tlsAllowInvalidHostnames the URI carried.
-                if (!settings.allowInsecure()) {
-                    b.invalidHostNameAllowed(false);
-                }
-                // An explicit CA file trusts a self-signed chain (the local development one); with no
-                // CA file the handshake falls back to the JVM default trust store.
-                if (settings.tlsCaFile() != null) {
-                    b.context(buildSslContext(settings.tlsCaFile()));
-                }
-            });
+        // TLS follows the URI (applyConnectionString already applied it). A CA file is meaningful only
+        // when TLS is on, so it is applied then and ignored otherwise: it trusts the self-signed chain
+        // without touching the JVM-wide trust store.
+        boolean useTls = Boolean.TRUE.equals(connectionString.getSslEnabled());
+        if (useTls && settings.tlsCaFile() != null) {
+            builder.applyToSslSettings(b -> b.context(buildSslContext(settings.tlsCaFile())));
         }
         return builder.build();
     }

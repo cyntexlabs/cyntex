@@ -36,8 +36,7 @@ class StorePortWiringIT {
         runner.withPropertyValues(
                         "cyntex.store.mongo.enabled=true",
                         "cyntex.store.mongo.uri=" + REPLICA_SET.getReplicaSetUrl(),
-                        // the container speaks plaintext; the TLS-required guard is covered by StoreStartupTest
-                        "cyntex.store.mongo.allow-insecure=true",
+                        // the container speaks plaintext; TLS is opt-in, so no flag is needed here
                         "cyntex.store.mongo.server-selection-timeout=5s")
                 .run(context -> {
                     assertThat(context).hasNotFailed();
