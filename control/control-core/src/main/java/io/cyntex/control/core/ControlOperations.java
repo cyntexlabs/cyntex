@@ -10,8 +10,8 @@ import java.util.Map;
  *
  * <p>The first landing opens only the subset it needs, and only on the CLI face at {@code POC} — no
  * operation carries an {@code MCP} or {@code REST} exposure key yet, so those faces derive empty.
- * Later slices append their own domains (task, connector, cluster, runtime read) here, so every face
- * grows the new verbs in lockstep rather than each face maintaining its own hand-written list.
+ * Later slices append their own domains (task, connector, runtime read) here, so every face grows
+ * the new verbs in lockstep rather than each face maintaining its own hand-written list.
  *
  * <p>The audit flag marks the operations that mutate persisted control-plane state (an artifact, a
  * user, a token) and therefore leave a record; read and list operations and the read-only connection
@@ -31,6 +31,11 @@ public final class ControlOperations {
     // later slice; this only reserves the contract.
     public static final Operation CONNECTION_TEST = new Operation("connection.test", Scope.WRITE, true, null, CLI_POC);
 
+    // cluster domain: topology is sensitive, so listing members is a registry operation (authenticated
+    // like every other verb) rather than an anonymous endpoint — only the process-liveness probe stays
+    // outside the registry. Reading topology mutates nothing, so it is read-scoped and unaudited.
+    public static final Operation CLUSTER_MEMBERS = new Operation("cluster.members", Scope.READ, false, null, CLI_POC);
+
     // security domain: all admin-scoped. The mutating ones are audited; the list queries are not.
     public static final Operation USER_CREATE = new Operation("user.create", Scope.ADMIN, true, null, CLI_POC);
     public static final Operation USER_PASSWD = new Operation("user.passwd", Scope.ADMIN, true, null, CLI_POC);
@@ -44,6 +49,7 @@ public final class ControlOperations {
             ARTIFACT_GET,
             ARTIFACT_LIST,
             CONNECTION_TEST,
+            CLUSTER_MEMBERS,
             USER_CREATE,
             USER_PASSWD,
             USER_LIST,

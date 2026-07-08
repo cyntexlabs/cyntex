@@ -123,7 +123,9 @@ public final class DslParser {
             case "transform" -> transformDefinition(doc);
             case "view" -> viewDefinition(doc);
             case "serve" -> serveDefinition(doc);
-            case null, default -> throw new UnsupportedOperationException("kind not yet supported: " + kind);
+            case null, default -> throw YamlMap.error(DslError.ILLEGAL_VALUE, "kind", mapping,
+                    Map.of("value", kind == null ? "(absent)" : kind,
+                            "expected", "one of: source, pipeline, transform, view, serve"));
         };
     }
 

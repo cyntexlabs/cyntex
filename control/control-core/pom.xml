@@ -28,6 +28,24 @@
       <artifactId>spi-store</artifactId>
       <version>${revision}</version>
     </dependency>
+    <!-- The apply pipeline reaches into the core ring only (R5 admits io.cyntex.core..): core-dsl
+         runs the full semantic validation stack, core-model normalizes to canonical form and
+         content-hashes it, core-catalog supplies the connector capability matrix. -->
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>core-model</artifactId>
+      <version>${revision}</version>
+    </dependency>
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>core-dsl</artifactId>
+      <version>${revision}</version>
+    </dependency>
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>core-catalog</artifactId>
+      <version>${revision}</version>
+    </dependency>
 
     <!-- Test only. Production code stays framework-free (no Spring); versions come from the reactor BOM. -->
     <dependency>

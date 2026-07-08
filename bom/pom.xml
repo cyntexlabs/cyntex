@@ -22,9 +22,12 @@
   <properties>
     <!-- The core ring serializes with Jackson 2 (annotations + YAML dataformat) and must not depend
          on spring-boot-dependencies, so jackson is pinned here and imported first (below) to win over
-         the platform's managed version. Spring Boot 4.1 defaults to Jackson 3, but the service exposes
-         no HTTP wire codec yet, so Jackson 2 is retained and aligned to the platform's managed Jackson-2
-         line; the move to Jackson 3 lands when the web layer is introduced. -->
+         the platform's managed version. Spring Boot 4.1 ships both Jackson lines side by side: it
+         defaults to Jackson 3 (group tools.jackson) for the HTTP wire codec now that the web layer
+         exists (rest-api), while retaining the Jackson 2 line (group com.fasterxml.jackson) for
+         everything else. The two have disjoint coordinates, so this Jackson 2 pin — held at the exact
+         version the platform manages its Jackson-2 line to — coexists with the platform's Jackson 3
+         with no skew; the core ring keeps its Jackson 2 annotations untouched. -->
     <jackson.version>2.21.4</jackson.version>
     <snakeyaml.version>2.6</snakeyaml.version>
     <cel.version>0.10.1</cel.version>

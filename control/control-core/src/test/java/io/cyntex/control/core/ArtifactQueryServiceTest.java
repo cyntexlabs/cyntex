@@ -1,0 +1,234 @@
+package io.cyntex.control.core;
+
+import io.cyntex.core.catalog.CyntexCatalog;
+import io.cyntex.core.dsl.DslParser;
+import io.cyntex.core.model.Resource;
+import io.cyntex.core.model.canonical.CanonicalWriter;
+import io.cyntex.spi.store.ArtifactStore;
+import org.junit.jupiter.api.Test;
+
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
+/**
+ * The read side of the double-layer model: the store is the truth layer, and a read returns an
+ * artifact as its canonical form straight from that layer (server-as-truth). Its central guarantee is
+ * that the online read path — apply -> store -> get — reproduces the offline canonical contract
+ * byte-for-byte, the same {@link CanonicalWriter} the authoring corpus golden locks, so the online side
+ * never forks the canonical form.
+ */
+class ArtifactQueryServiceTest {
+
+    private final InMemoryArtifactStore store = new InMemoryArtifactStore();
+    private final ApplyService apply = new ApplyService(CyntexCatalog.load(), store);
+    private final ArtifactQueryService query = new ArtifactQueryService(store);
+
+    private static ArtifactDraft draft(String content) {
+        return new ArtifactDraft(null, content);
+    }
+
+    /** The offline canonical contract for a draft: the exact bytes the authoring corpus golden is generated from. */
+    private static String offlineCanonical(String draft) {
+        return new CanonicalWriter().write(new DslParser().parse(draft));
+    }
+
+    @Test
+    void getReadsBackAnAppliedArtifactAsItsCanonicalForm() {
+        apply.apply(List.of(draft(TGT_MY)));
+
+        Optional<StoredArtifact> got = query.get("tgt_my");
+
+        assertThat(got).isPresent();
+        assertThat(got.get().id()).isEqualTo("tgt_my");
+        assertThat(got.get().kind()).isEqualTo("source");
+        assertThat(got.get().canonicalForm())
+                .as("get reads back the stored canonical form")
+                .isEqualTo(offlineCanonical(TGT_MY));
+    }
+
+    @Test
+    void getReturnsEmptyForAnUnstoredId() {
+        apply.apply(List.of(draft(TGT_MY)));
+
+        assertThat(query.get("no_such_id")).isEmpty();
+    }
+
+    @Test
+    void appliedArtifactsReadBackByteStableAsTheOfflineCanonical() {
+        // The core golden: the online read path (apply -> store -> get) reproduces the offline canonical
+        // form byte-for-byte across kinds — source and pipeline here — using the one CanonicalWriter the
+        // authoring corpus golden locks. No second baseline is checked in on the online side: forking the
+        // canonical form here is exactly the drift this guards, so the expectation is the offline contract.
+        apply.apply(List.of(draft(SRC_ORA), draft(TGT_MY), draft(PIPELINE)));
+
+        assertThat(query.get("src_ora")).get().extracting(StoredArtifact::canonicalForm)
+                .isEqualTo(offlineCanonical(SRC_ORA));
+        assertThat(query.get("tgt_my")).get().extracting(StoredArtifact::canonicalForm)
+                .isEqualTo(offlineCanonical(TGT_MY));
+        assertThat(query.get("ora2my_ods")).get().extracting(StoredArtifact::canonicalForm)
+                .isEqualTo(offlineCanonical(PIPELINE));
+    }
+
+    @Test
+    void listReturnsEveryStoredArtifactAsItsCanonicalForm() {
+        apply.apply(List.of(draft(SRC_ORA), draft(TGT_MY), draft(PIPELINE)));
+
+        assertThat(query.list()).extracting(StoredArtifact::id)
+                .containsExactlyInAnyOrder("src_ora", "tgt_my", "ora2my_ods");
+        // Each listed artifact carries the same canonical form its own get returns.
+        assertThat(query.list()).allSatisfy(a ->
+                assertThat(a.canonicalForm())
+                        .isEqualTo(query.get(a.id()).orElseThrow().canonicalForm()));
+    }
+
+    @Test
+    void listIsEmptyWhenNothingIsStored() {
+        assertThat(query.list()).isEmpty();
+    }
+
+    @Test
+    void listByKindReturnsOnlyArtifactsOfThatKind() {
+        // The read-by-kind query lives in the read service (server-as-truth read semantics), so a face
+        // stays a pure projection: list("source") returns the two sources, list("pipeline") the pipeline.
+        apply.apply(List.of(draft(SRC_ORA), draft(TGT_MY), draft(PIPELINE)));
+
+        assertThat(query.list("source")).extracting(StoredArtifact::id)
+                .containsExactlyInAnyOrder("src_ora", "tgt_my");
+        assertThat(query.list("pipeline")).extracting(StoredArtifact::id)
+                .containsExactly("ora2my_ods");
+    }
+
+    @Test
+    void listByBlankKindReturnsEveryKind() {
+        // A blank or absent kind filter is "no filter": the query returns every stored artifact across
+        // kinds, the same as the unfiltered list, so the endpoint's optional ?kind= parameter degrades
+        // to list-all.
+        apply.apply(List.of(draft(SRC_ORA), draft(TGT_MY), draft(PIPELINE)));
+
+        assertThat(query.list((String) null)).extracting(StoredArtifact::id)
+                .containsExactlyInAnyOrder("src_ora", "tgt_my", "ora2my_ods");
+        assertThat(query.list("   ")).extracting(StoredArtifact::id)
+                .containsExactlyInAnyOrder("src_ora", "tgt_my", "ora2my_ods");
+    }
+
+    @Test
+    void onlyApplyMovesTheTruthLayerNotAPreparedEdit() {
+        // Server-as-truth: the store is the read source and only apply mutates it. Apply v1 -> get is v1;
+        // preparing the edit through plan (the store-free validate + canonicalize front half, which writes
+        // nothing) leaves the store — and get — at v1; applying the edit is what finally moves get to v2.
+        apply.apply(List.of(draft(TGT_MY)));
+        assertThat(query.get("tgt_my")).get().extracting(StoredArtifact::canonicalForm)
+                .isEqualTo(offlineCanonical(TGT_MY));
+
+        // The edit is only prepared, never applied — plan touches no store — so get still reads v1.
+        apply.plan(List.of(draft(TGT_MY_CHANGED)));
+        assertThat(query.get("tgt_my")).get().extracting(StoredArtifact::canonicalForm)
+                .as("a prepared-but-unapplied edit does not reach the truth layer")
+                .isEqualTo(offlineCanonical(TGT_MY));
+
+        apply.apply(List.of(draft(TGT_MY_CHANGED)));
+        assertThat(query.get("tgt_my")).get().extracting(StoredArtifact::canonicalForm)
+                .as("get reflects the last apply — server-as-truth, last write wins")
+                .isEqualTo(offlineCanonical(TGT_MY_CHANGED));
+    }
+
+    @Test
+    void aNullStoreIsRejected() {
+        assertThatThrownBy(() -> new ArtifactQueryService(null))
+                .isInstanceOf(NullPointerException.class);
+    }
+
+    @Test
+    void aNullIdIsRejected() {
+        assertThatThrownBy(() -> query.get(null))
+                .isInstanceOf(NullPointerException.class);
+    }
+
+    // ---- fixtures ----
+
+    private static final String TGT_MY = """
+            version: cyntex/v1
+            kind: source
+            id: tgt_my
+            connector: mysql
+            config: { host: 10.30.0.5, username: writer, password: My_2026 }
+            """;
+
+    private static final String TGT_MY_CHANGED = """
+            version: cyntex/v1
+            kind: source
+            id: tgt_my
+            connector: mysql
+            config: { host: 10.30.0.5, username: writer, password: Changed_2026 }
+            """;
+
+    private static final String SRC_ORA = """
+            version: cyntex/v1
+            kind: source
+            id: src_ora
+            connector: oracle
+            config: { host: 10.20.0.15, port: 1521, service_name: ORCL,
+                      username: cdc_user, password: Ora_2026 }
+            mode: cdc
+            tables: [ ORDERS, ORDER_ITEMS, CUSTOMERS ]
+            options: { include_ddl: true }
+            """;
+
+    private static final String PIPELINE = """
+            version: cyntex/v1
+            kind: pipeline
+            id: ora2my_ods
+            source: src_ora
+            settings: { read_mode: snapshot_and_cdc }
+            serve:
+              from: /.*/
+              sync:
+                - id: my_ods
+                  source: tgt_my
+                  write_mode: upsert
+                  ddl: apply
+            """;
+
+    /**
+     * An in-memory {@link ArtifactStore} that mirrors the Mongo store's canonical round-trip: it holds
+     * each artifact as its canonical text and reconstructs it on read through the parser, so a read
+     * exercises the same write-then-parse the real store does.
+     */
+    private static final class InMemoryArtifactStore implements ArtifactStore {
+
+        private final CanonicalWriter writer = new CanonicalWriter();
+        private final DslParser parser = new DslParser();
+        private final Map<String, String> byId = new LinkedHashMap<>();
+
+        @Override
+        public void saveAll(List<Resource> artifacts) {
+            // Atomic on this fake by construction: the whole valid batch stages into the map at once.
+            Map<String, String> staged = new LinkedHashMap<>();
+            for (Resource artifact : artifacts) {
+                staged.put(artifact.id(), writer.write(artifact));
+            }
+            byId.putAll(staged);
+        }
+
+        @Override
+        public Optional<Resource> get(String id) {
+            String canonical = byId.get(id);
+            return canonical == null ? Optional.empty() : Optional.of(parser.parse(canonical));
+        }
+
+        @Override
+        public List<Resource> list() {
+            List<Resource> resources = new ArrayList<>();
+            for (String canonical : byId.values()) {
+                resources.add(parser.parse(canonical));
+            }
+            return resources;
+        }
+    }
+}

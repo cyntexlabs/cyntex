@@ -50,9 +50,7 @@ public final class WorkspaceLoader {
                 throw e.withSource(name);   // a parse error is located at exactly this file
             }
         }
-        Workspace workspace = Workspace.of(resources);
-        CapabilityRules.validate(resources, catalog);
-        return workspace;
+        return Workspace.of(resources, catalog);
     }
 
     private static List<Path> artifacts(Path dir) {

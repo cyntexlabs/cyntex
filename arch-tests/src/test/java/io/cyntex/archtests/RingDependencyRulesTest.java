@@ -196,7 +196,7 @@ class RingDependencyRulesTest {
     }
 
     @Test
-    @DisplayName("R5: rest-api depends on control-core + core only (not on the ports directly)")
+    @DisplayName("R5: rest-api depends on control-core + core + the shared message catalog (not the ports)")
     void r5_restApiLayering() {
         classes().that().resideInAPackage("io.cyntex.control.restapi..")
                 .should().onlyDependOnClassesThat().resideInAnyPackage(
@@ -204,11 +204,14 @@ class RingDependencyRulesTest {
                         "io.cyntex.control.restapi..",
                         "io.cyntex.control.core..",
                         "io.cyntex.core..",
+                        // the shared error-code message catalog + renderer (presentation layer): rest-api
+                        // renders coded errors the same way the CLI does (its R6 grant), a leaf not a ring
+                        "io.cyntex.messages..",
                         // Spring is permitted in the control ring (rest-api is the HTTP layer)
                         "org.springframework..")
                 .allowEmptyShould(true)
-                .because("the HTTP presentation adapter sits on control-core and the kernel; it "
-                        + "does not reach the ports directly")
+                .because("the HTTP presentation adapter sits on control-core, the kernel, and the shared "
+                        + "message catalog; it does not reach the ports directly")
                 .check(cyntexClasses);
     }
 
