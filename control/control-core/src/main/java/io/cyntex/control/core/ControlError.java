@@ -19,7 +19,14 @@ public enum ControlError implements CyntexErrorCode {
      * An audited operation was refused because its mandatory audit record could not be written first;
      * {@code op} is the operation id. No audit, no execute — the operation never ran.
      */
-    AUDIT_BLOCKED("control.audit-blocked", Set.of("op"));
+    AUDIT_BLOCKED("control.audit-blocked", Set.of("op")),
+
+    /**
+     * A login was rejected: the username does not exist, or the password did not match. One code
+     * covers both cases and it carries no placeholder on purpose — echoing nothing back means the
+     * failure cannot be used to tell an existing username from an absent one (no user enumeration).
+     */
+    AUTH_FAILED("control.auth-failed", Set.of());
 
     private final String code;
     private final Set<String> placeholders;

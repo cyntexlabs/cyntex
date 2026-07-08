@@ -15,6 +15,7 @@ connector.load-failed
 connector.projection-failed
 connector.write-failed
 control.audit-blocked
+control.auth-failed
 dsl.ambiguous-reference
 dsl.composition
 dsl.config-type-mismatch

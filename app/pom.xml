@@ -50,6 +50,13 @@
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter</artifactId>
     </dependency>
+    <!-- The password-hashing primitive (adaptive salted hash) backing the control ring's hasher port.
+         A self-contained crypto library, version-managed by the platform BOM; the raw hash algorithm
+         only, not the full security framework. -->
+    <dependency>
+      <groupId>org.springframework.security</groupId>
+      <artifactId>spring-security-crypto</artifactId>
+    </dependency>
     <!-- The embedded Hazelcast member + Jet execution engine. The assembly root creates and owns
          the one full member per process; join discovery is explicitly disabled so the member is
          structurally undiscoverable. -->
@@ -62,6 +69,14 @@
     <dependency>
       <groupId>io.cyntex</groupId>
       <artifactId>core-common</artifactId>
+      <version>${revision}</version>
+    </dependency>
+    <!-- The control ring's ports the assembly root binds concrete implementations to: the password
+         hasher and the session-token signer are framework-free interfaces in the control kernel, and
+         their real (library-backed) implementations live here at the assembly point. -->
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>control-core</artifactId>
       <version>${revision}</version>
     </dependency>
     <!-- The shared error-code message catalog + renderer: the server renders coded diagnostics

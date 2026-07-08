@@ -110,3 +110,6 @@ connector.write-failed:
 control.audit-blocked:
   message: "Operation '{op}' was refused because its required audit record could not be written."
   solution: "An audited operation must leave an audit record before it runs; check the store is reachable and healthy, then retry."
+control.auth-failed:
+  message: "Authentication failed: invalid username or password."
+  solution: "Check the username and password are correct, then sign in again."
