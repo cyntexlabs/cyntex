@@ -1,5 +1,6 @@
 package io.cyntex.control.restapi;
 
+import io.cyntex.messages.MessageCatalog;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.bind.annotation.RestController;
@@ -28,5 +29,15 @@ public class RestApiConfiguration {
                 configurer.addPathPrefix("/api", HandlerTypePredicate.forAnnotation(RestController.class));
             }
         };
+    }
+
+    /**
+     * The shared error-code catalog + renderer, so this HTTP face renders coded errors the same way every
+     * other presentation face does (the offline CLI, the assembly root). The bundled {@code en} catalog is
+     * immutable and stateless, so a single instance is shared.
+     */
+    @Bean
+    MessageCatalog messageCatalog() {
+        return MessageCatalog.bundled();
     }
 }

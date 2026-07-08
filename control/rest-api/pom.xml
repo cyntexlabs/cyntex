@@ -33,6 +33,15 @@
       <artifactId>spring-boot-starter-web</artifactId>
     </dependency>
 
+    <!-- The shared error-code catalog + renderer (presentation-layer leaf, core-ring-only, no third-party):
+         this HTTP face renders coded errors the same way every other presentation face does (the CLI, the
+         assembly root). Granted to rest-api by the R5 ArchUnit rule, like the CLI's R6 grant. -->
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>messages</artifactId>
+      <version>${revision}</version>
+    </dependency>
+
     <!-- Test only. The web context is booted programmatically (SpringApplication, not the Spring
          JUnit extension) so the module stays on the reactor's JUnit line; versions come from the BOM. -->
     <dependency>

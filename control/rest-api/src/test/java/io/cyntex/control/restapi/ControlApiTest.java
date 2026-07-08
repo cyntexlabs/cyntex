@@ -25,6 +25,7 @@ import org.springframework.boot.web.server.context.WebServerApplicationContext;
 import org.springframework.context.ConfigurableApplicationContext;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
+import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.MediaType;
@@ -144,6 +145,43 @@ class ControlApiTest {
                 .containsExactlyInAnyOrder("src_ora", "tgt_my");
     }
 
+    // ---- coded errors project onto structured HTTP responses ----
+
+    @Test
+    void applyingAnInvalidDraftIsABadRequestWithACodedBody() {
+        // A validation failure (an unknown field) surfaces the dsl.* coded diagnostic before any store
+        // write; the advice projects it onto a 400 with the {code, params, message} body — no 500.
+        ApiError body = client().post().uri("/api/artifacts:apply")
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(Map.of("drafts", List.of(Map.of("content", UNKNOWN_FIELD_DRAFT))))
+                .exchange((request, response) -> {
+                    assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+                    return response.bodyTo(ApiError.class);
+                });
+
+        assertThat(body.code()).isEqualTo("dsl.unknown-field");
+        assertThat(body.message()).isEqualTo("Unknown field 'snapshot_mode' at options.snapshot_mode.");
+        assertThat(body.params()).containsEntry("field", "snapshot_mode");
+    }
+
+    @Test
+    void anUncodedFailureStaysABareServerErrorNotACodedBody() {
+        // A request with a null drafts field currently trips an invariant guard inside the service (a bare
+        // NPE). Whatever its origin, an uncoded throwable must never be laundered into a coded body: the
+        // advice catches only CyntexException, so this stays a bare 500 with no {code} envelope. (Coercing a
+        // malformed request into a coded 4xx is a separate request-validation concern, not this rule.)
+        Map<String, Object> body = client().post().uri("/api/artifacts:apply")
+                .contentType(MediaType.APPLICATION_JSON)
+                .accept(MediaType.APPLICATION_JSON)
+                .body(Map.of())
+                .exchange((request, response) -> {
+                    assertThat(response.getStatusCode().is5xxServerError()).isTrue();
+                    return response.bodyTo(new ParameterizedTypeReference<Map<String, Object>>() {});
+                });
+
+        assertThat(body).doesNotContainKey("code");
+    }
+
     @Test
     void connectionTestIsRoutedButNotYetImplemented() {
         // The R5 synchronous verb is reserved and routed; its probe and result-store land later, so it
@@ -215,7 +253,8 @@ class ControlApiTest {
      */
     @SpringBootConfiguration
     @EnableAutoConfiguration
-    @Import({RestApiConfiguration.class, ArtifactController.class, ConnectionController.class})
+    @Import({RestApiConfiguration.class, ArtifactController.class, ConnectionController.class,
+            ApiExceptionHandler.class})
     static class TestApp {
 
         @Bean
@@ -235,6 +274,18 @@ class ControlApiTest {
     }
 
     // ---- fixtures ----
+
+    /** A source draft carrying a field outside the cyntex/v1 schema — rejected as dsl.unknown-field. */
+    private static final String UNKNOWN_FIELD_DRAFT = """
+            version: cyntex/v1
+            kind: source
+            id: src_ora
+            connector: oracle
+            config: { host: 10.20.0.15 }
+            mode: cdc
+            tables: [ ORDERS ]
+            options: { snapshot_mode: initial, include_ddl: true }
+            """;
 
     private static final String TGT_MY = """
             version: cyntex/v1
