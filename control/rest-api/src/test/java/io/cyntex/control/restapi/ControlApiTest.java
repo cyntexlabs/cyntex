@@ -193,6 +193,33 @@ class ControlApiTest {
         assertThat(status).isEqualTo(HttpStatus.NOT_IMPLEMENTED);
     }
 
+    // ---- the anonymous probe lives outside the verb surface ----
+
+    @Test
+    void healthzAnswersAtTheRootOutsideTheApiPrefix() {
+        // The load-balancer probe is pure HTTP: anonymous, at the root, not a registry verb. It must
+        // not be swept under the /api prefix — that root is exactly what the plain-@Controller carve-out
+        // in the path-prefix rule exists for.
+        ResponseEntity<String> probe = client().get().uri("/healthz").retrieve().toEntity(String.class);
+
+        assertThat(probe.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(probe.getBody()).isEqualTo("ok");
+
+        HttpStatusCode underApi = client().get().uri("/api/healthz")
+                .exchange((request, response) -> response.getStatusCode());
+        assertThat(underApi).isEqualTo(HttpStatus.NOT_FOUND);
+    }
+
+    @Test
+    void clusterMembersIsRoutedButNotYetImplemented() {
+        // Topology must never leak anonymously: until the authentication interceptor and the member
+        // listing land, the endpoint is reserved and answers 501 — it exposes nothing.
+        HttpStatusCode status = client().get().uri("/api/cluster/members")
+                .exchange((request, response) -> response.getStatusCode());
+
+        assertThat(status).isEqualTo(HttpStatus.NOT_IMPLEMENTED);
+    }
+
     // ---- the endpoint table is a derivation of the registry ----
 
     @Test
@@ -233,8 +260,8 @@ class ControlApiTest {
                 .as("every projected verb must be a registered, CLI-exposed operation")
                 .isEmpty();
         assertThat(projected)
-                .as("the artifact verbs and the R5 connection-test verb are projected onto HTTP")
-                .contains("artifact.apply", "artifact.get", "artifact.list", "connection.test");
+                .as("the artifact verbs, the R5 connection-test verb and the topology verb are projected onto HTTP")
+                .contains("artifact.apply", "artifact.get", "artifact.list", "connection.test", "cluster.members");
     }
 
     private static String describe(HandlerMethod handler) {
@@ -254,7 +281,7 @@ class ControlApiTest {
     @SpringBootConfiguration
     @EnableAutoConfiguration
     @Import({RestApiConfiguration.class, ArtifactController.class, ConnectionController.class,
-            ApiExceptionHandler.class})
+            ClusterController.class, HealthController.class, ApiExceptionHandler.class})
     static class TestApp {
 
         @Bean
