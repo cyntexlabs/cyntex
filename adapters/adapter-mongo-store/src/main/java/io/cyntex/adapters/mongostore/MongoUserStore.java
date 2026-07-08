@@ -47,6 +47,14 @@ public final class MongoUserStore implements UserStore {
         return document == null ? Optional.empty() : Optional.of(toUser(document));
     }
 
+    @Override
+    public boolean isEmpty() {
+        // An existence check, not a count: fetch at most one document rather than scanning the whole
+        // collection. Reads no field, so a corrupt document cannot fail this the way find / toUser can.
+        Document any = StoreIo.call(() -> collection.find().limit(1).first());
+        return any == null;
+    }
+
     /** Maps a user to its stored document, keyed by the username as {@code _id} for natural uniqueness. */
     static Document toDocument(User user) {
         return new Document("_id", user.username())

@@ -19,4 +19,11 @@ public interface UserStore {
      * replaces the stored record in place rather than creating a second one.
      */
     void save(User user);
+
+    /**
+     * Returns whether no user exists at all. This is the precondition the zero-user bootstrap exception
+     * turns on — a server with an empty user table may create its first admin — so it reports exact
+     * emptiness, not an estimate.
+     */
+    boolean isEmpty();
 }

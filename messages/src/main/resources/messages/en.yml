@@ -113,6 +113,12 @@ control.audit-blocked:
 control.auth-failed:
   message: "Authentication failed: invalid username or password."
   solution: "Check the username and password are correct, then sign in again."
+control.bootstrap-closed:
+  message: "The initial-admin bootstrap channel is closed because an admin account already exists."
+  solution: "Sign in with an existing admin account to create more users."
+control.bootstrap-forbidden:
+  message: "The initial-admin bootstrap channel accepts only local (loopback) connections."
+  solution: "Create the first admin from a session on the server host itself, or pre-seed one at deployment."
 control.forbidden:
   message: "Operation '{op}' requires {required} capability."
   solution: "Sign in as a user with that capability, or use a token issued with that scope."

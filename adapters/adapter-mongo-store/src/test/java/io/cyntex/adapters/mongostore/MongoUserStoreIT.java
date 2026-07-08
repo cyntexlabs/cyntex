@@ -55,6 +55,20 @@ class MongoUserStoreIT {
         });
     }
 
+    @Test
+    void anEmptyCollectionReportsEmpty() {
+        withStore((store, collection) -> assertThat(store.isEmpty()).isTrue());
+    }
+
+    @Test
+    void aSavedUserMakesTheStoreNonEmpty() {
+        withStore((store, collection) -> {
+            store.save(new User("alice", "hash-abc", "admin"));
+
+            assertThat(store.isEmpty()).isFalse();
+        });
+    }
+
     private interface StoreTest {
         void run(MongoUserStore store, MongoCollection<Document> collection);
     }

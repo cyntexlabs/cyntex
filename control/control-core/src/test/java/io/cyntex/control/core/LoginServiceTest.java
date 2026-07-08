@@ -141,6 +141,11 @@ class LoginServiceTest {
         public void save(User user) {
             users.put(user.username(), user);
         }
+
+        @Override
+        public boolean isEmpty() {
+            return users.isEmpty();
+        }
     }
 
     /** A deterministic password verifier that also counts verification calls, to witness timing parity. */

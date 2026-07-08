@@ -22,6 +22,22 @@ public enum ControlError implements CyntexErrorCode {
     AUDIT_BLOCKED("control.audit-blocked", Set.of("op")),
 
     /**
+     * The zero-user bootstrap channel was reached from a non-loopback caller and refused. It carries no
+     * placeholder on purpose: a remote caller is refused before the user table is consulted, so this
+     * single answer — returned whether or not the server has been bootstrapped — leaks nothing about
+     * that state. Distinct from {@code bootstrap-closed}, which a trusted loopback caller sees once an
+     * admin already exists.
+     */
+    BOOTSTRAP_FORBIDDEN("control.bootstrap-forbidden", Set.of()),
+
+    /**
+     * The zero-user bootstrap channel was reached after an admin already exists and refused: the one
+     * exception is closed for good the moment the user table stops being empty. Reached only by a
+     * loopback caller — a remote one is turned away earlier with {@code bootstrap-forbidden}.
+     */
+    BOOTSTRAP_CLOSED("control.bootstrap-closed", Set.of()),
+
+    /**
      * A login was rejected: the username does not exist, or the password did not match. One code
      * covers both cases and it carries no placeholder on purpose — echoing nothing back means the
      * failure cannot be used to tell an existing username from an absent one (no user enumeration).
