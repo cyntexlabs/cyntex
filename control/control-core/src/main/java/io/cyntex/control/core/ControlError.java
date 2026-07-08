@@ -26,7 +26,15 @@ public enum ControlError implements CyntexErrorCode {
      * covers both cases and it carries no placeholder on purpose — echoing nothing back means the
      * failure cannot be used to tell an existing username from an absent one (no user enumeration).
      */
-    AUTH_FAILED("control.auth-failed", Set.of());
+    AUTH_FAILED("control.auth-failed", Set.of()),
+
+    /**
+     * An authenticated caller's credential does not carry the capability grade the operation requires;
+     * {@code op} is the operation id and {@code required} the grade it needs. Distinct from
+     * {@code auth-failed}, which is pre-authentication: here the caller is known, they simply lack the
+     * grade, so echoing the operation and the grade it needs is a help, not an information leak.
+     */
+    FORBIDDEN("control.forbidden", Set.of("op", "required"));
 
     private final String code;
     private final Set<String> placeholders;

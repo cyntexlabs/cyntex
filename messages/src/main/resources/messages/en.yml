@@ -113,3 +113,6 @@ control.audit-blocked:
 control.auth-failed:
   message: "Authentication failed: invalid username or password."
   solution: "Check the username and password are correct, then sign in again."
+control.forbidden:
+  message: "Operation '{op}' requires {required} capability."
+  solution: "Sign in as a user with that capability, or use a token issued with that scope."
