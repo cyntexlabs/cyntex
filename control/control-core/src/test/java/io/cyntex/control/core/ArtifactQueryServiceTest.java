@@ -93,6 +93,31 @@ class ArtifactQueryServiceTest {
     }
 
     @Test
+    void listByKindReturnsOnlyArtifactsOfThatKind() {
+        // The read-by-kind query lives in the read service (server-as-truth read semantics), so a face
+        // stays a pure projection: list("source") returns the two sources, list("pipeline") the pipeline.
+        apply.apply(List.of(draft(SRC_ORA), draft(TGT_MY), draft(PIPELINE)));
+
+        assertThat(query.list("source")).extracting(StoredArtifact::id)
+                .containsExactlyInAnyOrder("src_ora", "tgt_my");
+        assertThat(query.list("pipeline")).extracting(StoredArtifact::id)
+                .containsExactly("ora2my_ods");
+    }
+
+    @Test
+    void listByBlankKindReturnsEveryKind() {
+        // A blank or absent kind filter is "no filter": the query returns every stored artifact across
+        // kinds, the same as the unfiltered list, so the endpoint's optional ?kind= parameter degrades
+        // to list-all.
+        apply.apply(List.of(draft(SRC_ORA), draft(TGT_MY), draft(PIPELINE)));
+
+        assertThat(query.list((String) null)).extracting(StoredArtifact::id)
+                .containsExactlyInAnyOrder("src_ora", "tgt_my", "ora2my_ods");
+        assertThat(query.list("   ")).extracting(StoredArtifact::id)
+                .containsExactlyInAnyOrder("src_ora", "tgt_my", "ora2my_ods");
+    }
+
+    @Test
     void onlyApplyMovesTheTruthLayerNotAPreparedEdit() {
         // Server-as-truth: the store is the read source and only apply mutates it. Apply v1 -> get is v1;
         // preparing the edit through plan (the store-free validate + canonicalize front half, which writes

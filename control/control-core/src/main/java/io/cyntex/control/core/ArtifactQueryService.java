@@ -39,6 +39,18 @@ public final class ArtifactQueryService {
         return store.list().stream().map(this::view).toList();
     }
 
+    /**
+     * Lists stored artifacts of the given {@code kind} as their canonical form; a null or blank kind is
+     * "no filter" and returns every artifact, the same as {@link #list()}. Read-by-kind lives here in
+     * the read service so a face stays a pure projection of the verb rather than filtering results itself.
+     */
+    public List<StoredArtifact> list(String kind) {
+        if (kind == null || kind.isBlank()) {
+            return list();
+        }
+        return store.list().stream().filter(r -> r.kind().equals(kind)).map(this::view).toList();
+    }
+
     private StoredArtifact view(Resource resource) {
         return new StoredArtifact(resource.id(), resource.kind(), writer.write(resource));
     }

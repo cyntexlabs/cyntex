@@ -16,6 +16,15 @@
     the control verbs onto a single-context, single-port HTTP surface under the /api prefix.</description>
 
   <dependencies>
+    <!-- The verb layer this face projects onto HTTP. rest-api holds a compile dependency on control-core
+         (and the core ring it carries), never on the storage port directly (R5): the store-backed apply /
+         query services are constructed at the assembly root and injected here as control-core types. -->
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>control-core</artifactId>
+      <version>${revision}</version>
+    </dependency>
+
     <!-- The Web MVC substrate (Spring Boot 4.1.x on Spring Framework 7 / Jakarta EE 11): embedded
          servlet container + the HTTP JSON wire codec. Versions come from the reactor BOM. This is the
          only ring where Spring is admitted (R5); the control-core verb layer stays framework-free. -->
