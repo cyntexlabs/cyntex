@@ -79,6 +79,14 @@
       <artifactId>control-core</artifactId>
       <version>${revision}</version>
     </dependency>
+    <!-- The HTTP control face (Spring Web MVC): the assembly root imports its ControlHttpFace bundle to
+         serve the authenticated /api verb surface. This brings the servlet web starter transitively, so
+         the server runs an embedded web container; the CLI stays native and never depends on it. -->
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>rest-api</artifactId>
+      <version>${revision}</version>
+    </dependency>
     <!-- The shared error-code message catalog + renderer: the server renders coded diagnostics
          through the same catalog as the CLI. -->
     <dependency>

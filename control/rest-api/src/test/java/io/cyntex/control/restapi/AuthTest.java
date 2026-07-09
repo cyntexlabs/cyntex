@@ -322,14 +322,15 @@ class AuthTest {
             """;
 
     /**
-     * A minimal boot config: auto-configures Web MVC + the embedded servlet container, imports the HTTP
-     * face (path prefix + interceptor registration), every verb controller, the pre-auth controller and
-     * the exception advice, and constructs the real control-core services over in-memory fakes.
+     * A minimal boot config: auto-configures Web MVC + the embedded servlet container, imports the whole
+     * HTTP control face as one bundle ({@link ControlHttpFace} — path prefix, interceptor registration,
+     * every verb controller, the pre-auth controller, the probe, the advice, and the interceptor bean),
+     * and constructs the real control-core services over in-memory fakes. Importing the bundle rather than
+     * the parts means this test exercises the exact assembly the running server uses.
      */
     @SpringBootConfiguration
     @EnableAutoConfiguration
-    @Import({RestApiConfiguration.class, ArtifactController.class, ConnectionController.class,
-            ClusterController.class, HealthController.class, AuthController.class, ApiExceptionHandler.class})
+    @Import(ControlHttpFace.class)
     static class TestApp {
 
         @Bean
@@ -402,11 +403,6 @@ class AuthTest {
         @Bean
         CredentialAuthenticator credentialAuthenticator(TokenService tokens, TokenSigner signer) {
             return new CredentialAuthenticator(tokens, signer);
-        }
-
-        @Bean
-        AuthInterceptor authInterceptor(OperationRegistry registry, CredentialAuthenticator credentials) {
-            return new AuthInterceptor(registry, credentials);
         }
 
         @Bean
