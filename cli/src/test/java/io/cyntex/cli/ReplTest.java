@@ -48,10 +48,22 @@ class ReplTest {
         return new Harness(new Repl(cl, workdir, controlPlane), sink);
     }
 
+    private static Harness harness(Path workdir, ControlPlaneClient controlPlane, Prompter prompter) {
+        CommandLine cl = Cli.newCommandLine();
+        StringWriter sink = new StringWriter();
+        PrintWriter pw = new PrintWriter(sink);
+        cl.setOut(pw);
+        cl.setErr(pw);
+        return new Harness(new Repl(cl, workdir, controlPlane, prompter), sink);
+    }
+
     /** A network-free stand-in that answers healthy only for the given base URLs and records probes. */
     private static final class FakeControlPlane implements ControlPlaneClient {
         private final Set<URI> healthy;
         final List<URI> probed = new ArrayList<>();
+        /** The canned login outcome and a log of the login calls made ({@code user:pass@base}). */
+        LoginOutcome loginOutcome = new LoginOutcome.Unreachable();
+        final List<String> loginCalls = new ArrayList<>();
 
         FakeControlPlane(URI... healthy) {
             this.healthy = new LinkedHashSet<>(List.of(healthy));
@@ -61,6 +73,18 @@ class ReplTest {
         public boolean isHealthy(URI baseUrl) {
             probed.add(baseUrl);
             return healthy.contains(baseUrl);
+        }
+
+        /** Replaces the reachable set, so a test can knock a landing node down mid-session. */
+        void setHealthy(URI... urls) {
+            healthy.clear();
+            healthy.addAll(List.of(urls));
+        }
+
+        @Override
+        public LoginOutcome login(URI baseUrl, String username, String password) {
+            loginCalls.add(username + ":" + password + "@" + baseUrl);
+            return loginOutcome;
         }
     }
 
@@ -388,20 +412,15 @@ class ReplTest {
     }
 
     @Test
-    void connectingCarriesNoCredential() {
+    void connectingLeavesTheSessionUnauthenticated() {
         FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
         Harness h = harness(Path.of("cyn-work"), client);
         h.repl().dispatch("connect node1:7900");
         assertThat(h.repl().session().isConnected()).isTrue();
-        // connect establishes a transport target only; no credential/auth state exists on the session
-        for (var f : Session.class.getDeclaredFields()) {
-            String name = f.getName().toLowerCase(java.util.Locale.ROOT);
-            assertThat(name)
-                    .doesNotContain("credential")
-                    .doesNotContain("token")
-                    .doesNotContain("password")
-                    .doesNotContain("user");
-        }
+        // connect establishes a transport target only; no credential is obtained until login
+        assertThat(h.repl().session().isAuthenticated()).isFalse();
+        assertThat(h.repl().session().credential()).isNull();
+        assertThat(h.repl().session().principal()).isNull();
     }
 
     @Test
@@ -465,5 +484,151 @@ class ReplTest {
         assertThat(h.repl().dispatch("disconnect")).isTrue();
         assertThat(h.repl().session().isConnected()).isFalse();
         assertThat(h.sink().toString()).contains("not connected");
+    }
+
+    // --- login / logout / authenticated prompt ---------------------------------------------------
+
+    @Test
+    void loginBeforeConnectReportsNotConnectedAndDoesNotCallTheClient() {
+        FakeControlPlane client = new FakeControlPlane();
+        Harness h = harness(Path.of("cyn-work"), client, new ScriptedPrompter("pw"));
+        assertThat(h.repl().dispatch("login alice")).isTrue();
+        assertThat(h.repl().session().isAuthenticated()).isFalse();
+        assertThat(h.sink().toString()).contains("login:").contains("not connected");
+        assertThat(client.loginCalls).isEmpty();
+    }
+
+    @Test
+    void loginWithNoUsernameReportsMissingOperandAndDoesNotCallTheClient() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        Harness h = harness(Path.of("cyn-work"), client, new ScriptedPrompter("pw"));
+        h.repl().dispatch("connect node1:7900");
+        assertThat(h.repl().dispatch("login")).isTrue();
+        assertThat(h.sink().toString()).contains("login:").contains("missing operand");
+        assertThat(client.loginCalls).isEmpty();
+    }
+
+    @Test
+    void loginReadsAMaskedPasswordAndAuthenticatesOnSuccess() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.loginOutcome = new LoginOutcome.Success("jwt-abc");
+        ScriptedPrompter prompter = new ScriptedPrompter("s3cret");
+        Harness h = harness(Path.of("cyn-work"), client, prompter);
+        h.repl().dispatch("connect node1:7900");
+        assertThat(h.repl().dispatch("login alice")).isTrue();
+        assertThat(h.repl().session().isAuthenticated()).isTrue();
+        assertThat(h.repl().session().principal()).isEqualTo("alice");
+        assertThat(h.repl().session().credential()).isEqualTo("jwt-abc");
+        assertThat(prompter.secretQuestions).isNotEmpty();   // the password was read masked, never echoed
+        assertThat(client.loginCalls).containsExactly("alice:s3cret@http://node1:7900");
+        assertThat(h.sink().toString()).contains("logged in as alice");
+    }
+
+    @Test
+    void authenticatedPromptShowsThePrincipalAtTheNode() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.loginOutcome = new LoginOutcome.Success("jwt-abc");
+        Harness h = harness(Path.of("cyn-work"), client, new ScriptedPrompter("s3cret"));
+        h.repl().dispatch("connect node1:7900");
+        assertThat(h.repl().prompt()).isEqualTo("cyntex(node1:7900)> ");   // connected, unauthenticated
+        h.repl().dispatch("login alice");
+        assertThat(h.repl().prompt()).isEqualTo("cyntex(alice@node1:7900)> ");
+    }
+
+    @Test
+    void loginRejectedRendersTheServerErrorAndStaysUnauthenticated() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.loginOutcome = new LoginOutcome.Rejected("control.auth-failed", "Login failed.");
+        Harness h = harness(Path.of("cyn-work"), client, new ScriptedPrompter("wrong"));
+        h.repl().dispatch("connect node1:7900");
+        assertThat(h.repl().dispatch("login alice")).isTrue();
+        assertThat(h.repl().session().isAuthenticated()).isFalse();
+        assertThat(h.sink().toString()).contains("control.auth-failed").contains("Login failed.");
+        assertThat(h.repl().prompt()).isEqualTo("cyntex(node1:7900)> ");   // stays connected-unauthenticated
+    }
+
+    @Test
+    void loginUnreachableReportsAndStaysUnauthenticated() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.loginOutcome = new LoginOutcome.Unreachable();
+        Harness h = harness(Path.of("cyn-work"), client, new ScriptedPrompter("pw"));
+        h.repl().dispatch("connect node1:7900");
+        assertThat(h.repl().dispatch("login alice")).isTrue();
+        assertThat(h.repl().session().isAuthenticated()).isFalse();
+        assertThat(h.sink().toString()).contains("login:").contains("node1:7900");
+    }
+
+    @Test
+    void logoutClearsAuthenticationButKeepsTheConnection() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.loginOutcome = new LoginOutcome.Success("jwt");
+        Harness h = harness(Path.of("cyn-work"), client, new ScriptedPrompter("pw"));
+        h.repl().dispatch("connect node1:7900");
+        h.repl().dispatch("login alice");
+        assertThat(h.repl().dispatch("logout")).isTrue();
+        assertThat(h.repl().session().isAuthenticated()).isFalse();
+        assertThat(h.repl().session().isConnected()).isTrue();
+        assertThat(h.sink().toString()).contains("logged out");
+        assertThat(h.repl().prompt()).isEqualTo("cyntex(node1:7900)> ");
+    }
+
+    @Test
+    void logoutWhileNotAuthenticatedPrintsABenignLine() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        Harness h = harness(Path.of("cyn-work"), client, new ScriptedPrompter());
+        h.repl().dispatch("connect node1:7900");
+        assertThat(h.repl().dispatch("logout")).isTrue();
+        assertThat(h.sink().toString()).contains("not logged in");
+    }
+
+    // --- failover: re-land across the member set on a lost landing node --------------------------
+
+    @Test
+    void failoverRelandsOnAnotherHealthyMemberKeepingTheCredential() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://n1:7900"), URI.create("http://n2:7900"));
+        client.loginOutcome = new LoginOutcome.Success("jwt");
+        Harness h = harness(Path.of("cyn-work"), client, new ScriptedPrompter("pw"));
+        h.repl().dispatch("connect n1:7900,n2:7900");      // both healthy -> lands n1, members = [n1, n2]
+        h.repl().dispatch("login alice");
+        client.setHealthy(URI.create("http://n2:7900"));   // n1 goes down
+        assertThat(h.repl().failover()).isTrue();
+        assertThat(h.repl().session().landingNode()).isEqualTo(URI.create("http://n2:7900"));
+        assertThat(h.repl().session().isAuthenticated()).isTrue();   // cluster-wide credential survives
+        assertThat(h.repl().session().credential()).isEqualTo("jwt");
+        assertThat(h.repl().prompt()).isEqualTo("cyntex(alice@n2:7900)> ");
+    }
+
+    @Test
+    void failoverReconnectsToTheSameSingleNodeWhenItIsStillReachable() {
+        // the failover path is not omitted for a single-node member list (L1 exercises the same mechanism)
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://n1:7900"));
+        Harness h = harness(Path.of("cyn-work"), client, new ScriptedPrompter());
+        h.repl().dispatch("connect n1:7900");
+        assertThat(h.repl().failover()).isTrue();
+        assertThat(h.repl().session().landingNode()).isEqualTo(URI.create("http://n1:7900"));
+        assertThat(h.repl().session().isConnected()).isTrue();
+    }
+
+    @Test
+    void failoverWithNoReachableMemberLosesTheConnection() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://n1:7900"));
+        client.loginOutcome = new LoginOutcome.Success("jwt");
+        Harness h = harness(Path.of("cyn-work"), client, new ScriptedPrompter("pw"));
+        h.repl().dispatch("connect n1:7900");
+        h.repl().dispatch("login alice");
+        client.setHealthy();   // nothing reachable
+        assertThat(h.repl().failover()).isFalse();
+        assertThat(h.repl().session().isConnected()).isFalse();
+        assertThat(h.repl().session().isAuthenticated()).isFalse();
+        assertThat(h.repl().prompt()).isEqualTo("cyntex(offline:cyn-work)> ");
+    }
+
+    @Test
+    void failoverWhileOfflineIsANoOpAndProbesNothing() {
+        FakeControlPlane client = new FakeControlPlane();
+        Harness h = harness(Path.of("cyn-work"), client, new ScriptedPrompter());
+        assertThat(h.repl().failover()).isFalse();
+        assertThat(h.repl().session().isConnected()).isFalse();
+        assertThat(client.probed).isEmpty();
     }
 }

@@ -37,12 +37,16 @@ import java.util.stream.Collectors;
 final class Repl {
 
     /** REPL-only words handled here rather than by the command table; completed alongside the verbs. */
-    static final List<String> BUILTINS = List.of("help", "exit", "quit", "cd", "pwd", "connect", "disconnect");
+    static final List<String> BUILTINS =
+            List.of("help", "exit", "quit", "cd", "pwd", "connect", "disconnect", "login", "logout");
 
     private final CommandLine commandLine;
 
     /** The transport seam to a server; a network-free fake is injected in tests. */
     private final ControlPlaneClient controlPlane;
+
+    /** Reads the login password masked; a scripted fake is injected in tests, a JLine one bound in {@link #run}. */
+    private Prompter prompter;
 
     /** The connection state, carried across read-loop iterations (offline until {@code connect}). */
     private final Session session = new Session();
@@ -59,9 +63,14 @@ final class Repl {
     }
 
     Repl(CommandLine commandLine, Path workdir, ControlPlaneClient controlPlane) {
+        this(commandLine, workdir, controlPlane, null);
+    }
+
+    Repl(CommandLine commandLine, Path workdir, ControlPlaneClient controlPlane, Prompter prompter) {
         this.commandLine = commandLine;
         this.workdir = workdir;
         this.controlPlane = controlPlane;
+        this.prompter = prompter;
     }
 
     /** The current session workspace. */
@@ -75,10 +84,14 @@ final class Repl {
     }
 
     /**
-     * The prompt: {@code cyntex(offline:<workspace>)> } while offline, or {@code cyntex(<host:port>)> }
-     * naming the landing node once connected.
+     * The prompt: {@code cyntex(offline:<workspace>)> } while offline, {@code cyntex(<host:port>)> }
+     * naming the landing node once connected, and {@code cyntex(<principal>@<host:port>)> } once
+     * authenticated (the cluster name is not shown while membership is undiscovered in L1).
      */
     String prompt() {
+        if (session.isAuthenticated()) {
+            return "cyntex(" + session.principal() + "@" + hostPort(session.landingNode()) + ")> ";
+        }
         if (session.isConnected()) {
             return "cyntex(" + hostPort(session.landingNode()) + ")> ";
         }
@@ -120,6 +133,14 @@ final class Repl {
         }
         if (words.get(0).equals("disconnect")) {
             disconnect();
+            return true;
+        }
+        if (words.get(0).equals("login")) {
+            login(words);
+            return true;
+        }
+        if (words.get(0).equals("logout")) {
+            logout();
             return true;
         }
         commandLine.execute(withWorkspace(words));
@@ -170,6 +191,91 @@ final class Repl {
             out.println("disconnected");
         } else {
             out.println("not connected");
+        }
+        out.flush();
+    }
+
+    /**
+     * Authenticates the connected session as a human user: reads the password masked, verifies it via
+     * {@code POST /auth/login}, and on success stores the returned bearer credential. Login requires an
+     * established connection (authenticating is decoupled from connecting) and a username operand — both
+     * absences are benign usage lines, not coded errors. A server refusal renders the server's coded
+     * message (a bad credential is {@code control.auth-failed}, revealing nothing about which half was
+     * wrong); an unreachable landing node is a benign transient line. The member set for failover is the
+     * seeds until membership discovery lands.
+     */
+    private void login(List<String> words) {
+        PrintWriter out = commandLine.getOut();
+        PrintWriter err = commandLine.getErr();
+        if (!session.isConnected()) {
+            err.println("login: not connected (run connect first)");
+            err.flush();
+            return;
+        }
+        if (words.size() < 2 || words.get(1).isBlank()) {
+            err.println("login: missing operand (usage: login <username>)");
+            err.flush();
+            return;
+        }
+        String username = words.get(1);
+        String password = prompter.secret("Password");
+        URI node = session.landingNode();
+        switch (controlPlane.login(node, username, password)) {
+            case LoginOutcome.Success success -> {
+                session.authenticate(success.token(), username, null, session.seeds());
+                out.println("logged in as " + username);
+                out.flush();
+            }
+            case LoginOutcome.Rejected rejected -> {
+                if (!rejected.code().isBlank()) {
+                    err.println(Ansi.AUTO.string("@|bold,red error:|@") + " " + rejected.code());
+                }
+                err.println("  " + rejected.message());
+                err.flush();
+            }
+            case LoginOutcome.Unreachable ignored -> {
+                err.println("login: cannot reach " + hostPort(node));
+                err.flush();
+            }
+        }
+    }
+
+    /**
+     * Re-establishes the landing node after the current one is found unreachable: probes the member set
+     * in order and re-lands on the first that answers, keeping the (cluster-wide) credential so the
+     * session stays authenticated across the move. When no member answers the connection is lost and the
+     * session returns to offline; an offline session is a no-op. This is the seam a connected verb
+     * invokes on a request failure — L1's single-node member set exercises the same path (it is not
+     * omitted for one node). Returns whether a landing node was kept.
+     */
+    boolean failover() {
+        if (!session.isConnected()) {
+            return false;
+        }
+        for (URI member : session.members()) {
+            if (controlPlane.isHealthy(member)) {
+                session.reland(member);
+                PrintWriter out = commandLine.getOut();
+                out.println("reconnected to " + hostPort(member));
+                out.flush();
+                return true;
+            }
+        }
+        session.disconnect();
+        PrintWriter err = commandLine.getErr();
+        err.println("connection lost: no reachable cluster member");
+        err.flush();
+        return false;
+    }
+
+    /** Drops the credential while keeping the transport connection; a benign line either way. */
+    private void logout() {
+        PrintWriter out = commandLine.getOut();
+        if (session.isAuthenticated()) {
+            session.logout();
+            out.println("logged out");
+        } else {
+            out.println("not logged in");
         }
         out.flush();
     }
@@ -319,6 +425,10 @@ final class Repl {
         // system(true) for a real terminal; dumb(true) degrades silently to a dumb terminal when
         // there is no TTY (piped / redirected input) instead of printing a JLine warning.
         try (Terminal terminal = TerminalBuilder.builder().system(true).dumb(true).build()) {
+            if (prompter == null) {
+                // bind the masked-input reader to the REPL's own terminal (which this try owns and closes)
+                prompter = new JLinePrompter(terminal, false);
+            }
             LineReader reader = LineReaderBuilder.builder()
                     .terminal(terminal)
                     .completer(CyntexCompleter.forRepl(commandLine, SchemaNavigator.bundled()))
