@@ -1,6 +1,8 @@
 package io.cyntex.cli;
 
+import io.cyntex.core.common.CyntexException;
 import io.cyntex.core.schema.SchemaNavigator;
+import io.cyntex.messages.MessageCatalog;
 import org.jline.reader.EndOfFileException;
 import org.jline.reader.LineReader;
 import org.jline.reader.LineReaderBuilder;
@@ -8,14 +10,18 @@ import org.jline.reader.UserInterruptException;
 import org.jline.terminal.Terminal;
 import org.jline.terminal.TerminalBuilder;
 import picocli.CommandLine;
+import picocli.CommandLine.Help.Ansi;
 
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.io.UncheckedIOException;
+import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 /**
  * The offline REPL: a JLine read loop over the same command table the one-shot mode uses, so a verb
@@ -31,9 +37,15 @@ import java.util.List;
 final class Repl {
 
     /** REPL-only words handled here rather than by the command table; completed alongside the verbs. */
-    static final List<String> BUILTINS = List.of("help", "exit", "quit", "cd", "pwd");
+    static final List<String> BUILTINS = List.of("help", "exit", "quit", "cd", "pwd", "connect", "disconnect");
 
     private final CommandLine commandLine;
+
+    /** The transport seam to a server; a network-free fake is injected in tests. */
+    private final ControlPlaneClient controlPlane;
+
+    /** The connection state, carried across read-loop iterations (offline until {@code connect}). */
+    private final Session session = new Session();
 
     /** The session workspace: the current {@code cd} directory, injected into workspace-aware verbs. */
     private Path workdir;
@@ -43,8 +55,13 @@ final class Repl {
     }
 
     Repl(CommandLine commandLine, Path workdir) {
+        this(commandLine, workdir, new HttpControlPlaneClient());
+    }
+
+    Repl(CommandLine commandLine, Path workdir, ControlPlaneClient controlPlane) {
         this.commandLine = commandLine;
         this.workdir = workdir;
+        this.controlPlane = controlPlane;
     }
 
     /** The current session workspace. */
@@ -52,8 +69,19 @@ final class Repl {
         return workdir;
     }
 
-    /** The prompt, naming the current workspace, e.g. {@code cyntex(offline:cyn-work)> }. */
+    /** The current connection state. */
+    Session session() {
+        return session;
+    }
+
+    /**
+     * The prompt: {@code cyntex(offline:<workspace>)> } while offline, or {@code cyntex(<host:port>)> }
+     * naming the landing node once connected.
+     */
     String prompt() {
+        if (session.isConnected()) {
+            return "cyntex(" + hostPort(session.landingNode()) + ")> ";
+        }
         Path name = workdir.getFileName();
         String label = name != null ? name.toString() : workdir.toString();
         return "cyntex(offline:" + label + ")> ";
@@ -86,8 +114,95 @@ final class Repl {
             changeDir(words);
             return true;
         }
+        if (words.get(0).equals("connect")) {
+            connect(words);
+            return true;
+        }
+        if (words.get(0).equals("disconnect")) {
+            disconnect();
+            return true;
+        }
         commandLine.execute(withWorkspace(words));
         return true;
+    }
+
+    /**
+     * Establishes a transport target from a comma-separated seed list, probing each seed in order and
+     * landing on the first that answers {@code /healthz}. Connecting does not authenticate — the
+     * session carries no credential. A blank argument is a usage mistake (a benign message, not a
+     * coded error); no reachable seed is the coded {@code cli.connect-failed} diagnostic.
+     */
+    private void connect(List<String> words) {
+        PrintWriter err = commandLine.getErr();
+        String arg = words.size() > 1 ? words.get(1) : "";
+        List<URI> seeds = parseSeeds(arg);
+        if (seeds.isEmpty()) {
+            err.println("connect: missing operand (usage: connect <host:port>[,<host:port>...])");
+            err.flush();
+            return;
+        }
+        for (URI seed : seeds) {
+            if (controlPlane.isHealthy(seed)) {
+                session.connect(seeds, seed);
+                PrintWriter out = commandLine.getOut();
+                out.println("connected to " + hostPort(seed));
+                out.flush();
+                return;
+            }
+        }
+        reportConnectFailed(seeds);
+    }
+
+    /** Clears the connection back to offline; a benign line either way, never an error. */
+    private void disconnect() {
+        PrintWriter out = commandLine.getOut();
+        if (session.isConnected()) {
+            session.disconnect();
+            out.println("disconnected");
+        } else {
+            out.println("not connected");
+        }
+        out.flush();
+    }
+
+    /** Renders the {@code cli.connect-failed} diagnostic through the message catalog to the err stream. */
+    private void reportConnectFailed(List<URI> seeds) {
+        String display = seeds.stream().map(URI::toString).collect(Collectors.joining(", "));
+        CyntexException failure =
+                new CyntexException(CliError.CONNECT_FAILED, Map.of("seeds", display), null);
+        MessageCatalog.Rendered rendered =
+                MessageCatalog.bundled().render(failure.code(), failure.args());
+        PrintWriter err = commandLine.getErr();
+        err.println(Ansi.AUTO.string("@|bold,red error:|@") + " " + failure.code().code());
+        err.println("  " + rendered.message());
+        if (rendered.solution() != null) {
+            err.println("  " + rendered.solution());
+        }
+        err.flush();
+    }
+
+    /**
+     * Parses a comma-separated seed list into base URLs: each element is trimmed and blanks dropped;
+     * one that already carries a scheme ({@code ://}) is kept as-is, and a bare {@code host:port} gets
+     * an {@code http://} scheme.
+     */
+    static List<URI> parseSeeds(String arg) {
+        List<URI> seeds = new ArrayList<>();
+        for (String raw : arg.split(",")) {
+            String s = raw.trim();
+            if (s.isEmpty()) {
+                continue;
+            }
+            seeds.add(URI.create(s.contains("://") ? s : "http://" + s));
+        }
+        return seeds;
+    }
+
+    /** The {@code host} or {@code host:port} of a base URL, for the prompt and success line. */
+    private static String hostPort(URI uri) {
+        String host = uri.getHost();
+        int port = uri.getPort();
+        return port == -1 ? host : host + ":" + port;
     }
 
     /** Changes the session workspace to an existing directory, resolved against the current one. */

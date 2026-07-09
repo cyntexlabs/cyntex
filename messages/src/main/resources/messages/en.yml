@@ -23,6 +23,9 @@ cli.kind-dir-mismatch:
 cli.resource-not-found:
   message: "No resource with id '{id}' in the workspace."
   solution: "Run `cyntex ls` to see the available resources."
+cli.connect-failed:
+  message: "Could not reach any Cyntex server among the seeds: {seeds}."
+  solution: "Check the addresses are correct and that a Cyntex server is running there, then try connect again."
 dsl.unknown-field:
   message: "Unknown field '{field}' at {path}."
   solution: "Remove it, or run `cyntex explain` to see the fields allowed here."

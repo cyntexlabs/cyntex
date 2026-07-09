@@ -5,6 +5,7 @@
 # @Deprecated codes stay listed as tombstones until intentionally retired.
 boot.hazelcast-unavailable
 cli.artifact-exists
+cli.connect-failed
 cli.kind-dir-mismatch
 cli.resource-not-found
 cli.unknown-connector

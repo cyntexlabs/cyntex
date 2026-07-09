@@ -63,8 +63,10 @@ class CliTest {
 
     @Test
     void connectedVerbsAreRegisteredNotMissing() {
+        // connect is a REPL builtin (session-scoped), not a one-shot subcommand
         assertThat(Cli.newCommandLine().getSubcommands().keySet())
-                .contains("apply", "run", "connect");
+                .contains("apply", "run")
+                .doesNotContain("connect");
     }
 
     @Test

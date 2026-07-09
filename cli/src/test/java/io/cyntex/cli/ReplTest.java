@@ -6,9 +6,13 @@ import picocli.CommandLine;
 
 import java.io.PrintWriter;
 import java.io.StringWriter;
+import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -33,6 +37,31 @@ class ReplTest {
         cl.setOut(pw);
         cl.setErr(pw);
         return new Harness(new Repl(cl, workdir), sink);
+    }
+
+    private static Harness harness(Path workdir, ControlPlaneClient controlPlane) {
+        CommandLine cl = Cli.newCommandLine();
+        StringWriter sink = new StringWriter();
+        PrintWriter pw = new PrintWriter(sink);
+        cl.setOut(pw);
+        cl.setErr(pw);
+        return new Harness(new Repl(cl, workdir, controlPlane), sink);
+    }
+
+    /** A network-free stand-in that answers healthy only for the given base URLs and records probes. */
+    private static final class FakeControlPlane implements ControlPlaneClient {
+        private final Set<URI> healthy;
+        final List<URI> probed = new ArrayList<>();
+
+        FakeControlPlane(URI... healthy) {
+            this.healthy = new LinkedHashSet<>(List.of(healthy));
+        }
+
+        @Override
+        public boolean isHealthy(URI baseUrl) {
+            probed.add(baseUrl);
+            return healthy.contains(baseUrl);
+        }
     }
 
     /** Copies a classpath workspace tree into {@code dest}, preserving the kind-directory layout. */
@@ -252,5 +281,122 @@ class ReplTest {
         h.repl().dispatch("desc kfk2my");
         String afterCd = h.sink().toString().substring(afterMiss);
         assertThat(afterCd).contains("kfk2my").contains("pipeline").doesNotContain("resource-not-found");
+    }
+
+    // --- online-session skeleton: connect / disconnect / prompt / seed parsing --------------------
+
+    @Test
+    void connectToAReachableSeedFlipsTheSessionAndPrompt() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        Harness h = harness(Path.of("cyn-work"), client);
+        assertThat(h.repl().dispatch("connect node1:7900")).isTrue();
+        assertThat(h.repl().session().isConnected()).isTrue();
+        assertThat(h.repl().session().landingNode()).isEqualTo(URI.create("http://node1:7900"));
+        assertThat(h.repl().prompt()).isEqualTo("cyntex(node1:7900)> ");
+        assertThat(h.sink().toString()).contains("connected").contains("node1:7900");
+    }
+
+    @Test
+    void connectTriesSeedsInOrderAndLandsOnTheFirstReachable() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node2:7900"));
+        Harness h = harness(Path.of("cyn-work"), client);
+        assertThat(h.repl().dispatch("connect node1:7900,node2:7900")).isTrue();
+        assertThat(h.repl().session().landingNode()).isEqualTo(URI.create("http://node2:7900"));
+        assertThat(client.probed)
+                .containsExactly(URI.create("http://node1:7900"), URI.create("http://node2:7900"));
+        assertThat(h.repl().prompt()).isEqualTo("cyntex(node2:7900)> ");
+    }
+
+    @Test
+    void connectWithNoReachableSeedRendersConnectFailedAndStaysOffline() {
+        FakeControlPlane client = new FakeControlPlane();   // nothing is healthy
+        Harness h = harness(Path.of("cyn-work"), client);
+        assertThat(h.repl().dispatch("connect node1:7900,node2:7900")).isTrue();
+        assertThat(h.repl().session().isConnected()).isFalse();
+        assertThat(h.repl().prompt()).isEqualTo("cyntex(offline:cyn-work)> ");
+        assertThat(h.sink().toString())
+                .contains("cli.connect-failed")
+                .contains("http://node1:7900")
+                .contains("http://node2:7900");
+    }
+
+    @Test
+    void connectWithNoArgumentPrintsUsageAndLeavesTheSessionOffline() {
+        FakeControlPlane client = new FakeControlPlane();
+        Harness h = harness(Path.of("cyn-work"), client);
+        assertThat(h.repl().dispatch("connect")).isTrue();
+        assertThat(h.repl().session().isConnected()).isFalse();
+        assertThat(h.sink().toString()).contains("connect:");
+        assertThat(client.probed).isEmpty();
+    }
+
+    @Test
+    void connectWithABlankSeedListPrintsUsageAndDoesNotProbe() {
+        FakeControlPlane client = new FakeControlPlane();
+        Harness h = harness(Path.of("cyn-work"), client);
+        assertThat(h.repl().dispatch("connect \" , \"")).isTrue();
+        assertThat(h.repl().session().isConnected()).isFalse();
+        assertThat(h.sink().toString()).contains("connect:");
+        assertThat(client.probed).isEmpty();
+    }
+
+    @Test
+    void connectingCarriesNoCredential() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        Harness h = harness(Path.of("cyn-work"), client);
+        h.repl().dispatch("connect node1:7900");
+        assertThat(h.repl().session().isConnected()).isTrue();
+        // connect establishes a transport target only; no credential/auth state exists on the session
+        for (var f : Session.class.getDeclaredFields()) {
+            String name = f.getName().toLowerCase(java.util.Locale.ROOT);
+            assertThat(name)
+                    .doesNotContain("credential")
+                    .doesNotContain("token")
+                    .doesNotContain("password")
+                    .doesNotContain("user");
+        }
+    }
+
+    @Test
+    void parseSeedsGivesABareHostPortAnHttpScheme() {
+        assertThat(Repl.parseSeeds("node1:7900")).containsExactly(URI.create("http://node1:7900"));
+    }
+
+    @Test
+    void parseSeedsKeepsAnExplicitScheme() {
+        assertThat(Repl.parseSeeds("http://host:8080")).containsExactly(URI.create("http://host:8080"));
+        assertThat(Repl.parseSeeds("https://secure:8443")).containsExactly(URI.create("https://secure:8443"));
+    }
+
+    @Test
+    void parseSeedsSplitsCommaSeparatedAndTrimsEach() {
+        assertThat(Repl.parseSeeds(" node1:7900 , http://node2:8080 "))
+                .containsExactly(URI.create("http://node1:7900"), URI.create("http://node2:8080"));
+    }
+
+    @Test
+    void parseSeedsDropsBlankElements() {
+        assertThat(Repl.parseSeeds("node1:7900,,")).containsExactly(URI.create("http://node1:7900"));
+        assertThat(Repl.parseSeeds("  , ")).isEmpty();
+    }
+
+    @Test
+    void disconnectReturnsAConnectedSessionToOffline() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        Harness h = harness(Path.of("cyn-work"), client);
+        h.repl().dispatch("connect node1:7900");
+        assertThat(h.repl().dispatch("disconnect")).isTrue();
+        assertThat(h.repl().session().isConnected()).isFalse();
+        assertThat(h.repl().prompt()).isEqualTo("cyntex(offline:cyn-work)> ");
+        assertThat(h.sink().toString()).contains("disconnected");
+    }
+
+    @Test
+    void disconnectWhileOfflinePrintsABenignLine() {
+        FakeControlPlane client = new FakeControlPlane();
+        Harness h = harness(Path.of("cyn-work"), client);
+        assertThat(h.repl().dispatch("disconnect")).isTrue();
+        assertThat(h.repl().session().isConnected()).isFalse();
+        assertThat(h.sink().toString()).contains("not connected");
     }
 }
