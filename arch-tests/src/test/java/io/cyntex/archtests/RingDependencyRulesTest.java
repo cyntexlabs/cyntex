@@ -208,10 +208,13 @@ class RingDependencyRulesTest {
                         // renders coded errors the same way the CLI does (its R6 grant), a leaf not a ring
                         "io.cyntex.messages..",
                         // Spring is permitted in the control ring (rest-api is the HTTP layer)
-                        "org.springframework..")
+                        "org.springframework..",
+                        // the Servlet API is the substrate the Web MVC servlet stack runs on; the HTTP
+                        // layer's interceptor and controllers read the request through it
+                        "jakarta.servlet..")
                 .allowEmptyShould(true)
-                .because("the HTTP presentation adapter sits on control-core, the kernel, and the shared "
-                        + "message catalog; it does not reach the ports directly")
+                .because("the HTTP presentation adapter sits on control-core, the kernel, the shared "
+                        + "message catalog and the servlet substrate; it does not reach the ports directly")
                 .check(cyntexClasses);
     }
 

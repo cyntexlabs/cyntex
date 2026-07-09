@@ -15,6 +15,9 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.catchThrowableOfType;
@@ -175,6 +178,45 @@ class BootstrapServiceTest {
         assertThat(users.saved).as("the admin is not created when its audit record could not be written").isEmpty();
     }
 
+    @Test
+    void concurrentBootstrapsAreSerializedSoOnlyTheFirstAdminIsCreated() throws InterruptedException {
+        // The channel is check-then-act (isEmpty() then save()); under concurrency two loopback callers
+        // could both pass the emptiness check and each create a different first admin. The service must
+        // serialize the whole check-and-create so only one wins. This is witnessed deterministically: the
+        // first caller parks inside save() while holding the single-flight guard, so the second caller
+        // cannot even reach its own emptiness check until the first has committed and the table is no
+        // longer empty — it must then be turned away as bootstrap-closed.
+        CountDownLatch firstReachedSave = new CountDownLatch(1);
+        CountDownLatch releaseSave = new CountDownLatch(1);
+        BlockingUserStore users = new BlockingUserStore(firstReachedSave, releaseSave);
+        BootstrapService bootstrap = new BootstrapService(
+                users, new FakeHasher(), new AuditGate(new RecordingAuditStore(), FIXED_CLOCK));
+
+        AtomicReference<CyntexException> secondOutcome = new AtomicReference<>();
+        Thread first = new Thread(() -> bootstrap.createFirstAdmin(CallerOrigin.LOOPBACK, "alice", "s3cret"));
+        Thread second = new Thread(() -> {
+            try {
+                bootstrap.createFirstAdmin(CallerOrigin.LOOPBACK, "bob", "another");
+            } catch (CyntexException refused) {
+                secondOutcome.set(refused);
+            }
+        });
+
+        first.start();
+        firstReachedSave.await(); // the first caller now holds the guard, parked inside save()
+        second.start();
+        // Give the second caller time to run. Serialized, it is parked acquiring the guard and has not yet
+        // read the table; unserialized, it would read the still-empty table here and create a second admin.
+        Thread.sleep(150);
+        releaseSave.countDown(); // let the first caller commit and release the guard
+        first.join();
+        second.join();
+
+        assertThat(users.saved.keySet()).as("only the first admin is created").containsExactly("alice");
+        assertThat(secondOutcome.get()).as("the second caller finds the channel already closed").isNotNull();
+        assertThat(secondOutcome.get().code().code()).isEqualTo("control.bootstrap-closed");
+    }
+
     /** An in-memory user store keyed by username that also reports emptiness for the bootstrap guard. */
     private static final class FakeUserStore implements UserStore {
         private final Map<String, User> saved = new HashMap<>();
@@ -223,6 +265,44 @@ class BootstrapServiceTest {
         @Override
         public void record(AuditRecord record) {
             throw new IllegalStateException("audit backend down");
+        }
+    }
+
+    /**
+     * A thread-safe user store whose {@code save} parks — it signals it was reached, then waits for the
+     * test to release it — so a test can pin one caller inside the commit and observe how a concurrent
+     * caller behaves. {@code isEmpty} reflects only committed saves.
+     */
+    private static final class BlockingUserStore implements UserStore {
+        final Map<String, User> saved = new ConcurrentHashMap<>();
+        private final CountDownLatch reachedSave;
+        private final CountDownLatch release;
+
+        BlockingUserStore(CountDownLatch reachedSave, CountDownLatch release) {
+            this.reachedSave = reachedSave;
+            this.release = release;
+        }
+
+        @Override
+        public Optional<User> find(String username) {
+            return Optional.ofNullable(saved.get(username));
+        }
+
+        @Override
+        public void save(User user) {
+            reachedSave.countDown();
+            try {
+                release.await();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException("interrupted while parked in save", e);
+            }
+            saved.put(user.username(), user);
+        }
+
+        @Override
+        public boolean isEmpty() {
+            return saved.isEmpty();
         }
     }
 }

@@ -122,3 +122,6 @@ control.bootstrap-forbidden:
 control.forbidden:
   message: "Operation '{op}' requires {required} capability."
   solution: "Sign in as a user with that capability, or use a token issued with that scope."
+control.unauthenticated:
+  message: "This operation requires authentication."
+  solution: "Sign in with `login` to obtain a session token, or present a machine token with `--token`."

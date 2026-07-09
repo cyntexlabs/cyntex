@@ -54,6 +54,33 @@ class ApiExceptionHandlerTest {
     }
 
     @Test
+    void aMissingOrRejectedCredentialIsUnauthorized() {
+        // Both the interceptor's "no valid credential" and the login flow's own rejection map to 401.
+        assertThat(handler.handle(new CyntexException(ControlError.UNAUTHENTICATED, Map.of(), null)).getStatusCode())
+                .isEqualTo(HttpStatus.UNAUTHORIZED);
+        assertThat(handler.handle(new CyntexException(ControlError.AUTH_FAILED, Map.of(), null)).getStatusCode())
+                .isEqualTo(HttpStatus.UNAUTHORIZED);
+    }
+
+    @Test
+    void anUnderScopedOrNonLoopbackCallerIsForbidden() {
+        assertThat(handler.handle(new CyntexException(
+                ControlError.FORBIDDEN, Map.of("op", "artifact.apply", "required", "write"), null)).getStatusCode())
+                .isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(handler.handle(new CyntexException(ControlError.BOOTSTRAP_FORBIDDEN, Map.of(), null)).getStatusCode())
+                .isEqualTo(HttpStatus.FORBIDDEN);
+    }
+
+    @Test
+    void anAlreadyClosedBootstrapChannelIsAConflict() {
+        ResponseEntity<ApiError> response =
+                handler.handle(new CyntexException(ControlError.BOOTSTRAP_CLOSED, Map.of(), null));
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(response.getBody().code()).isEqualTo("control.bootstrap-closed");
+    }
+
+    @Test
     void theCanonicalCodeCrossesTheBoundaryAsAStringNotAnEnum() {
         CyntexException e = new CyntexException(DslError.MALFORMED_YAML, Map.of("detail", "bad token"), null);
 

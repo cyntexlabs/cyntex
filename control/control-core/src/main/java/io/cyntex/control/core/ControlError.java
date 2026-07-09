@@ -45,6 +45,16 @@ public enum ControlError implements CyntexErrorCode {
     AUTH_FAILED("control.auth-failed", Set.of()),
 
     /**
+     * A protected operation was reached with no valid credential — none was presented, or the one
+     * presented is malformed, unknown, revoked, expired or unsigned. It carries no placeholder on
+     * purpose: the refusal is identical for every reason, so it cannot be used to probe which
+     * credentials exist or why one failed. Distinct from {@code auth-failed}, which is the login
+     * operation's own rejection of a username / password, and from {@code forbidden}, which is a known
+     * caller who simply lacks the grade.
+     */
+    UNAUTHENTICATED("control.unauthenticated", Set.of()),
+
+    /**
      * An authenticated caller's credential does not carry the capability grade the operation requires;
      * {@code op} is the operation id and {@code required} the grade it needs. Distinct from
      * {@code auth-failed}, which is pre-authentication: here the caller is known, they simply lack the

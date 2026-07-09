@@ -19,6 +19,7 @@ control.auth-failed
 control.bootstrap-closed
 control.bootstrap-forbidden
 control.forbidden
+control.unauthenticated
 dsl.ambiguous-reference
 dsl.composition
 dsl.config-type-mismatch
