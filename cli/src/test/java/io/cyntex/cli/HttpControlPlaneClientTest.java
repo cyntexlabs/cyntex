@@ -139,14 +139,35 @@ class HttpControlPlaneClientTest {
     }
 
     @Test
-    void loginTreatsANonCodedErrorBodyAsARejectionWithoutCrashing() throws Exception {
-        // a non-JSON error body (e.g. a container 500 page) must not crash login; it is still a refusal
+    void loginTreatsANonCodedErrorBodyAsAGenericRejectionRevealingNothing() throws Exception {
+        // a non-JSON error body (e.g. a container 500 page) must not crash login, and the raw body must
+        // not leak to the user: it is refused with a fixed generic message, no code
         HttpServer server = loginServer(500, "<html>Internal Server Error</html>", new AtomicReference<>());
         try {
             LoginOutcome outcome = new HttpControlPlaneClient().login(baseOf(server), "a", "b");
-            assertThat(outcome).isInstanceOf(LoginOutcome.Rejected.class);
+            assertThat(outcome).isEqualTo(new LoginOutcome.Rejected("", "Login was refused by the server."));
         } finally {
             server.stop(0);
+        }
+    }
+
+    @Test
+    void loginTreatsA200WithoutAUsableTokenAsUnreachableNotASuccess() throws Exception {
+        // a bodyless / tokenless 200 (a reverse proxy, captive portal, or non-Cyntex server) is not a
+        // real login and must never authenticate the session
+        HttpServer emptyObject = loginServer(200, "{}", new AtomicReference<>());
+        try {
+            assertThat(new HttpControlPlaneClient().login(baseOf(emptyObject), "a", "b"))
+                    .isInstanceOf(LoginOutcome.Unreachable.class);
+        } finally {
+            emptyObject.stop(0);
+        }
+        HttpServer blankToken = loginServer(200, "{\"token\":\"\"}", new AtomicReference<>());
+        try {
+            assertThat(new HttpControlPlaneClient().login(baseOf(blankToken), "a", "b"))
+                    .isInstanceOf(LoginOutcome.Unreachable.class);
+        } finally {
+            blankToken.stop(0);
         }
     }
 

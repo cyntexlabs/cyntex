@@ -42,12 +42,13 @@ final class JLinePrompter implements Prompter, AutoCloseable {
         String prompt = defaultValue == null || defaultValue.isEmpty()
                 ? question + ": "
                 : question + " [" + defaultValue + "]: ";
-        return readLine(prompt, null);
+        return readLine(prompt, null, true);
     }
 
     @Override
     public String secret(String question) {
-        return readLine(question + ": ", '*');
+        // a secret is returned verbatim (no trim) so a password / token reaches the wire exactly as typed
+        return readLine(question + ": ", '*', false);
     }
 
     @Override
@@ -59,7 +60,7 @@ final class JLinePrompter implements Prompter, AutoCloseable {
         }
         out.flush();
         while (true) {
-            String line = readLine("  choice [1-" + options.size() + "]: ", null);
+            String line = readLine("  choice [1-" + options.size() + "]: ", null, true);
             if (line.isEmpty()) {
                 return options.get(options.size() - 1); // Enter / end-of-input = the skip sentinel
             }
@@ -112,13 +113,25 @@ final class JLinePrompter implements Prompter, AutoCloseable {
         return block.isEmpty() ? "" : block.substring(0, block.length() - 1);
     }
 
-    private String readLine(String prompt, Character mask) {
+    private String readLine(String prompt, Character mask, boolean trim) {
         try {
             String line = mask == null ? reader.readLine(prompt) : reader.readLine(prompt, mask);
-            return line == null ? "" : line.trim();
+            return normalizeReply(line, trim);
         } catch (EndOfFileException | UserInterruptException end) {
             return ""; // no more input — the caller treats empty as skip / default
         }
+    }
+
+    /**
+     * Normalizes a raw reply: end of input ({@code null}) reads as empty; a free-text answer is trimmed
+     * of surrounding whitespace, but a secret is returned verbatim so a password / token is transmitted
+     * exactly as typed.
+     */
+    static String normalizeReply(String line, boolean trim) {
+        if (line == null) {
+            return "";
+        }
+        return trim ? line.trim() : line;
     }
 
     @Override

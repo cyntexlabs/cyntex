@@ -109,6 +109,31 @@ class SessionTest {
     }
 
     @Test
+    void reconnectingDropsAStaleAuthentication() {
+        // a fresh connect is a new transport target; a credential issued by the old node must not carry over
+        Session session = new Session();
+        session.connect(List.of(NODE1), NODE1);
+        session.authenticate("jwt-from-node1", "alice", "prod", List.of(NODE1));
+        session.connect(List.of(NODE2), NODE2);
+        assertThat(session.isConnected()).isTrue();
+        assertThat(session.landingNode()).isEqualTo(NODE2);
+        assertThat(session.isAuthenticated()).isFalse();
+        assertThat(session.credential()).isNull();
+        assertThat(session.principal()).isNull();
+        assertThat(session.clusterName()).isNull();
+    }
+
+    @Test
+    void logoutResetsMembersToTheSeedsNotTheDiscoveredSet() {
+        // discovered members are session-scoped; after logout the failover set is the seeds again
+        Session session = new Session();
+        session.connect(List.of(NODE1), NODE1);
+        session.authenticate("t", "u", "c", List.of(NODE1, NODE2));   // discovered set wider than the seeds
+        session.logout();
+        assertThat(session.members()).containsExactly(NODE1);
+    }
+
+    @Test
     void relandMovesTheLandingNodeKeepingAuthAndMembers() {
         // failover re-lands on another member without dropping the (cluster-wide) credential
         Session session = new Session();

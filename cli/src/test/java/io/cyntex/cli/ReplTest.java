@@ -630,5 +630,6 @@ class ReplTest {
         assertThat(h.repl().failover()).isFalse();
         assertThat(h.repl().session().isConnected()).isFalse();
         assertThat(client.probed).isEmpty();
+        assertThat(h.sink().toString()).isEmpty();   // a true no-op prints nothing (no "connection lost")
     }
 }

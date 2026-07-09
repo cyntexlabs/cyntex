@@ -79,6 +79,10 @@ final class Session {
         this.landingNode = landingNode;
         this.connected = true;
         this.members = this.seeds;   // members = seeds until discovery refines them
+        // a fresh connect is a new transport target: never carry a credential the previous node issued
+        this.credential = null;
+        this.principal = null;
+        this.clusterName = null;
     }
 
     /** Records an authenticated session: the credential, the principal, an optional cluster name, and members. */
