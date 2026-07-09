@@ -9,6 +9,7 @@ import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -180,5 +181,197 @@ class HttpControlPlaneClientTest {
         LoginOutcome outcome =
                 new HttpControlPlaneClient().login(URI.create("http://127.0.0.1:" + closedPort), "a", "b");
         assertThat(outcome).isInstanceOf(LoginOutcome.Unreachable.class);
+    }
+
+    // --- online verbs: apply / get / list under /api, authenticated by a bearer credential ---------
+
+    /** What the fake server saw for one request: method, path, query, the Authorization header, and body. */
+    private record CapturedRequest(String method, String path, String query, String authorization, String body) {
+    }
+
+    /**
+     * A server that answers one {@code context} with a fixed status + body and records the request it saw,
+     * so a test can assert the client sent the right method, path, bearer credential and JSON body.
+     */
+    private static HttpServer apiServer(String context, int status, String responseBody,
+            AtomicReference<CapturedRequest> captured) throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext(context, exchange -> {
+            String body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
+            captured.set(new CapturedRequest(
+                    exchange.getRequestMethod(),
+                    exchange.getRequestURI().getPath(),
+                    exchange.getRequestURI().getQuery(),
+                    exchange.getRequestHeaders().getFirst("Authorization"),
+                    body));
+            byte[] bytes = responseBody == null ? new byte[0] : responseBody.getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(status, bytes.length == 0 ? -1 : bytes.length);
+            if (bytes.length > 0) {
+                try (OutputStream os = exchange.getResponseBody()) {
+                    os.write(bytes);
+                }
+            }
+            exchange.close();
+        });
+        server.start();
+        return server;
+    }
+
+    @Test
+    void applyPostsTheDraftsWithABearerCredentialAndReturnsTheOutcomes() throws Exception {
+        AtomicReference<CapturedRequest> seen = new AtomicReference<>();
+        HttpServer server = apiServer("/api/artifacts:apply", 200,
+                "{\"outcomes\":[{\"id\":\"src_kfk\",\"kind\":\"source\",\"change\":\"CREATED\",\"contentHash\":\"h1\"},"
+                        + "{\"id\":\"kfk2my\",\"kind\":\"pipeline\",\"change\":\"UNCHANGED\",\"contentHash\":\"h2\"}]}",
+                seen);
+        try {
+            ApplyOutcome outcome = new HttpControlPlaneClient().apply(baseOf(server), "tok-abc",
+                    List.of(new LocalDraft("src_kfk.cyn.yml", "kind: source\nid: src_kfk\n")));
+            assertThat(outcome).isInstanceOf(ApplyOutcome.Applied.class);
+            ApplyOutcome.Applied applied = (ApplyOutcome.Applied) outcome;
+            assertThat(applied.items()).containsExactly(
+                    new ApplyOutcome.Item("src_kfk", "source", "CREATED"),
+                    new ApplyOutcome.Item("kfk2my", "pipeline", "UNCHANGED"));
+            assertThat(seen.get().method()).isEqualTo("POST");
+            assertThat(seen.get().path()).isEqualTo("/api/artifacts:apply");
+            assertThat(seen.get().authorization()).isEqualTo("Bearer tok-abc");
+            Map<?, ?> sent = (Map<?, ?>) JsonReader.parse(seen.get().body());
+            assertThat(sent.get("drafts")).isInstanceOf(List.class);
+            assertThat(seen.get().body()).contains("src_kfk.cyn.yml").contains("kind: source");
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void applyReturnsRejectedWithTheServerCodeAndMessageOnACodedError() throws Exception {
+        HttpServer server = apiServer("/api/artifacts:apply", 400,
+                "{\"code\":\"dsl.illegal-value\",\"params\":{},\"message\":\"Not a known kind.\"}",
+                new AtomicReference<>());
+        try {
+            ApplyOutcome outcome = new HttpControlPlaneClient()
+                    .apply(baseOf(server), "tok", List.of(new LocalDraft("bad.cyn.yml", "kind: nope\n")));
+            assertThat(outcome).isEqualTo(new ApplyOutcome.Rejected("dsl.illegal-value", "Not a known kind."));
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void applyReturnsUnreachableWhenTheServerIsDownWithoutThrowing() throws Exception {
+        int closedPort;
+        try (ServerSocket socket = new ServerSocket(0)) {
+            closedPort = socket.getLocalPort();
+        }
+        ApplyOutcome outcome = new HttpControlPlaneClient().apply(URI.create("http://127.0.0.1:" + closedPort),
+                "tok", List.of(new LocalDraft("a.cyn.yml", "kind: source\n")));
+        assertThat(outcome).isInstanceOf(ApplyOutcome.Unreachable.class);
+    }
+
+    @Test
+    void getReturnsFoundWithTheStoredArtifactAndSendsTheCredential() throws Exception {
+        AtomicReference<CapturedRequest> seen = new AtomicReference<>();
+        HttpServer server = apiServer("/api/artifacts/", 200,
+                "{\"id\":\"src_kfk\",\"kind\":\"source\",\"canonicalForm\":\"kind: source\\nid: src_kfk\\n\"}", seen);
+        try {
+            GetOutcome outcome = new HttpControlPlaneClient().get(baseOf(server), "tok-xyz", "src_kfk");
+            assertThat(outcome).isEqualTo(new GetOutcome.Found(
+                    new RemoteArtifact("src_kfk", "source", "kind: source\nid: src_kfk\n")));
+            assertThat(seen.get().method()).isEqualTo("GET");
+            assertThat(seen.get().path()).isEqualTo("/api/artifacts/src_kfk");
+            assertThat(seen.get().authorization()).isEqualTo("Bearer tok-xyz");
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void getReturnsAbsentOnA404() throws Exception {
+        HttpServer server = apiServer("/api/artifacts/", 404, null, new AtomicReference<>());
+        try {
+            assertThat(new HttpControlPlaneClient().get(baseOf(server), "tok", "missing"))
+                    .isInstanceOf(GetOutcome.Absent.class);
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void getReturnsRejectedWithTheServerCodeAndMessageOnACodedErrorStatus() throws Exception {
+        // a non-404 error status (here 403 control.forbidden) is a coded refusal, distinct from Absent
+        HttpServer server = apiServer("/api/artifacts/", 403,
+                "{\"code\":\"control.forbidden\",\"params\":{},\"message\":\"You lack the grade.\"}",
+                new AtomicReference<>());
+        try {
+            GetOutcome outcome = new HttpControlPlaneClient().get(baseOf(server), "tok", "src_kfk");
+            assertThat(outcome).isEqualTo(new GetOutcome.Rejected("control.forbidden", "You lack the grade."));
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void getReturnsUnreachableWhenTheServerIsDownWithoutThrowing() throws Exception {
+        int closedPort;
+        try (ServerSocket socket = new ServerSocket(0)) {
+            closedPort = socket.getLocalPort();
+        }
+        assertThat(new HttpControlPlaneClient().get(URI.create("http://127.0.0.1:" + closedPort), "tok", "x"))
+                .isInstanceOf(GetOutcome.Unreachable.class);
+    }
+
+    @Test
+    void listReturnsTheArtifactsAndSendsTheKindFilterAndCredential() throws Exception {
+        AtomicReference<CapturedRequest> seen = new AtomicReference<>();
+        HttpServer server = apiServer("/api/artifacts", 200,
+                "{\"artifacts\":[{\"id\":\"src_kfk\",\"kind\":\"source\",\"canonicalForm\":\"kind: source\\n\"}]}", seen);
+        try {
+            ListOutcome outcome = new HttpControlPlaneClient().list(baseOf(server), "tok-1", "source");
+            assertThat(outcome).isInstanceOf(ListOutcome.Listed.class);
+            assertThat(((ListOutcome.Listed) outcome).artifacts())
+                    .containsExactly(new RemoteArtifact("src_kfk", "source", "kind: source\n"));
+            assertThat(seen.get().path()).isEqualTo("/api/artifacts");
+            assertThat(seen.get().query()).isEqualTo("kind=source");
+            assertThat(seen.get().authorization()).isEqualTo("Bearer tok-1");
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void listWithoutAKindSendsNoQueryFilter() throws Exception {
+        AtomicReference<CapturedRequest> seen = new AtomicReference<>();
+        HttpServer server = apiServer("/api/artifacts", 200, "{\"artifacts\":[]}", seen);
+        try {
+            ListOutcome outcome = new HttpControlPlaneClient().list(baseOf(server), "tok", null);
+            assertThat(outcome).isInstanceOf(ListOutcome.Listed.class);
+            assertThat(((ListOutcome.Listed) outcome).artifacts()).isEmpty();
+            assertThat(seen.get().query()).isNull();
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void listReturnsRejectedWithTheServerCodeAndMessageOnACodedErrorStatus() throws Exception {
+        HttpServer server = apiServer("/api/artifacts", 403,
+                "{\"code\":\"control.forbidden\",\"params\":{},\"message\":\"You lack the grade.\"}",
+                new AtomicReference<>());
+        try {
+            ListOutcome outcome = new HttpControlPlaneClient().list(baseOf(server), "tok", null);
+            assertThat(outcome).isEqualTo(new ListOutcome.Rejected("control.forbidden", "You lack the grade."));
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void listReturnsUnreachableWhenTheServerIsDownWithoutThrowing() throws Exception {
+        int closedPort;
+        try (ServerSocket socket = new ServerSocket(0)) {
+            closedPort = socket.getLocalPort();
+        }
+        assertThat(new HttpControlPlaneClient().list(URI.create("http://127.0.0.1:" + closedPort), "tok", null))
+                .isInstanceOf(ListOutcome.Unreachable.class);
     }
 }
