@@ -29,7 +29,13 @@ enum CliError implements CyntexErrorCode {
     RESOURCE_NOT_FOUND("cli.resource-not-found", Set.of("id")),
 
     /** No server among the connect seeds answered the reachability probe. */
-    CONNECT_FAILED("cli.connect-failed", Set.of("seeds"));
+    CONNECT_FAILED("cli.connect-failed", Set.of("seeds")),
+
+    /** A verb that needs a live connection was run before the session connected; {@code verb} names it. */
+    NOT_CONNECTED("cli.not-connected", Set.of("verb")),
+
+    /** A connected online verb was run before the session authenticated; {@code verb} names it. */
+    NOT_AUTHENTICATED("cli.not-authenticated", Set.of("verb"));
 
     private final String code;
     private final Set<String> placeholders;

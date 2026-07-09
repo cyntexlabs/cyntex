@@ -7,6 +7,8 @@ boot.hazelcast-unavailable
 cli.artifact-exists
 cli.connect-failed
 cli.kind-dir-mismatch
+cli.not-authenticated
+cli.not-connected
 cli.resource-not-found
 cli.unknown-connector
 connector.api-level-incompatible

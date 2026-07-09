@@ -291,16 +291,7 @@ final class DescCmd implements Callable<Integer> {
                 out.println(YamlOut.write(notFoundEnvelope(code, args)));
                 out.flush();
             }
-            default -> {
-                MessageCatalog.Rendered rendered = MessageCatalog.bundled().render(code, args);
-                PrintWriter err = CliIo.err(spec);
-                err.println(Ansi.AUTO.string("@|bold,red error:|@") + " " + code.code());
-                err.println("  " + rendered.message());
-                if (rendered.solution() != null) {
-                    err.println("  " + rendered.solution());
-                }
-                err.flush();
-            }
+            default -> Diagnostics.printText(CliIo.err(spec), code, args);
         }
         return EXIT_DIAGNOSTIC;
     }

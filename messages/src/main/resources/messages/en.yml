@@ -26,6 +26,12 @@ cli.resource-not-found:
 cli.connect-failed:
   message: "Could not reach any Cyntex server among the seeds: {seeds}."
   solution: "Check the addresses are correct and that a Cyntex server is running there, then try connect again."
+cli.not-connected:
+  message: "The `{verb}` command needs a connection to a Cyntex server."
+  solution: "Run `connect <host:port>` to reach a server first, then try again."
+cli.not-authenticated:
+  message: "The `{verb}` command needs you to sign in first."
+  solution: "Run `login <username>` to authenticate, then try again."
 dsl.unknown-field:
   message: "Unknown field '{field}' at {path}."
   solution: "Remove it, or run `cyntex explain` to see the fields allowed here."

@@ -1,8 +1,6 @@
 package io.cyntex.cli;
 
-import io.cyntex.core.common.CyntexException;
 import io.cyntex.core.schema.SchemaNavigator;
-import io.cyntex.messages.MessageCatalog;
 import org.jline.reader.EndOfFileException;
 import org.jline.reader.LineReader;
 import org.jline.reader.LineReaderBuilder;
@@ -173,8 +171,7 @@ final class Repl {
     private void onlineVerb(List<String> words) {
         PrintWriter err = commandLine.getErr();
         if (!session.isAuthenticated()) {
-            err.println(words.get(0) + ": not authenticated (run login)");
-            err.flush();
+            Diagnostics.printText(err, CliError.NOT_AUTHENTICATED, Map.of("verb", words.get(0)));
             return;
         }
         // The connected verbs take positional operands only; a dash-option (e.g. `-o json`) is not yet
@@ -415,8 +412,7 @@ final class Repl {
         PrintWriter out = commandLine.getOut();
         PrintWriter err = commandLine.getErr();
         if (!session.isConnected()) {
-            err.println("login: not connected (run connect first)");
-            err.flush();
+            Diagnostics.printText(err, CliError.NOT_CONNECTED, Map.of("verb", "login"));
             return;
         }
         if (words.size() < 2 || words.get(1).isBlank()) {
@@ -481,20 +477,10 @@ final class Repl {
         out.flush();
     }
 
-    /** Renders the {@code cli.connect-failed} diagnostic through the message catalog to the err stream. */
+    /** Renders the {@code cli.connect-failed} diagnostic through the shared coded-error renderer. */
     private void reportConnectFailed(List<URI> seeds) {
         String display = seeds.stream().map(URI::toString).collect(Collectors.joining(", "));
-        CyntexException failure =
-                new CyntexException(CliError.CONNECT_FAILED, Map.of("seeds", display), null);
-        MessageCatalog.Rendered rendered =
-                MessageCatalog.bundled().render(failure.code(), failure.args());
-        PrintWriter err = commandLine.getErr();
-        err.println(Ansi.AUTO.string("@|bold,red error:|@") + " " + failure.code().code());
-        err.println("  " + rendered.message());
-        if (rendered.solution() != null) {
-            err.println("  " + rendered.solution());
-        }
-        err.flush();
+        Diagnostics.printText(commandLine.getErr(), CliError.CONNECT_FAILED, Map.of("seeds", display));
     }
 
     /**

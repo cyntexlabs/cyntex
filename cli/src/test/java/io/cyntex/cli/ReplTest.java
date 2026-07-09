@@ -528,7 +528,8 @@ class ReplTest {
         Harness h = harness(Path.of("cyn-work"), client, new ScriptedPrompter("pw"));
         assertThat(h.repl().dispatch("login alice")).isTrue();
         assertThat(h.repl().session().isAuthenticated()).isFalse();
-        assertThat(h.sink().toString()).contains("login:").contains("not connected");
+        // the not-connected state is a coded cli.* diagnostic naming the login verb, not a bare string
+        assertThat(h.sink().toString()).contains("cli.not-connected").contains("login");
         assertThat(client.loginCalls).isEmpty();
     }
 
@@ -707,8 +708,25 @@ class ReplTest {
         Harness h = harness(Path.of("cyn-work"), client, new ScriptedPrompter());
         h.repl().dispatch("connect node1:7900");   // connected, never logged in
         assertThat(h.repl().dispatch("get x")).isTrue();
-        assertThat(h.sink().toString()).contains("not authenticated");
+        // the not-authenticated state is a coded cli.* diagnostic naming the verb, not a bare string
+        assertThat(h.sink().toString()).contains("cli.not-authenticated").contains("get");
         assertThat(client.getCalls).isEmpty();
+    }
+
+    @Test
+    void anUnauthenticatedOnlineVerbRendersThroughTheSharedCatalogRendererNamingTheVerb() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        Harness h = harness(Path.of("cyn-work"), client, new ScriptedPrompter());
+        h.repl().dispatch("connect node1:7900");   // connected, never logged in
+        int mark = h.sink().toString().length();
+        assertThat(h.repl().dispatch("apply")).isTrue();
+        String out = h.sink().toString().substring(mark);
+        // rendered like every other coded diagnostic: an `error: <code>` header, the catalog message,
+        // and the solution hint — proving it goes through the shared renderer, not a hand-rolled string
+        assertThat(out).contains("error:").contains("cli.not-authenticated");
+        assertThat(out).contains("apply");        // the {verb} placeholder is bound to the verb name
+        assertThat(out).containsIgnoringCase("login");   // the solution points at the recovery verb
+        assertThat(client.applyCalls).isEmpty();
     }
 
     @Test
@@ -751,6 +769,43 @@ class ReplTest {
         Harness h = onlineSession(Path.of("cyn-work"), client);
         h.repl().dispatch("ls source");
         assertThat(client.listCalls).containsExactly("jwt-tok@http://node1:7900?source");
+    }
+
+    // --- server-as-truth: a connected read verb sources the server store, never the local workspace ---
+
+    @Test
+    void onlineLsSourcesTheServerAndNeverTheLocalWorkspace(@TempDir Path base) throws Exception {
+        copyWorkspace("/ws-valid", base);   // a real local workspace: source/src_kfk + pipeline/kfk2my
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.listOutcome = new ListOutcome.Listed(List.of());
+        Harness h = harness(base, client, new ScriptedPrompter("pw"));
+        // precondition: offline, ls really does read these local artifacts (so the guard below is load-bearing)
+        h.repl().dispatch("ls");
+        assertThat(h.sink().toString()).contains("src_kfk").contains("kfk2my");
+        // once online, the same session's ls sources the (empty) server, not that local workspace
+        client.loginOutcome = new LoginOutcome.Success("jwt-tok");
+        h.repl().dispatch("connect node1:7900");
+        h.repl().dispatch("login alice");
+        int mark = h.sink().toString().length();
+        h.repl().dispatch("ls");
+        String out = h.sink().toString().substring(mark);
+        assertThat(out).contains("no resources");                    // the empty server ...
+        assertThat(out).doesNotContain("src_kfk").doesNotContain("kfk2my");   // ... not the local files it just listed
+    }
+
+    @Test
+    void onlineGetSourcesTheServerCanonicalNotTheLocalWorkspaceFileWithTheSameId(@TempDir Path base) throws Exception {
+        copyWorkspace("/ws-valid", base);   // a real local source/src_kfk.cyn.yml exists in the workspace
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.getOutcome = new GetOutcome.Found(new RemoteArtifact(
+                "src_kfk", "source", "kind: source\nid: src_kfk\nserver_marker: REMOTE\n"));
+        Harness h = onlineSession(base, client);
+        int mark = h.sink().toString().length();
+        h.repl().dispatch("get src_kfk");
+        String out = h.sink().toString().substring(mark);
+        // the server canonical is returned — carrying a marker the local file does not have — via the server call
+        assertThat(out).contains("server_marker: REMOTE");
+        assertThat(client.getCalls).containsExactly("jwt-tok@http://node1:7900/src_kfk");
     }
 
     @Test
