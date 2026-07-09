@@ -67,4 +67,12 @@ class HttpControlPlaneClientTest {
         URI base = URI.create("http://127.0.0.1:" + closedPort);
         assertThat(new HttpControlPlaneClient().isHealthy(base)).isFalse();
     }
+
+    @Test
+    void notHealthyForAHostlessUriWithoutThrowing() {
+        // `http://foo:bar` parses but a non-numeric port makes the authority registry-based, so it has
+        // no host; building the request throws IllegalArgumentException, which must resolve to not
+        // healthy rather than propagate, honoring the never-throws contract
+        assertThat(new HttpControlPlaneClient().isHealthy(URI.create("http://foo:bar"))).isFalse();
+    }
 }

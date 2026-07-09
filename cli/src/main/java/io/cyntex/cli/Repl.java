@@ -129,13 +129,22 @@ final class Repl {
     /**
      * Establishes a transport target from a comma-separated seed list, probing each seed in order and
      * landing on the first that answers {@code /healthz}. Connecting does not authenticate — the
-     * session carries no credential. A blank argument is a usage mistake (a benign message, not a
-     * coded error); no reachable seed is the coded {@code cli.connect-failed} diagnostic.
+     * session carries no credential. A blank argument, or a malformed / hostless seed token, is a
+     * usage mistake (a benign message, not a coded error); a single invalid token rejects the whole
+     * line before any probe, so a typo never silently connects to a subset. No reachable well-formed
+     * seed is the coded {@code cli.connect-failed} diagnostic.
      */
     private void connect(List<String> words) {
         PrintWriter err = commandLine.getErr();
         String arg = words.size() > 1 ? words.get(1) : "";
-        List<URI> seeds = parseSeeds(arg);
+        ParsedSeeds parsed = parseSeeds(arg);
+        if (parsed.invalidToken() != null) {
+            err.println("connect: invalid seed '" + parsed.invalidToken()
+                    + "' (usage: connect <host:port>[,<host:port>...])");
+            err.flush();
+            return;
+        }
+        List<URI> seeds = parsed.valid();
         if (seeds.isEmpty()) {
             err.println("connect: missing operand (usage: connect <host:port>[,<host:port>...])");
             err.flush();
@@ -182,20 +191,41 @@ final class Repl {
     }
 
     /**
-     * Parses a comma-separated seed list into base URLs: each element is trimmed and blanks dropped;
-     * one that already carries a scheme ({@code ://}) is kept as-is, and a bare {@code host:port} gets
-     * an {@code http://} scheme.
+     * The outcome of parsing a seed argument: the host-bearing base URLs in order and, when a token
+     * could not be turned into one, that first offending token ({@code invalidToken} is {@code null}
+     * when every non-blank token parsed). A token is invalid when it is not a legal URI or resolves to
+     * one with no host. Blank tokens are dropped, so an all-blank argument yields an empty list and a
+     * {@code null} invalid token.
      */
-    static List<URI> parseSeeds(String arg) {
+    record ParsedSeeds(List<URI> valid, String invalidToken) {
+    }
+
+    /**
+     * Parses a comma-separated seed argument into host-bearing base URLs without ever throwing. Each
+     * element is trimmed and blanks dropped; one that already carries a scheme ({@code ://}) is kept
+     * as-is, and a bare {@code host:port} gets an {@code http://} scheme. Parsing stops at the first
+     * token that is not a legal URI or resolves to one with no host, returning it as the invalid token
+     * so the caller can reject the whole line instead of crashing on it.
+     */
+    static ParsedSeeds parseSeeds(String arg) {
         List<URI> seeds = new ArrayList<>();
         for (String raw : arg.split(",")) {
             String s = raw.trim();
             if (s.isEmpty()) {
                 continue;
             }
-            seeds.add(URI.create(s.contains("://") ? s : "http://" + s));
+            URI uri;
+            try {
+                uri = URI.create(s.contains("://") ? s : "http://" + s);
+            } catch (IllegalArgumentException e) {
+                return new ParsedSeeds(List.of(), s);
+            }
+            if (uri.getHost() == null) {
+                return new ParsedSeeds(List.of(), s);
+            }
+            seeds.add(uri);
         }
-        return seeds;
+        return new ParsedSeeds(seeds, null);
     }
 
     /** The {@code host} or {@code host:port} of a base URL, for the prompt and success line. */

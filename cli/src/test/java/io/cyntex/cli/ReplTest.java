@@ -341,6 +341,53 @@ class ReplTest {
     }
 
     @Test
+    void connectWithAUriIllegalSeedPrintsUsageStaysOfflineAndDoesNotProbe() {
+        // `^` is illegal in a URI authority; the token must be treated as a usage-level input error,
+        // not bubble an uncaught IllegalArgumentException that would crash the read loop
+        FakeControlPlane client = new FakeControlPlane();
+        Harness h = harness(Path.of("cyn-work"), client);
+        assertThat(h.repl().dispatch("connect foo^bar")).isTrue();
+        assertThat(h.repl().session().isConnected()).isFalse();
+        assertThat(h.sink().toString()).contains("connect:").contains("foo^bar");
+        assertThat(client.probed).isEmpty();
+    }
+
+    @Test
+    void connectWithAPipeIllegalSeedPrintsUsageAndDoesNotProbe() {
+        // `|` is likewise illegal in a URI; same total-parse requirement
+        FakeControlPlane client = new FakeControlPlane();
+        Harness h = harness(Path.of("cyn-work"), client);
+        assertThat(h.repl().dispatch("connect a|b")).isTrue();
+        assertThat(h.repl().session().isConnected()).isFalse();
+        assertThat(h.sink().toString()).contains("connect:").contains("a|b");
+        assertThat(client.probed).isEmpty();
+    }
+
+    @Test
+    void connectWithAHostlessSeedPrintsUsageAndStaysOffline() {
+        // `foo:bar` parses (a non-numeric port makes the authority registry-based) but has no host;
+        // such a seed is unusable and must be rejected as a usage error, not probed
+        FakeControlPlane client = new FakeControlPlane();
+        Harness h = harness(Path.of("cyn-work"), client);
+        assertThat(h.repl().dispatch("connect foo:bar")).isTrue();
+        assertThat(h.repl().session().isConnected()).isFalse();
+        assertThat(h.sink().toString()).contains("connect:").contains("foo:bar");
+        assertThat(client.probed).isEmpty();
+    }
+
+    @Test
+    void connectRejectsTheWholeLineOnABadSeedWithoutProbingTheGoodOne() {
+        // the good seed is healthy, but a single invalid seed rejects the whole line before any probe,
+        // so a typo can never silently connect to a subset
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://goodhost:80"));
+        Harness h = harness(Path.of("cyn-work"), client);
+        assertThat(h.repl().dispatch("connect goodhost:80,foo^bar")).isTrue();
+        assertThat(h.repl().session().isConnected()).isFalse();
+        assertThat(h.sink().toString()).contains("connect:").contains("foo^bar");
+        assertThat(client.probed).isEmpty();
+    }
+
+    @Test
     void connectingCarriesNoCredential() {
         FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
         Harness h = harness(Path.of("cyn-work"), client);
@@ -359,25 +406,45 @@ class ReplTest {
 
     @Test
     void parseSeedsGivesABareHostPortAnHttpScheme() {
-        assertThat(Repl.parseSeeds("node1:7900")).containsExactly(URI.create("http://node1:7900"));
+        Repl.ParsedSeeds parsed = Repl.parseSeeds("node1:7900");
+        assertThat(parsed.valid()).containsExactly(URI.create("http://node1:7900"));
+        assertThat(parsed.invalidToken()).isNull();
     }
 
     @Test
     void parseSeedsKeepsAnExplicitScheme() {
-        assertThat(Repl.parseSeeds("http://host:8080")).containsExactly(URI.create("http://host:8080"));
-        assertThat(Repl.parseSeeds("https://secure:8443")).containsExactly(URI.create("https://secure:8443"));
+        assertThat(Repl.parseSeeds("http://host:8080").valid())
+                .containsExactly(URI.create("http://host:8080"));
+        assertThat(Repl.parseSeeds("https://secure:8443").valid())
+                .containsExactly(URI.create("https://secure:8443"));
     }
 
     @Test
     void parseSeedsSplitsCommaSeparatedAndTrimsEach() {
-        assertThat(Repl.parseSeeds(" node1:7900 , http://node2:8080 "))
+        assertThat(Repl.parseSeeds(" node1:7900 , http://node2:8080 ").valid())
                 .containsExactly(URI.create("http://node1:7900"), URI.create("http://node2:8080"));
     }
 
     @Test
     void parseSeedsDropsBlankElements() {
-        assertThat(Repl.parseSeeds("node1:7900,,")).containsExactly(URI.create("http://node1:7900"));
-        assertThat(Repl.parseSeeds("  , ")).isEmpty();
+        assertThat(Repl.parseSeeds("node1:7900,,").valid()).containsExactly(URI.create("http://node1:7900"));
+        Repl.ParsedSeeds allBlank = Repl.parseSeeds("  , ");
+        assertThat(allBlank.valid()).isEmpty();
+        assertThat(allBlank.invalidToken()).isNull();
+    }
+
+    @Test
+    void parseSeedsReportsTheFirstUriIllegalTokenWithoutThrowing() {
+        Repl.ParsedSeeds parsed = Repl.parseSeeds("node1:7900,foo^bar");
+        assertThat(parsed.invalidToken()).isEqualTo("foo^bar");
+        assertThat(parsed.valid()).isEmpty();
+    }
+
+    @Test
+    void parseSeedsReportsAHostlessTokenAsInvalid() {
+        Repl.ParsedSeeds parsed = Repl.parseSeeds("foo:bar");
+        assertThat(parsed.invalidToken()).isEqualTo("foo:bar");
+        assertThat(parsed.valid()).isEmpty();
     }
 
     @Test
