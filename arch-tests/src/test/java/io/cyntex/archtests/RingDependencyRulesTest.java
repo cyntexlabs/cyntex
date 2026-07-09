@@ -1,5 +1,6 @@
 package io.cyntex.archtests;
 
+import com.tngtech.archunit.core.domain.JavaClass;
 import com.tngtech.archunit.core.domain.JavaClasses;
 import com.tngtech.archunit.core.importer.ClassFileImporter;
 import com.tngtech.archunit.core.importer.ImportOption;
@@ -177,7 +178,7 @@ class RingDependencyRulesTest {
     }
 
     @Test
-    @DisplayName("R5: control-core depends on core + the storage port only (framework-free — no Spring)")
+    @DisplayName("R5: control-core depends on core + the storage port + the connection-probe seam only (framework-free — no Spring)")
     void r5_controlCoreLayering() {
         classes().that().resideInAPackage("io.cyntex.control.core..")
                 .should().onlyDependOnClassesThat().resideInAnyPackage(
@@ -185,13 +186,19 @@ class RingDependencyRulesTest {
                         "io.cyntex.control.core..",
                         "io.cyntex.core..",
                         // control-core decouples from the runtime through the storage port
-                        "io.cyntex.spi.store..")
+                        "io.cyntex.spi.store..",
+                        // the sole synchronous control-to-runtime seam: the connection-probe whitelist
+                        // (a closed set of one). Every other control<->runtime interaction stays
+                        // store-decoupled; this narrow channel is the one compile reference control-core
+                        // holds into the runtime ring
+                        "io.cyntex.runtime.probe..")
                 .allowEmptyShould(true)
                 .because("control-core is the resource-type-agnostic verb layer: pure logic that "
-                        + "depends on the kernel and the storage port only. It stays framework-free "
-                        + "— Spring lives in rest-api (the HTTP presentation face), never here — so "
-                        + "the apply / registry logic is unit-testable without a container; it "
-                        + "reaches the runtime only through the store, never by a compile reference")
+                        + "depends on the kernel, the storage port, and the one synchronous "
+                        + "connection-probe seam only. It stays framework-free — Spring lives in "
+                        + "rest-api (the HTTP presentation face), never here — so the apply / registry "
+                        + "logic is unit-testable without a container; it reaches the runtime only "
+                        + "through the store, save for the connection-probe whitelist (a closed set of one)")
                 .check(cyntexClasses);
     }
 
@@ -219,19 +226,28 @@ class RingDependencyRulesTest {
     }
 
     @Test
-    @DisplayName("R9: control and runtime hold no compile reference to each other")
+    @DisplayName("R9: control and runtime hold no compile reference to each other, save the connection-probe whitelist")
     void r9_controlAndRuntimeDoNotReferenceEachOther() {
+        // The control-to-runtime half carries the single R5 exception: control may reach the runtime
+        // synchronously only through the connection-probe whitelist (io.cyntex.runtime.probe), a closed
+        // set of one. Any other runtime package is still forbidden. A later tightening turns this into
+        // an exactness gate — the whitelist has exactly one member, proven by a mutation test.
         noClasses().that().resideInAPackage("io.cyntex.control..")
-                .should().dependOnClassesThat().resideInAPackage("io.cyntex.runtime..")
+                .should().dependOnClassesThat(
+                        JavaClass.Predicates.resideInAPackage("io.cyntex.runtime..")
+                                .and(JavaClass.Predicates.resideOutsideOfPackage("io.cyntex.runtime.probe..")))
                 .allowEmptyShould(true)
-                .because("control writes desired state and the runtime watches and converges; "
-                        + "they decouple through the store and never hold each other's references")
+                .because("control writes desired state and the runtime watches and converges; they "
+                        + "decouple through the store and hold no reference to each other — the sole "
+                        + "exception is the synchronous connection-probe whitelist "
+                        + "(io.cyntex.runtime.probe), a closed set of one")
                 .check(cyntexClasses);
+        // The runtime-to-control half stays a blanket ban: the runtime never reaches up into control.
         noClasses().that().resideInAPackage("io.cyntex.runtime..")
                 .should().dependOnClassesThat().resideInAPackage("io.cyntex.control..")
                 .allowEmptyShould(true)
-                .because("control writes desired state and the runtime watches and converges; "
-                        + "they decouple through the store and never hold each other's references")
+                .because("control writes desired state and the runtime watches and converges; the "
+                        + "runtime holds no reference back into the control ring")
                 .check(cyntexClasses);
     }
 
