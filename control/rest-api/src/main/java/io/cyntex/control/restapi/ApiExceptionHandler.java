@@ -14,10 +14,10 @@ import java.util.TreeMap;
  * Projects a coded first-party error onto a structured HTTP response. A {@link CyntexException} — a
  * user-facing, diagnosable failure — becomes a {@code {code, params, message}} body: the canonical code
  * string, the named arguments, and the message rendered from them through the shared catalog. The status
- * is chosen from the code's domain: a client input error ({@code dsl.*}) is a 400; any other coded error
- * keeps the structured body but answers 500, since the surface has no client-attributable mapping for it
- * yet. That mapping is the seam later slices extend as client-attributable codes land (the auth layer
- * maps its codes to 401 / 403, and so on).
+ * is chosen from the code: a client input error ({@code dsl.*}) is a 400; the authentication codes map to
+ * 401 / 403 / 409; any other coded error keeps the structured body but answers 500, since the surface has
+ * no client-attributable mapping for it yet. That mapping is the seam later slices extend as more
+ * client-attributable codes land.
  *
  * <p>Only {@link CyntexException} is handled here. A programmer error / invariant violation (a bare NPE or
  * {@code IllegalStateException}) is left to crash into the container's default 500 — it must never be
@@ -41,14 +41,21 @@ class ApiExceptionHandler {
     }
 
     /**
-     * The HTTP status for a coded error, chosen by its domain: a client input error is a 400; any other
-     * coded error is a server-side failure (500) that still carries the structured body.
+     * The HTTP status for a coded error. The authentication codes are client-attributable and map to the
+     * usual auth statuses: no / invalid credential and a rejected login are 401, an under-scoped or
+     * non-loopback caller is 403, and a bootstrap channel that has already closed is a 409 state conflict.
+     * A client input error ({@code dsl.*}) is a 400. Any other coded error is a server-side failure (500)
+     * that still carries the structured body — never a bare, uncoded crash.
      */
     static HttpStatus statusFor(CyntexErrorCode code) {
-        String domain = domainOf(code.code());
-        return switch (domain) {
-            case "dsl" -> HttpStatus.BAD_REQUEST;
-            default -> HttpStatus.INTERNAL_SERVER_ERROR;
+        return switch (code.code()) {
+            case "control.auth-failed", "control.unauthenticated" -> HttpStatus.UNAUTHORIZED;
+            case "control.forbidden", "control.bootstrap-forbidden" -> HttpStatus.FORBIDDEN;
+            case "control.bootstrap-closed" -> HttpStatus.CONFLICT;
+            default -> switch (domainOf(code.code())) {
+                case "dsl" -> HttpStatus.BAD_REQUEST;
+                default -> HttpStatus.INTERNAL_SERVER_ERROR;
+            };
         };
     }
 
