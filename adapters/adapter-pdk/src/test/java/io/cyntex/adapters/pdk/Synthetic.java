@@ -220,4 +220,72 @@ final class Synthetic {
                 + "}";
         return SyntheticJar.compileToJar(dir, "synthetic.StaticThrows", src);
     }
+
+    // ---- connection-test connectors (drive TapConnectorNode.connectionTest) -----------------------
+
+    /**
+     * A minimal connector whose connectionTest body the caller fills in — no read/write functions, inert
+     * lifecycle and discovery. The body streams TestItems to the consumer and returns ConnectionOptions,
+     * or throws to exercise the coded drive-failure path. connectionTest creates and releases its own
+     * connection, so the drive never inits or stops the node around it.
+     */
+    private static String connectionTestSource(String simpleName, String testBody) {
+        return ""
+                + "package synthetic;"
+                + "import io.tapdata.pdk.apis.TapConnector;"
+                + "import io.tapdata.pdk.apis.functions.ConnectorFunctions;"
+                + "import io.tapdata.entity.codec.TapCodecsRegistry;"
+                + "import io.tapdata.pdk.apis.context.TapConnectionContext;"
+                + "import io.tapdata.pdk.apis.entity.ConnectionOptions;"
+                + "import io.tapdata.pdk.apis.entity.TestItem;"
+                + "import io.tapdata.pdk.apis.exception.TapTestItemException;"
+                + "import io.tapdata.entity.schema.TapTable;"
+                + "import java.util.List;"
+                + "import java.util.function.Consumer;"
+                + "public class " + simpleName + " implements TapConnector {"
+                + "  public void registerCapabilities(ConnectorFunctions functions, TapCodecsRegistry codecs) {}"
+                + "  public void init(TapConnectionContext c) {}"
+                + "  public void stop(TapConnectionContext c) {}"
+                + "  public void discoverSchema(TapConnectionContext c, List<String> t, int n, Consumer<List<TapTable>> s) {}"
+                + "  public int tableCount(TapConnectionContext c) { return 0; }"
+                + "  public ConnectionOptions connectionTest(TapConnectionContext c, Consumer<TestItem> s) {" + testBody + "}"
+                + "}";
+    }
+
+    /** A connector whose connectionTest reports a single passing check. */
+    static Path passingTest(Path dir) {
+        String body = ""
+                + "s.accept(new TestItem(\"Connection\", TestItem.RESULT_SUCCESSFULLY));"
+                + "return ConnectionOptions.create();";
+        return SyntheticJar.compileToJar(dir, "synthetic.PassingTest", connectionTestSource("PassingTest", body));
+    }
+
+    /** A connector whose connectionTest passes but attaches a warning item carrying free-text information. */
+    static Path warningTest(Path dir) {
+        String body = ""
+                + "s.accept(new TestItem(\"Connection\", TestItem.RESULT_SUCCESSFULLY));"
+                + "s.accept(new TestItem(\"Time detection\", TestItem.RESULT_SUCCESSFULLY_WITH_WARN, \"clock skew 3s\"));"
+                + "return ConnectionOptions.create();";
+        return SyntheticJar.compileToJar(dir, "synthetic.WarningTest", connectionTestSource("WarningTest", body));
+    }
+
+    /** A connector whose connectionTest reports a failed check with a full structured diagnostic. */
+    static Path failingTest(Path dir) {
+        String body = ""
+                + "s.accept(new TestItem(\"Connection\", TestItem.RESULT_SUCCESSFULLY));"
+                + "TapTestItemException ex = new TapTestItemException();"
+                + "ex.setMessage(\"Login denied\");"
+                + "ex.setReason(\"bad credentials\");"
+                + "ex.setSolution(\"check username/password\");"
+                + "ex.setErrorCode(\"28000\");"
+                + "s.accept(new TestItem(\"Login\", ex, TestItem.RESULT_FAILED));"
+                + "return ConnectionOptions.create();";
+        return SyntheticJar.compileToJar(dir, "synthetic.FailingTest", connectionTestSource("FailingTest", body));
+    }
+
+    /** A connector whose connectionTest throws — the test could not be completed, a coded drive failure. */
+    static Path throwingTest(Path dir) {
+        String body = "throw new RuntimeException(\"test boom\");";
+        return SyntheticJar.compileToJar(dir, "synthetic.ThrowingTest", connectionTestSource("ThrowingTest", body));
+    }
 }

@@ -57,6 +57,14 @@ public enum ConnectorError implements CyntexErrorCode {
     CAPTURE_FAILED("connector.capture-failed", Set.of("connector", "detail")),
 
     /**
+     * The connector's own connection test could not be run to completion — the connector threw out of
+     * {@code connectionTest} rather than reporting a failed check. A reported failed check is a normal
+     * FAILED result, not this code. {@code connector} is the connector id; {@code detail} is the failure
+     * the connector reported.
+     */
+    TEST_FAILED("connector.test-failed", Set.of("connector", "detail")),
+
+    /**
      * The connector failed while writing a batch. {@code connector} is the connector id;
      * {@code detail} is the failure the connector reported.
      */

@@ -16,6 +16,7 @@ connector.capture-failed
 connector.class-not-found
 connector.load-failed
 connector.projection-failed
+connector.test-failed
 connector.write-failed
 control.audit-blocked
 control.auth-failed
