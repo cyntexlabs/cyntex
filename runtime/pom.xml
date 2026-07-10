@@ -25,6 +25,7 @@
   <modules>
     <module>runtime-probe</module>
     <module>engine</module>
+    <module>srs</module>
     <module>scheduler</module>
   </modules>
 

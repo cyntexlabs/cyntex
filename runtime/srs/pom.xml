@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>io.cyntex</groupId>
+    <artifactId>runtime</artifactId>
+    <version>${revision}</version>
+  </parent>
+
+  <artifactId>srs</artifactId>
+  <name>Cyntex :: Runtime :: SRS</name>
+  <description>Source Replica Store write surface: the per-table change ring and the mining-chain meta model</description>
+
+  <dependencies>
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>core-event</artifactId>
+      <version>${revision}</version>
+    </dependency>
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>spi-capture</artifactId>
+      <version>${revision}</version>
+    </dependency>
+    <!-- The change ring's substrate: a per-table Hazelcast Ringbuffer holds the in-memory cdc buffer
+         (rule R4 allows the runtime ring to depend on Hazelcast). -->
+    <dependency>
+      <groupId>com.hazelcast</groupId>
+      <artifactId>hazelcast</artifactId>
+    </dependency>
+
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.assertj</groupId>
+      <artifactId>assertj-core</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+</project>
