@@ -4,7 +4,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import io.cyntex.core.lifecycle.CasOutcome;
 import io.cyntex.core.lifecycle.CheckpointDoc;
+import io.cyntex.core.lifecycle.DesiredState;
 import io.cyntex.core.lifecycle.EpochCas;
+import io.cyntex.core.lifecycle.PipelineState;
 import io.cyntex.core.model.Resource;
 import io.cyntex.core.model.SourceResource;
 import io.cyntex.core.model.ViewResource;
@@ -34,12 +36,13 @@ class StorePortTest {
     // --- facade ---
 
     @Test
-    void facadeExposesTheThreeStores() {
+    void facadeExposesTheFourStores() {
         StorePort store = new InMemoryStore();
 
         assertThat(store.artifacts()).isNotNull();
         assertThat(store.state()).isNotNull();
         assertThat(store.catalog()).isNotNull();
+        assertThat(store.desired()).isNotNull();
     }
 
     // --- artifacts (the canonical truth layer) ---
@@ -182,8 +185,36 @@ class StorePortTest {
         assertThat(catalog.list()).extracting(ConnectionConfig::id).containsExactlyInAnyOrder("orders-db", "events");
     }
 
+    // --- desired (the plain-upsert desired-intent store) ---
+
+    @Test
+    void desiredSaveThenReadRoundTrips() {
+        DesiredStore desired = new InMemoryStore().desired();
+        DesiredState want = new DesiredState("p1", PipelineState.RUNNING, "rev-abc");
+
+        desired.save(want);
+
+        assertThat(desired.read("p1")).contains(want);
+    }
+
+    @Test
+    void desiredReadAbsentIsEmpty() {
+        assertThat(new InMemoryStore().desired().read("p1")).isEmpty();
+    }
+
+    @Test
+    void desiredSaveUpsertsByPipelineId() {
+        DesiredStore desired = new InMemoryStore().desired();
+        desired.save(new DesiredState("p1", PipelineState.RUNNING, "rev-1"));
+        desired.save(new DesiredState("p1", PipelineState.STOPPED, "rev-2"));
+
+        DesiredState stored = desired.read("p1").orElseThrow();
+        assertThat(stored.targetState()).isEqualTo(PipelineState.STOPPED);
+        assertThat(stored.revision()).isEqualTo("rev-2");
+    }
+
     /**
-     * An in-memory store: three maps behind the three sub-ports. The state store applies the real
+     * An in-memory store: four maps behind the four sub-ports. The state store applies the real
      * fencing CAS, so the port composes with the core checkpoint contract, not a re-implementation.
      */
     private static final class InMemoryStore implements StorePort {
@@ -191,6 +222,7 @@ class StorePortTest {
         private final Map<String, Resource> artifacts = new HashMap<>();
         private final Map<String, CheckpointDoc> checkpoints = new HashMap<>();
         private final Map<String, ConnectionConfig> connections = new HashMap<>();
+        private final Map<String, DesiredState> desired = new HashMap<>();
 
         @Override
         public ArtifactStore artifacts() {
@@ -259,6 +291,21 @@ class StorePortTest {
                 @Override
                 public List<ConnectionConfig> list() {
                     return new ArrayList<>(connections.values());
+                }
+            };
+        }
+
+        @Override
+        public DesiredStore desired() {
+            return new DesiredStore() {
+                @Override
+                public void save(DesiredState desiredState) {
+                    desired.put(desiredState.pipelineId(), desiredState);
+                }
+
+                @Override
+                public Optional<DesiredState> read(String pipelineId) {
+                    return Optional.ofNullable(desired.get(pipelineId));
                 }
             };
         }
