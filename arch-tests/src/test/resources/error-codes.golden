@@ -22,6 +22,7 @@ control.auth-failed
 control.bootstrap-closed
 control.bootstrap-forbidden
 control.forbidden
+control.malformed-request
 control.unauthenticated
 dsl.ambiguous-reference
 dsl.composition

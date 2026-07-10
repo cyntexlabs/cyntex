@@ -211,6 +211,24 @@ class AuthTest {
         assertThat(body.params()).as("the login failure reveals nothing about which half was wrong").isEmpty();
     }
 
+    @Test
+    void loginWithABlankCredentialIsABadRequestWithACodedBody() {
+        // A missing / blank credential field is a malformed request — the client omitted a required value —
+        // refused at the boundary with a coded control.malformed-request (400). This is distinct from a
+        // present-but-wrong credential (the auth-failed 401), and it never reaches the login service's bare
+        // argument crash.
+        ApiError body = client().post().uri("/auth/login")
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(new LoginRequest("", "s3cret"))
+                .exchange((request, response) -> {
+                    assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+                    return response.bodyTo(ApiError.class);
+                });
+
+        assertThat(body.code()).isEqualTo("control.malformed-request");
+        assertThat(body.params()).containsKey("reason");
+    }
+
     // ---- the zero-user bootstrap channel: loopback-only, one-shot ----
 
     @Test
@@ -243,6 +261,23 @@ class AuthTest {
                 });
 
         assertThat(body.code()).isEqualTo("control.bootstrap-closed");
+    }
+
+    @Test
+    void bootstrapWithABlankCredentialIsABadRequestWithACodedBody() {
+        // The test client is on loopback and the store is empty, so the bootstrap channel is open. A blank
+        // password is still refused at the boundary with a coded control.malformed-request (400) — it would
+        // otherwise be hashed into a non-blank hash and silently create an admin with an empty password.
+        ApiError body = client().post().uri("/auth/bootstrap")
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(new BootstrapRequest("root", ""))
+                .exchange((request, response) -> {
+                    assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+                    return response.bodyTo(ApiError.class);
+                });
+
+        assertThat(body.code()).isEqualTo("control.malformed-request");
+        assertThat(body.params()).containsKey("reason");
     }
 
     // ---- the liveness probe stays anonymous; topology does not ----

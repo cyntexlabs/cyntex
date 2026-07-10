@@ -37,11 +37,19 @@ class AuthController {
 
     @PostMapping("/auth/login")
     ResponseEntity<LoginResponse> login(@RequestBody LoginRequest request) {
+        // A missing / blank credential field is a malformed request (a 400), distinct from a present-but-wrong
+        // credential (the auth-failed 401 the service raises); refuse it here before the service's bare guard.
+        MalformedRequest.requireText(request.username(), "a `username` is required");
+        MalformedRequest.requireText(request.password(), "a `password` is required");
         return ResponseEntity.ok(new LoginResponse(loginService.login(request.username(), request.password())));
     }
 
     @PostMapping("/auth/bootstrap")
     ResponseEntity<Void> bootstrap(@RequestBody BootstrapRequest request, HttpServletRequest http) {
+        // A missing / blank credential is refused as a coded 400 before the service builds the User — a blank
+        // password would otherwise be hashed into a non-blank hash and silently create an empty-password admin.
+        MalformedRequest.requireText(request.username(), "a `username` is required");
+        MalformedRequest.requireText(request.password(), "a `password` is required");
         CallerOrigin origin = CallerOrigins.classify(http.getRemoteAddr());
         bootstrapService.createFirstAdmin(origin, request.username(), request.password());
         return ResponseEntity.noContent().build();

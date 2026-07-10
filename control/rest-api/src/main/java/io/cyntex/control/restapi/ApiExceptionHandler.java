@@ -14,7 +14,8 @@ import java.util.TreeMap;
  * Projects a coded first-party error onto a structured HTTP response. A {@link CyntexException} — a
  * user-facing, diagnosable failure — becomes a {@code {code, params, message}} body: the canonical code
  * string, the named arguments, and the message rendered from them through the shared catalog. The status
- * is chosen from the code: a client input error ({@code dsl.*}) is a 400; the authentication codes map to
+ * is chosen from the code: a client input error (a {@code dsl.*} validation failure or a
+ * {@code control.malformed-request} refused at the boundary) is a 400; the authentication codes map to
  * 401 / 403 / 409; any other coded error keeps the structured body but answers 500, since the surface has
  * no client-attributable mapping for it yet. That mapping is the seam later slices extend as more
  * client-attributable codes land.
@@ -44,14 +45,17 @@ class ApiExceptionHandler {
      * The HTTP status for a coded error. The authentication codes are client-attributable and map to the
      * usual auth statuses: no / invalid credential and a rejected login are 401, an under-scoped or
      * non-loopback caller is 403, and a bootstrap channel that has already closed is a 409 state conflict.
-     * A client input error ({@code dsl.*}) is a 400. Any other coded error is a server-side failure (500)
-     * that still carries the structured body — never a bare, uncoded crash.
+     * A client input error — a {@code dsl.*} validation failure or a {@code control.malformed-request} refused
+     * at the boundary — is a 400. Any other coded error is a server-side failure (500) that still carries the
+     * structured body — never a bare, uncoded crash.
      */
     static HttpStatus statusFor(CyntexErrorCode code) {
         return switch (code.code()) {
             case "control.auth-failed", "control.unauthenticated" -> HttpStatus.UNAUTHORIZED;
             case "control.forbidden", "control.bootstrap-forbidden" -> HttpStatus.FORBIDDEN;
             case "control.bootstrap-closed" -> HttpStatus.CONFLICT;
+            // A request refused at the HTTP boundary as structurally malformed is a client input error, like dsl.*.
+            case "control.malformed-request" -> HttpStatus.BAD_REQUEST;
             default -> switch (domainOf(code.code())) {
                 case "dsl" -> HttpStatus.BAD_REQUEST;
                 default -> HttpStatus.INTERNAL_SERVER_ERROR;

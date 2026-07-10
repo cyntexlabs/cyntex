@@ -16,6 +16,15 @@ import java.util.Set;
 public enum ControlError implements CyntexErrorCode {
 
     /**
+     * A request was refused at the HTTP boundary because it is structurally malformed — a required field
+     * left null or blank, a missing body — before it could reach a service; {@code reason} is a short,
+     * human-readable statement of what was wrong (e.g. which field is required). This is a
+     * client-attributable input error, deliberately distinct from a service-layer invariant violation (a
+     * programmer bug), which stays a bare crash rather than being laundered into a coded error.
+     */
+    MALFORMED_REQUEST("control.malformed-request", Set.of("reason")),
+
+    /**
      * An audited operation was refused because its mandatory audit record could not be written first;
      * {@code op} is the operation id. No audit, no execute — the operation never ran.
      */
