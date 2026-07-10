@@ -1,15 +1,20 @@
 package io.cyntex.archtests;
 
+import com.tngtech.archunit.base.DescribedPredicate;
 import com.tngtech.archunit.core.domain.JavaClass;
 import com.tngtech.archunit.core.domain.JavaClasses;
+import com.tngtech.archunit.core.domain.JavaModifier;
 import com.tngtech.archunit.core.importer.ClassFileImporter;
 import com.tngtech.archunit.core.importer.ImportOption;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import static com.tngtech.archunit.core.domain.JavaClass.Predicates.resideInAPackage;
+import static com.tngtech.archunit.core.domain.properties.HasName.Predicates.name;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
+import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * Package-level enforcement of the ring dependency rules (the fine-grained gate; the
@@ -226,12 +231,51 @@ class RingDependencyRulesTest {
     }
 
     @Test
+    @DisplayName("R5 (exactness): the control-to-runtime sync whitelist is exactly the connection probe — no second channel")
+    void r5_controlToRuntimeSyncWhitelistHasNoSecondChannel() {
+        // A control-to-runtime sync channel is a runtime interface control reaches for. The whitelist is
+        // a closed set of exactly one such interface (the connection probe); the probe's value types
+        // (ProbeTarget / ProbeVerdict) are its payload, not channels of their own. This gate bans a
+        // second channel — a further probe interface control depends on. Widening the whitelist must
+        // change this gate and the sync-whitelist decision, not slip in beside it (a second probe
+        // interface control reaches for turns this red).
+        DescribedPredicate<JavaClass> aRuntimeSyncChannelOtherThanTheConnectionProbe =
+                resideInAPackage("io.cyntex.runtime.probe..")
+                        .and(DescribedPredicate.describe("interfaces", JavaClass::isInterface))
+                        .and(DescribedPredicate.not(name("io.cyntex.runtime.probe.ConnectionProbe")))
+                        .as("a control-to-runtime sync channel other than the connection probe");
+        noClasses().that().resideInAPackage("io.cyntex.control..")
+                .should().dependOnClassesThat(aRuntimeSyncChannelOtherThanTheConnectionProbe)
+                .allowEmptyShould(true)
+                .because("the control-to-runtime sync whitelist is a closed set of exactly one member, "
+                        + "the connection probe; a second synchronous channel must change this gate and "
+                        + "the sync-whitelist decision, not slip in beside it")
+                .check(cyntexClasses);
+    }
+
+    @Test
+    @DisplayName("R5 (exactness): the connection probe exposes exactly one operation (the connection test)")
+    void r5_theConnectionProbeExposesExactlyOneOperation() {
+        // The whitelist member is a single operation. Counting all abstract methods — including any
+        // inherited from a super-interface, not only the probe's own — a second operation (added
+        // directly or pulled in through a super-interface) is a second synchronous control-to-runtime
+        // call and must change the sync-whitelist decision, not slip in.
+        JavaClass connectionProbe = cyntexClasses.get("io.cyntex.runtime.probe.ConnectionProbe");
+        long operations = connectionProbe.getAllMethods().stream()
+                .filter(method -> method.getModifiers().contains(JavaModifier.ABSTRACT))
+                .count();
+        assertThat(operations)
+                .as("the connection-probe whitelist is a closed set of exactly one operation")
+                .isEqualTo(1L);
+    }
+
+    @Test
     @DisplayName("R9: control and runtime hold no compile reference to each other, save the connection-probe whitelist")
     void r9_controlAndRuntimeDoNotReferenceEachOther() {
         // The control-to-runtime half carries the single R5 exception: control may reach the runtime
         // synchronously only through the connection-probe whitelist (io.cyntex.runtime.probe), a closed
-        // set of one. Any other runtime package is still forbidden. A later tightening turns this into
-        // an exactness gate — the whitelist has exactly one member, proven by a mutation test.
+        // set of one. Any other runtime package is still forbidden; the exactness gate above pins that
+        // whitelist to exactly one channel and one operation.
         noClasses().that().resideInAPackage("io.cyntex.control..")
                 .should().dependOnClassesThat(
                         JavaClass.Predicates.resideInAPackage("io.cyntex.runtime..")
