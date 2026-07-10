@@ -41,6 +41,22 @@ class ApiExceptionHandlerTest {
     }
 
     @Test
+    void aMalformedRequestIsABadRequestWithACodedRenderedBody() {
+        // A request refused at the boundary as structurally malformed is a client input error like dsl.*: a 400
+        // with a coded body whose reason is substituted into the catalog template, not left as the bare code.
+        CyntexException e = new CyntexException(
+                ControlError.MALFORMED_REQUEST, Map.of("reason", "a `username` is required"), null);
+
+        ResponseEntity<ApiError> response = handler.handle(e);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        ApiError body = response.getBody();
+        assertThat(body.code()).isEqualTo("control.malformed-request");
+        assertThat(body.message()).contains("a `username` is required").isNotEqualTo("control.malformed-request");
+        assertThat(body.params()).containsEntry("reason", "a `username` is required");
+    }
+
+    @Test
     void aCodedServerSideFailureKeepsTheCodedBodyButAnswersServerError() {
         CyntexException e = new CyntexException(ControlError.AUDIT_BLOCKED, Map.of("op", "artifact.apply"), null);
 

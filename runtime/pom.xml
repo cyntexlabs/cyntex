@@ -23,6 +23,7 @@
   <name>Cyntex :: Runtime Ring</name>
 
   <modules>
+    <module>runtime-probe</module>
     <module>engine</module>
     <module>scheduler</module>
   </modules>

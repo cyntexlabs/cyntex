@@ -23,6 +23,15 @@ cli.kind-dir-mismatch:
 cli.resource-not-found:
   message: "No resource with id '{id}' in the workspace."
   solution: "Run `cyntex ls` to see the available resources."
+cli.connect-failed:
+  message: "Could not reach any Cyntex server among the seeds: {seeds}."
+  solution: "Check the addresses are correct and that a Cyntex server is running there, then try connect again."
+cli.not-connected:
+  message: "The `{verb}` command needs a connection to a Cyntex server."
+  solution: "Run `connect <host:port>` to reach a server first, then try again."
+cli.not-authenticated:
+  message: "The `{verb}` command needs you to sign in first."
+  solution: "Run `login <username>` to authenticate, then try again."
 dsl.unknown-field:
   message: "Unknown field '{field}' at {path}."
   solution: "Remove it, or run `cyntex explain` to see the fields allowed here."
@@ -122,6 +131,9 @@ control.bootstrap-forbidden:
 control.forbidden:
   message: "Operation '{op}' requires {required} capability."
   solution: "Sign in as a user with that capability, or use a token issued with that scope."
+control.malformed-request:
+  message: "The request is malformed: {reason}."
+  solution: "Correct the request body, then send it again."
 control.unauthenticated:
   message: "This operation requires authentication."
   solution: "Sign in with `login` to obtain a session token, or present a machine token with `--token`."

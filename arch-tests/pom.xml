@@ -123,6 +123,12 @@
     <!-- runtime ring: registered so the R4 rule scans the runtime classes -->
     <dependency>
       <groupId>io.cyntex</groupId>
+      <artifactId>runtime-probe</artifactId>
+      <version>${revision}</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>io.cyntex</groupId>
       <artifactId>engine</artifactId>
       <version>${revision}</version>
       <scope>test</scope>

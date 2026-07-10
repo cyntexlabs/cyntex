@@ -2,6 +2,7 @@ package io.cyntex.control.restapi;
 
 import io.cyntex.control.core.ApplyResult;
 import io.cyntex.control.core.ApplyService;
+import io.cyntex.control.core.ArtifactDraft;
 import io.cyntex.control.core.ArtifactQueryService;
 import io.cyntex.control.core.StoredArtifact;
 import org.springframework.http.ResponseEntity;
@@ -11,6 +12,8 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+
+import java.util.List;
 
 /**
  * The artifact verbs projected onto HTTP: apply (write), get and list (read). Each handler is a thin
@@ -32,7 +35,11 @@ class ArtifactController {
     @Verb("artifact.apply")
     @PostMapping("/artifacts:apply")
     ApplyResult apply(@RequestBody ApplyRequest request) {
-        return applyService.apply(request.drafts());
+        // Refuse a body with no drafts array at the boundary as a coded 400, rather than letting a null trip
+        // the service's bare invariant guard (a 500). A missing body is already a framework-level 400 upstream.
+        List<ArtifactDraft> drafts = MalformedRequest.require(
+                request == null ? null : request.drafts(), "the request must carry a `drafts` array");
+        return applyService.apply(drafts);
     }
 
     @Verb("artifact.get")

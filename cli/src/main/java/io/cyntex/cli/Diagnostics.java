@@ -2,7 +2,9 @@ package io.cyntex.cli;
 
 import io.cyntex.core.common.CyntexErrorCode;
 import io.cyntex.messages.MessageCatalog;
+import picocli.CommandLine.Help.Ansi;
 
+import java.io.PrintWriter;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.TreeMap;
@@ -17,6 +19,23 @@ import java.util.TreeMap;
 final class Diagnostics {
 
     private Diagnostics() {
+    }
+
+    /**
+     * Renders a coded diagnostic to an error stream in the CLI's stable text shape — a bold-red
+     * {@code error: <code>} header, then the catalog message, then the solution hint when the catalog
+     * carries one. This is the one text renderer every face shares, so a coded diagnostic reads
+     * identically whether an offline verb ({@code desc}, {@code connect}) or a connected online verb
+     * raised it; the message and solution come from the same bundled catalog as the structured form.
+     */
+    static void printText(PrintWriter err, CyntexErrorCode code, Map<String, Object> args) {
+        MessageCatalog.Rendered rendered = MessageCatalog.bundled().render(code, args);
+        err.println(Ansi.AUTO.string("@|bold,red error:|@") + " " + code.code());
+        err.println("  " + rendered.message());
+        if (rendered.solution() != null) {
+            err.println("  " + rendered.solution());
+        }
+        err.flush();
     }
 
     /** One coded diagnostic as a stable, machine-readable map. */

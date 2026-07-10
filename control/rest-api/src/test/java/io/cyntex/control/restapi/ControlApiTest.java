@@ -30,6 +30,8 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.stereotype.Controller;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.method.HandlerMethod;
 import org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping;
@@ -165,15 +167,48 @@ class ControlApiTest {
     }
 
     @Test
-    void anUncodedFailureStaysABareServerErrorNotACodedBody() {
-        // A request with a null drafts field currently trips an invariant guard inside the service (a bare
-        // NPE). Whatever its origin, an uncoded throwable must never be laundered into a coded body: the
-        // advice catches only CyntexException, so this stays a bare 500 with no {code} envelope. (Coercing a
-        // malformed request into a coded 4xx is a separate request-validation concern, not this rule.)
-        Map<String, Object> body = client().post().uri("/api/artifacts:apply")
+    void applyingWithNullDraftsIsABadRequestWithACodedBody() {
+        // A structurally malformed request — an apply body with no drafts array ({} deserializes to a null
+        // drafts field) — is a client-attributable, diagnosable error. It is refused at the HTTP boundary
+        // with a coded control.malformed-request (400) carrying a human reason, not a bare invariant crash
+        // (a 500) deeper in the service.
+        ApiError body = client().post().uri("/api/artifacts:apply")
                 .contentType(MediaType.APPLICATION_JSON)
                 .accept(MediaType.APPLICATION_JSON)
                 .body(Map.of())
+                .exchange((request, response) -> {
+                    assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+                    return response.bodyTo(ApiError.class);
+                });
+
+        assertThat(body.code()).isEqualTo("control.malformed-request");
+        assertThat(body.params()).containsKey("reason");
+        // the message is rendered from the catalog with the reason substituted, not the bare code
+        assertThat(body.message()).isNotBlank().isNotEqualTo("control.malformed-request").contains("drafts");
+    }
+
+    @Test
+    void applyingAnEmptyDraftsArrayIsAValidNoOp() {
+        // The boundary guard refuses only a missing drafts array (null), never an empty one: applying zero
+        // drafts is a legitimate no-op, not a malformed request. It answers 200 with no outcomes and writes
+        // nothing — the accept half of the request-validation boundary, so the guard cannot over-reach into
+        // rejecting a well-formed empty batch.
+        ApplyResult result = client().post().uri("/api/artifacts:apply")
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(Map.of("drafts", List.of()))
+                .retrieve().toEntity(ApplyResult.class).getBody();
+
+        assertThat(result.outcomes()).isEmpty();
+    }
+
+    @Test
+    void anUncodedProgrammerErrorStaysABareServerErrorNotACodedBody() {
+        // The discipline the coded-4xx request-validation boundary must not erode: a genuine uncoded
+        // throwable (a programmer error / invariant violation) is never laundered into a pretty coded body.
+        // The advice catches only CyntexException, so a bare RuntimeException stays a bare 500 with no {code}
+        // envelope. Exercised through a test-only fault endpoint mounted outside the /api verb surface.
+        Map<String, Object> body = client().get().uri("/boom")
+                .accept(MediaType.APPLICATION_JSON)
                 .exchange((request, response) -> {
                     assertThat(response.getStatusCode().is5xxServerError()).isTrue();
                     return response.bodyTo(new ParameterizedTypeReference<Map<String, Object>>() {});
@@ -281,7 +316,7 @@ class ControlApiTest {
     @SpringBootConfiguration
     @EnableAutoConfiguration
     @Import({RestApiConfiguration.class, ArtifactController.class, ConnectionController.class,
-            ClusterController.class, HealthController.class, ApiExceptionHandler.class})
+            ClusterController.class, HealthController.class, ApiExceptionHandler.class, FaultController.class})
     static class TestApp {
 
         @Bean
@@ -297,6 +332,21 @@ class ControlApiTest {
         @Bean
         ArtifactQueryService artifactQueryService(ArtifactStore store) {
             return new ArtifactQueryService(store);
+        }
+    }
+
+    /**
+     * A test-only endpoint that throws a bare, uncoded programmer error. Like the liveness probe it is a
+     * plain {@code @Controller}, so it stays at the root — outside the {@code /api} prefix and the
+     * endpoint-derivation gate (which inspects only {@code /api} handlers). It proves the advice never
+     * launders an uncoded throwable into a coded body: the boundary that request validation must not erode.
+     */
+    @Controller
+    static class FaultController {
+
+        @GetMapping("/boom")
+        ResponseEntity<String> boom() {
+            throw new IllegalStateException("a simulated programmer error");
         }
     }
 

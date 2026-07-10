@@ -41,10 +41,12 @@ public final class Cli implements Runnable {
     /**
      * Verbs that need a live server connection. Registered so they are listed and explained rather
      * than reported as unknown; each one prints a "requires a connection" notice in this offline
-     * build (the connected behaviour belongs to a later, server-state slice).
+     * build (the connected behaviour belongs to a later, server-state slice). {@code connect} is not
+     * here — it is a REPL builtin, since a connection is session-scoped and meaningful only inside
+     * the read loop, not as a one-shot verb.
      */
     static final List<String> CONNECTED_VERBS = List.of(
-            "connect", "apply", "run", "export", "diff", "edit", "start", "stop", "status", "logs");
+            "apply", "get", "run", "export", "diff", "edit", "start", "stop", "status", "logs");
 
     @Spec
     CommandSpec spec;
@@ -98,7 +100,7 @@ public final class Cli implements Runnable {
                 System.exit(newCommandLine().execute(args));
                 return;
             }
-            new Repl(newCommandLine(), seed).run();
+            new Repl(newCommandLine(), seed, new HttpControlPlaneClient()).run();
         } else {
             System.exit(newCommandLine().execute(args));
         }

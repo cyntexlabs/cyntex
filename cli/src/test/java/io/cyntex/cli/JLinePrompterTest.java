@@ -57,4 +57,14 @@ class JLinePrompterTest {
         assertThat(JLinePrompter.captureBlock(source("a", "", "b", ".")))
                 .isEqualTo("a\n\nb");
     }
+
+    @Test
+    void aSecretReplyIsReturnedVerbatimWhileFreeTextIsTrimmed() {
+        // a password / token must reach the wire exactly as typed; free-text answers drop surrounding
+        // whitespace, and either way end-of-input (null) reads as empty
+        assertThat(JLinePrompter.normalizeReply("  pass phrase  ", false)).isEqualTo("  pass phrase  ");
+        assertThat(JLinePrompter.normalizeReply("  alice  ", true)).isEqualTo("alice");
+        assertThat(JLinePrompter.normalizeReply(null, false)).isEmpty();
+        assertThat(JLinePrompter.normalizeReply(null, true)).isEmpty();
+    }
 }

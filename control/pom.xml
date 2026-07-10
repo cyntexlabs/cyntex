@@ -2,13 +2,14 @@
 <!--
   Control ring aggregate parent.
   Ring rules R5 / R9: control-core depends on core + spi-store; rest-api depends on
-  control-core + core. The control ring must NOT hold a compile dependency on the runtime ring
-  (control writes desired state, the runtime watches and converges — they decouple through the
-  store, never holding each other's references). It must not pull Hazelcast, the PDK, or any
-  adapter. Spring is allowed in rest-api (the HTTP presentation face) only; control-core stays
-  framework-free. The coarse enforcer gate below bans runtime modules / Hazelcast / PDK /
-  adapters ring-wide; the precise per-module checks (rest-api must not depend on spi directly;
-  control-core must not depend on Spring) are the ArchUnit R5 rules.
+  control-core + core. Control reaches the runtime only through the store (control writes desired
+  state, the runtime watches and converges — they decouple through the store). The sole exception
+  is the synchronous connection-probe whitelist (io.cyntex:runtime-probe), a closed set of one that
+  control-core may depend on; the runtime's execution modules (engine / scheduler), Hazelcast, the
+  PDK and every adapter stay banned. Spring is allowed in rest-api (the HTTP presentation face)
+  only; control-core stays framework-free. The coarse enforcer gate below bans the runtime engine /
+  scheduler / Hazelcast / PDK / adapters ring-wide; the precise per-module checks (rest-api must not
+  depend on spi directly; control-core must not depend on Spring) are the ArchUnit R5 rules.
 -->
 <project xmlns="http://maven.apache.org/POM/4.0.0"
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
@@ -44,10 +45,11 @@
 
   <build>
     <plugins>
-      <!-- Coarse ring gate (R5 / R9): the control ring must not hold a compile dependency on the
-           runtime ring, nor pull Hazelcast / PDK / any adapter. Spring is allowed in rest-api
-           only. The precise per-module checks (incl. control-core must not depend on Spring) are
-           the ArchUnit R5 rules. -->
+      <!-- Coarse ring gate (R5 / R9): the control ring reaches the runtime only through the store,
+           save the connection-probe whitelist (io.cyntex:runtime-probe, a closed set of one). The
+           runtime engine / scheduler, Hazelcast, the PDK and every adapter stay banned. Spring is
+           allowed in rest-api only. The precise per-module checks (incl. control-core must not depend
+           on Spring) are the ArchUnit R5 rules. -->
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-enforcer-plugin</artifactId>
@@ -68,11 +70,12 @@
                     <exclude>io.tapdata*</exclude>
                   </excludes>
                   <message>
-Forbidden dependency in the Control ring (rules R5 / R9). Control must not hold a compile
-dependency on the runtime ring (control writes desired state, the runtime watches and
-converges — they decouple through the store), nor pull Hazelcast / PDK / any adapter. Spring
-is allowed in rest-api only; control-core stays framework-free. The precise per-module checks
-are the ArchUnit R5 rules.
+Forbidden dependency in the Control ring (rules R5 / R9). Control reaches the runtime only
+through the store (control writes desired state, the runtime watches and converges), save the
+synchronous connection-probe whitelist (io.cyntex:runtime-probe, a closed set of one). The
+runtime engine / scheduler, Hazelcast, the PDK and every adapter stay banned. Spring is allowed
+in rest-api only; control-core stays framework-free. The precise per-module checks are the
+ArchUnit R5 rules.
                   </message>
                 </bannedDependencies>
               </rules>
