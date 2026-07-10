@@ -17,6 +17,14 @@
     core + spi and the Hazelcast execution substrate only (rule R4); never on an adapter.</description>
 
   <dependencies>
+    <!-- The resource model the DAG builder reads to compile a pipeline into a Jet job; core ring,
+         zero third-party (rule R4: core + spi only). -->
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>core-model</artifactId>
+      <version>${revision}</version>
+    </dependency>
+
     <!-- The stateless transform seam the runtime adapter wraps; brings the event envelope currency
          transitively (rule R4: core + spi only). -->
     <dependency>
