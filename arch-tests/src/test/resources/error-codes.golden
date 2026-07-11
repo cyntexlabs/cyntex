@@ -41,6 +41,7 @@ io.document-unreadable
 io.store-unauthorized
 io.store-unavailable
 lifecycle.illegal-transition
+lifecycle.incompatible-revision
 role.unsupported
 store.invalid-uri
 store.not-replica-set
