@@ -221,6 +221,36 @@ final class Synthetic {
         return SyntheticJar.compileToJar(dir, "synthetic.StaticThrows", src);
     }
 
+    /**
+     * A source that registers batch read but throws from every lifecycle method (init / stop /
+     * discover / connectionTest / tableCount). A capability derive reads only the registered ids, so a
+     * successful derive proves it inited nothing and opened no connection.
+     */
+    static Path initHostileSource(Path dir) {
+        String src = ""
+                + "package synthetic;"
+                + "import io.tapdata.pdk.apis.TapConnector;"
+                + "import io.tapdata.pdk.apis.functions.ConnectorFunctions;"
+                + "import io.tapdata.entity.codec.TapCodecsRegistry;"
+                + "import io.tapdata.pdk.apis.context.TapConnectionContext;"
+                + "import io.tapdata.pdk.apis.entity.ConnectionOptions;"
+                + "import io.tapdata.pdk.apis.entity.TestItem;"
+                + "import io.tapdata.entity.schema.TapTable;"
+                + "import java.util.List;"
+                + "import java.util.function.Consumer;"
+                + "public class InitHostile implements TapConnector {"
+                + "  public void registerCapabilities(ConnectorFunctions functions, TapCodecsRegistry codecs) {"
+                + "    functions.supportBatchRead((a, b, c, d, e) -> {});"
+                + "  }"
+                + "  public void init(TapConnectionContext c) { throw new AssertionError(\"init called during capability derive\"); }"
+                + "  public void stop(TapConnectionContext c) { throw new AssertionError(\"stop called during capability derive\"); }"
+                + "  public void discoverSchema(TapConnectionContext c, List<String> t, int n, Consumer<List<TapTable>> s) { throw new AssertionError(\"discoverSchema called during capability derive\"); }"
+                + "  public ConnectionOptions connectionTest(TapConnectionContext c, Consumer<TestItem> s) { throw new AssertionError(\"connectionTest called during capability derive\"); }"
+                + "  public int tableCount(TapConnectionContext c) { throw new AssertionError(\"tableCount called during capability derive\"); }"
+                + "}";
+        return SyntheticJar.compileToJar(dir, "synthetic.InitHostile", src);
+    }
+
     // ---- connection-test connectors (drive TapConnectorNode.connectionTest) -----------------------
 
     /**
