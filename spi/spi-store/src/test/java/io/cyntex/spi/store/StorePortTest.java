@@ -37,7 +37,7 @@ class StorePortTest {
     // --- facade ---
 
     @Test
-    void facadeExposesTheFiveStores() {
+    void facadeExposesTheSixStores() {
         StorePort store = new InMemoryStore();
 
         assertThat(store.artifacts()).isNotNull();
@@ -45,6 +45,7 @@ class StorePortTest {
         assertThat(store.catalog()).isNotNull();
         assertThat(store.schemas()).isNotNull();
         assertThat(store.connectors()).isNotNull();
+        assertThat(store.connectionTestResults()).isNotNull();
     }
 
     // --- artifacts (the canonical truth layer) ---
@@ -255,6 +256,49 @@ class StorePortTest {
                 .containsExactlyInAnyOrder("mysql", "postgres");
     }
 
+    // --- connection test results (latest-only per connection) ---
+
+    private static ConnectionTestResult passed(String connectionId, String connectorId) {
+        return new ConnectionTestResult(
+                connectionId,
+                connectorId,
+                ConnectionTestResult.Outcome.PASSED,
+                List.of(new ConnectionTestItem("Connection", ConnectionTestItem.Status.PASSED, null, null, null, null)),
+                1783939200000L);
+    }
+
+    @Test
+    void connectionTestResultSaveThenFindRoundTrips() {
+        ConnectionTestResultStore results = new InMemoryStore().connectionTestResults();
+        ConnectionTestResult result = passed("orders-db", "mysql");
+
+        results.save(result);
+
+        assertThat(results.find("orders-db")).contains(result);
+    }
+
+    @Test
+    void connectionTestResultFindAbsentConnectionIsEmpty() {
+        assertThat(new InMemoryStore().connectionTestResults().find("never-tested")).isEmpty();
+    }
+
+    @Test
+    void reTestReplacesTheStoredResultInPlace() {
+        ConnectionTestResultStore results = new InMemoryStore().connectionTestResults();
+        results.save(passed("orders-db", "mysql"));
+        ConnectionTestResult reTested = new ConnectionTestResult(
+                "orders-db",
+                "mysql",
+                ConnectionTestResult.Outcome.FAILED,
+                List.of(new ConnectionTestItem(
+                        "Login", ConnectionTestItem.Status.FAILED, "auth failed", null, null, "11000")),
+                1783939300000L);
+
+        results.save(reTested);
+
+        assertThat(results.find("orders-db")).contains(reTested);
+    }
+
     /**
      * An in-memory store: one map behind each sub-port. The state store applies the real fencing CAS,
      * so the port composes with the core checkpoint contract, not a re-implementation. The registry
@@ -269,6 +313,7 @@ class StorePortTest {
         private final Map<String, SourceModel> schemas = new HashMap<>();
         private final Map<String, ConnectorRegistration> registrations = new HashMap<>();
         private final Map<String, byte[]> connectorArtifacts = new HashMap<>();
+        private final Map<String, ConnectionTestResult> testResults = new HashMap<>();
 
         @Override
         public ArtifactStore artifacts() {
@@ -383,6 +428,21 @@ class StorePortTest {
                 public Optional<byte[]> artifact(String contentHash) {
                     byte[] bytes = connectorArtifacts.get(contentHash);
                     return bytes == null ? Optional.empty() : Optional.of(bytes.clone());
+                }
+            };
+        }
+
+        @Override
+        public ConnectionTestResultStore connectionTestResults() {
+            return new ConnectionTestResultStore() {
+                @Override
+                public void save(ConnectionTestResult result) {
+                    testResults.put(result.connectionId(), result);
+                }
+
+                @Override
+                public Optional<ConnectionTestResult> find(String connectionId) {
+                    return Optional.ofNullable(testResults.get(connectionId));
                 }
             };
         }

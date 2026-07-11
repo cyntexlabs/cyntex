@@ -6,6 +6,8 @@ import com.mongodb.client.MongoClients;
 import com.mongodb.client.MongoDatabase;
 import io.cyntex.core.dsl.DslParser;
 import io.cyntex.spi.store.ConnectionConfig;
+import io.cyntex.spi.store.ConnectionTestItem;
+import io.cyntex.spi.store.ConnectionTestResult;
 import io.cyntex.spi.store.RegistrationSource;
 import io.cyntex.spi.store.SourceModel;
 import io.cyntex.spi.store.SourceTable;
@@ -27,8 +29,9 @@ import static org.assertj.core.api.Assertions.assertThat;
  * Witnesses the aggregated store port against a real Mongo replica-set: one write through each of the
  * sub-stores lands in its own distinct, named storage area and reads back through that same sub-store,
  * so the artifact truth layer, the pipeline state store, the connection catalog, the discovered
- * source-schema store and the connector distribution registry never share storage. Skipped
- * automatically where Docker is absent, so a Docker-less build stays green.
+ * source-schema store, the connector distribution registry and the latest connection-test result per
+ * connection never share storage. Skipped automatically where Docker is absent, so a Docker-less build
+ * stays green.
  */
 @Testcontainers(disabledWithoutDocker = true)
 class MongoStorePortIT {
@@ -49,7 +52,7 @@ class MongoStorePortIT {
             """;
 
     @Test
-    void aggregatesTheFiveSubStoresEachOnItsOwnStorage() {
+    void aggregatesTheSixSubStoresEachOnItsOwnStorage() {
         // The Testcontainers Mongo speaks plaintext; TLS is opt-in, so a plaintext URL connects with
         // no flag. TLS wiring itself is covered by MongoConnectionTest.
         String uri = REPLICA_SET.getReplicaSetUrl();
@@ -58,7 +61,7 @@ class MongoStorePortIT {
             connection.verify();
             MongoStorePort port = new MongoStorePort(connection);
 
-            // one write through each of the five sub-stores
+            // one write through each of the six sub-stores
             port.artifacts().save(PARSER.parse(ORDERS));
             port.state().create("orders_sync", "{\"phase\":\"snapshot\"}", Instant.parse("2026-07-06T00:00:00Z"));
             port.catalog().save(new ConnectionConfig("mysql-local", "mysql", Map.of("host", "localhost")));
@@ -66,6 +69,12 @@ class MongoStorePortIT {
                     new SourceTable("orders", List.of(), List.of(), List.of()))));
             port.connectors().register(
                     "mysql", "1.3.5", RegistrationSource.SEED, "mysql-connector-bytes".getBytes(StandardCharsets.UTF_8));
+            port.connectionTestResults().save(new ConnectionTestResult(
+                    "mysql-local",
+                    "mysql",
+                    ConnectionTestResult.Outcome.PASSED,
+                    List.of(new ConnectionTestItem("Connection", ConnectionTestItem.Status.PASSED, null, null, null, null)),
+                    1783939200000L));
 
             // each reads back through its own sub-store
             assertThat(port.artifacts().get("orders")).isPresent();
@@ -73,6 +82,7 @@ class MongoStorePortIT {
             assertThat(port.catalog().get("mysql-local")).isPresent();
             assertThat(port.schemas().get("mysql-local")).isPresent();
             assertThat(port.connectors().list()).hasSize(1);
+            assertThat(port.connectionTestResults().find("mysql-local")).isPresent();
 
             // and each landed in its own distinct, named storage — no concern shares storage
             String databaseName = new ConnectionString(uri).getDatabase();
@@ -83,6 +93,8 @@ class MongoStorePortIT {
                 assertThat(database.getCollection(MongoStorePort.CONNECTIONS).countDocuments()).isEqualTo(1);
                 assertThat(database.getCollection(MongoStorePort.SOURCE_SCHEMAS).countDocuments()).isEqualTo(1);
                 assertThat(database.getCollection(MongoStorePort.CONNECTOR_ARTIFACTS + ".files").countDocuments())
+                        .isEqualTo(1);
+                assertThat(database.getCollection(MongoStorePort.CONNECTION_TEST_RESULTS).countDocuments())
                         .isEqualTo(1);
             }
         }
