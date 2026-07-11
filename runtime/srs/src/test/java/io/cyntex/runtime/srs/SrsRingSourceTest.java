@@ -18,6 +18,7 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
+import java.time.Instant;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -70,11 +71,22 @@ class SrsRingSourceTest {
         }
     }
 
-    /** Runs a job that streams one ring into a fresh list sink, waiting until {@code size} changes arrive. */
-    private static IList<SrsItem> streamRingToList(String ringName, String sinkName, int size)
+    /** Pre-fills a ring with one insert per event time in {@code timestamps}, ids matching sequence. */
+    private static void fillWith(String ringName, long... timestamps) {
+        SrsRingbuffer ring = new SrsRingbuffer(hz.getRingbuffer(ringName));
+        for (int i = 0; i < timestamps.length; i++) {
+            ring.append(new SrsItem(new SourcePosition("w" + i), Op.INSERT, timestamps[i], null, Map.of("id", i), 0L));
+        }
+    }
+
+    /**
+     * Runs a job that streams one ring from {@code start} into a fresh list sink, waiting until {@code size}
+     * changes arrive.
+     */
+    private static IList<SrsItem> streamRingToList(String ringName, String sinkName, int size, StartFrom start)
             throws InterruptedException {
         Pipeline p = Pipeline.create();
-        p.readFrom(SrsRingSource.create(ringName)).withoutTimestamps().writeTo(Sinks.list(sinkName));
+        p.readFrom(SrsRingSource.create(ringName, start)).withoutTimestamps().writeTo(Sinks.list(sinkName));
         IList<SrsItem> sink = hz.getList(sinkName);
         Job job = hz.getJet().newJob(p);
         try {
@@ -99,21 +111,34 @@ class SrsRingSourceTest {
     void streamsRingChangesToADownstreamJetStageInOrder() throws InterruptedException {
         fill("srs.chain.orders", 5);
 
-        IList<SrsItem> sink = streamRingToList("srs.chain.orders", "srs-sink-orders", 5);
+        IList<SrsItem> sink = streamRingToList("srs.chain.orders", "srs-sink-orders", 5, StartFrom.earliest());
 
         assertThat(sink).extracting(i -> i.after().get("id")).containsExactly(0, 1, 2, 3, 4);
     }
 
     @Test
-    void aFreshJobReplaysTheRingFromTheHead() throws InterruptedException {
+    void aFreshEarliestJobReplaysTheRingFromTheHead() throws InterruptedException {
         fill("srs.chain.replay", 4);
 
         // A first job drains the ring; a second, fresh job reads the same ring from the head again. The
         // source keeps no position in Jet state, so a restart replays rather than resuming a persisted
         // offset — the L1 restart=replay semantic.
-        streamRingToList("srs.chain.replay", "srs-sink-replay-1", 4);
-        IList<SrsItem> second = streamRingToList("srs.chain.replay", "srs-sink-replay-2", 4);
+        streamRingToList("srs.chain.replay", "srs-sink-replay-1", 4, StartFrom.earliest());
+        IList<SrsItem> second = streamRingToList("srs.chain.replay", "srs-sink-replay-2", 4, StartFrom.earliest());
 
         assertThat(second).extracting(i -> i.after().get("id")).containsExactly(0, 1, 2, 3);
+    }
+
+    @Test
+    void aTimestampSourceStreamsOnlyChangesAtOrAfterIt() throws InterruptedException {
+        // Buffered changes at event times 10, 20, 30, 40 (ids 0..3). start_from resolves to the first change
+        // at or after 25, so the source streams only ids 2 and 3 — proving create() honours a non-earliest
+        // start point end-to-end through a real Jet job (deterministic: the subset is already buffered).
+        fillWith("srs.chain.at", 10, 20, 30, 40);
+
+        IList<SrsItem> sink = streamRingToList(
+                "srs.chain.at", "srs-sink-at", 2, StartFrom.at(Instant.ofEpochMilli(25)));
+
+        assertThat(sink).extracting(i -> i.after().get("id")).containsExactly(2, 3);
     }
 }

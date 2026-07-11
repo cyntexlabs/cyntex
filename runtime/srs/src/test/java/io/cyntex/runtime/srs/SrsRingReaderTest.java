@@ -12,6 +12,7 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -60,7 +61,11 @@ class SrsRingReaderTest {
     }
 
     private static SrsItem insert(int id) {
-        return new SrsItem(new SourcePosition("w" + id), Op.INSERT, 1L, null, Map.of("id", id), 0L);
+        return insertAt(id, 1L);
+    }
+
+    private static SrsItem insertAt(int id, long ts) {
+        return new SrsItem(new SourcePosition("w" + id), Op.INSERT, ts, null, Map.of("id", id), 0L);
     }
 
     /** A ring pre-filled with {@code count} inserts at sequences {@code 0..count-1}. */
@@ -68,6 +73,15 @@ class SrsRingReaderTest {
         SrsRingbuffer ring = new SrsRingbuffer(hz.getRingbuffer(ringName));
         for (int i = 0; i < count; i++) {
             ring.append(insert(i));
+        }
+        return ring;
+    }
+
+    /** A ring pre-filled with one insert per event time in {@code timestamps}, ids matching sequence. */
+    private static SrsRingbuffer filledWith(String ringName, long... timestamps) {
+        SrsRingbuffer ring = new SrsRingbuffer(hz.getRingbuffer(ringName));
+        for (int i = 0; i < timestamps.length; i++) {
+            ring.append(insertAt(i, timestamps[i]));
         }
         return ring;
     }
@@ -146,5 +160,62 @@ class SrsRingReaderTest {
     @Test
     void rejectsANullRing() {
         assertThatThrownBy(() -> new SrsRingReader(null, 0)).isInstanceOf(NullPointerException.class);
+    }
+
+    @Test
+    void fromEarliestReplaysEveryBufferedChange() {
+        SrsRingReader reader = SrsRingReader.from(filled("srs.start.earliest", 3), StartFrom.earliest());
+        List<SrsItem> out = new ArrayList<>();
+
+        assertThat(reader.fill(out::add, 10)).isEqualTo(3);
+        assertThat(out).extracting(i -> i.after().get("id")).containsExactly(0, 1, 2);
+    }
+
+    @Test
+    void fromLatestSkipsBufferedChangesAndTailsNewOnes() {
+        SrsRingbuffer ring = filled("srs.start.latest", 3);
+        SrsRingReader reader = SrsRingReader.from(ring, StartFrom.latest());
+        List<SrsItem> out = new ArrayList<>();
+
+        // latest starts past the newest buffered change: nothing already there is replayed...
+        assertThat(reader.fill(out::add, 10)).isEqualTo(0);
+        // ...but a change appended after the start point is tailed.
+        ring.append(insert(3));
+        assertThat(reader.fill(out::add, 10)).isEqualTo(1);
+        assertThat(out).extracting(i -> i.after().get("id")).containsExactly(3);
+    }
+
+    @Test
+    void fromAnInstantStartsAtTheFirstChangeAtOrAfterIt() {
+        SrsRingReader reader = SrsRingReader.from(
+                filledWith("srs.start.at", 10, 20, 30, 40), StartFrom.at(Instant.ofEpochMilli(25)));
+        List<SrsItem> out = new ArrayList<>();
+
+        assertThat(reader.fill(out::add, 10)).isEqualTo(2);
+        assertThat(out).extracting(i -> i.after().get("id")).containsExactly(2, 3);
+    }
+
+    @Test
+    void fromAnInstantOlderThanEveryBufferedChangeReplaysFromHead() {
+        // The ring only goes back so far: an instant older than everything buffered clamps to the head —
+        // the earliest change still available — rather than inventing history the buffer no longer holds.
+        SrsRingReader reader = SrsRingReader.from(
+                filledWith("srs.start.at-old", 100, 200), StartFrom.at(Instant.ofEpochMilli(50)));
+        List<SrsItem> out = new ArrayList<>();
+
+        assertThat(reader.fill(out::add, 10)).isEqualTo(2);
+        assertThat(out).extracting(i -> i.after().get("id")).containsExactly(0, 1);
+    }
+
+    @Test
+    void fromAnInstantNewerThanEveryBufferedChangeTailsOnlyFutureChanges() {
+        SrsRingbuffer ring = filledWith("srs.start.at-future", 10, 20);
+        SrsRingReader reader = SrsRingReader.from(ring, StartFrom.at(Instant.ofEpochMilli(999)));
+        List<SrsItem> out = new ArrayList<>();
+
+        assertThat(reader.fill(out::add, 10)).isEqualTo(0);
+        ring.append(insertAt(2, 1000));
+        assertThat(reader.fill(out::add, 10)).isEqualTo(1);
+        assertThat(out).extracting(i -> i.after().get("id")).containsExactly(2);
     }
 }

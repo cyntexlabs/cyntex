@@ -20,6 +20,19 @@
       <artifactId>core-event</artifactId>
       <version>${revision}</version>
     </dependency>
+    <!-- The error-code kernel: user-facing capture faults (an unparsable start_from) are thrown as coded
+         CyntexExceptions, not bare strings. -->
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>core-common</artifactId>
+      <version>${revision}</version>
+    </dependency>
+    <!-- The pipeline read mode: the consumption plan branches the capture topology off it. -->
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>core-model</artifactId>
+      <version>${revision}</version>
+    </dependency>
     <dependency>
       <groupId>io.cyntex</groupId>
       <artifactId>spi-capture</artifactId>

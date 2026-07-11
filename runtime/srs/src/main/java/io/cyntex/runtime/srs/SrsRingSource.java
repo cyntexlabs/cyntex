@@ -25,14 +25,20 @@ public final class SrsRingSource {
     private SrsRingSource() {
     }
 
-    /** A Jet stream source that tails the named change ring from its head, in sequence order. */
-    public static StreamSource<SrsItem> create(String ringName) {
+    /**
+     * A Jet stream source that tails the named change ring in sequence order from the {@code start} point.
+     * The start point is resolved against the ring on the member that owns it — {@code earliest} replays
+     * from the head, {@code latest} takes only changes from now on, and an instant starts at the first
+     * change at or after it.
+     */
+    public static StreamSource<SrsItem> create(String ringName, StartFrom start) {
         Objects.requireNonNull(ringName, "ringName");
+        Objects.requireNonNull(start, "start");
         return SourceBuilder
                 .stream("srs-source-" + ringName, ctx -> {
                     Ringbuffer<SrsItem> rb = ctx.hazelcastInstance().getRingbuffer(ringName);
                     SrsRingbuffer ring = new SrsRingbuffer(rb);
-                    return new SrsRingReader(ring, ring.headSequence());
+                    return SrsRingReader.from(ring, start);
                 })
                 .fillBufferFn((SrsRingReader reader, SourceBuilder.SourceBuffer<SrsItem> buffer) ->
                         reader.fill(buffer::add, FILL_BATCH))
