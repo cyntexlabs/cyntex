@@ -60,7 +60,8 @@ public final class PipelineDagBuilder {
             for (int i = 0; i < sync.size(); i++) {
                 SyncElement element = sync.get(i);
                 String name = "serve." + (element.id() != null ? element.id() : i);
-                Vertex vertex = dag.newVertex(name, bindings.sinkVertices().apply(element));
+                Vertex vertex = dag.newVertex(name,
+                        SinkProcessor.metaSupplier(bindings.sinkWriters().apply(element)));
                 connect(dag, upstream, vertex, outboundOrdinal, inboundOrdinal);
             }
         }

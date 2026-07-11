@@ -2,7 +2,6 @@ package io.cyntex.runtime.engine;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.hazelcast.collection.IList;
 import com.hazelcast.config.Config;
 import com.hazelcast.config.JoinConfig;
 import com.hazelcast.core.Hazelcast;
@@ -14,13 +13,14 @@ import com.hazelcast.jet.core.Processor;
 import com.hazelcast.jet.core.ProcessorMetaSupplier;
 import com.hazelcast.jet.core.ProcessorSupplier;
 import io.cyntex.core.event.Envelope;
+import io.cyntex.core.model.FromClause;
 import io.cyntex.core.model.FromRef;
 import io.cyntex.core.model.PipelineResource;
 import io.cyntex.core.model.ServeBlock;
 import io.cyntex.core.model.Step;
 import io.cyntex.core.model.SyncElement;
-import io.cyntex.core.model.FromClause;
 import io.cyntex.core.model.TransformBody;
+import io.cyntex.spi.sink.SinkWriter;
 import io.cyntex.spi.transform.TransformPort;
 import java.util.List;
 import java.util.Map;
@@ -30,9 +30,11 @@ import org.junit.jupiter.api.Test;
 
 /**
  * Runs a DAG the builder assembled from a whole pipeline on an embedded single member: a source, a
- * real stateless filter port and a sink, wired only through the injected bindings. Proves the built
- * topology is a runnable Jet job and that the filter actually drops rows - the part a structural
- * assertion cannot see. Every leaf is an injected double, so the test carries no SRS dependency.
+ * real stateless filter port and the real generic sink adapter over an injected writer, wired only
+ * through the bindings. Proves the built topology is a runnable Jet job, that the filter actually
+ * drops rows, and that the sink adapter delivers the surviving rows to its writer - the part a
+ * structural assertion cannot see. Every leaf is an injected double, so the test carries no SRS or
+ * connector dependency.
  */
 class PipelineDagRunTest {
 
@@ -75,19 +77,20 @@ class PipelineDagRunTest {
 
         SupplierEx<TransformPort> keepEvenIds = () -> event ->
                 ((Integer) event.after().get("id")) % 2 == 0 ? List.of(event) : List.of();
+        SupplierEx<SinkWriter> intoOut = () -> new CollectingSinkWriter("out");
 
         DagBindings bindings = new DagBindings(
                 sourceId -> insertsSource(List.of(1, 2, 3, 4), "orders"),
                 step -> keepEvenIds,
-                syncElement -> collectIdsSink("out"),
+                syncElement -> intoOut,
                 ref -> Map.of(
                         FromRef.literal("orders_src"), List.of("orders_src"),
                         FromRef.literal("keep_even"), List.of("keep_even")).getOrDefault(ref, List.of()));
 
+        CollectingSinkWriter.reset("out");
         member.getJet().newJob(PipelineDagBuilder.build(pipeline, bindings)).join();
 
-        IList<Integer> out = member.getList("out");
-        assertThat(out).containsExactlyInAnyOrder(2, 4);
+        assertThat(CollectingSinkWriter.collected("out")).containsExactlyInAnyOrder(2, 4);
     }
 
     @Test
@@ -104,33 +107,30 @@ class PipelineDagRunTest {
                         null, null),
                 null, null);
 
+        SupplierEx<SinkWriter> intoOut = () -> new CollectingSinkWriter("out");
+
         DagBindings bindings = new DagBindings(
                 sourceId -> insertsSource(
                         sourceId.equals("a_src") ? List.of(1, 2) : List.of(10, 20), sourceId),
                 step -> {
                     throw new AssertionError("union must not consult transformPorts");
                 },
-                syncElement -> collectIdsSink("out"),
+                syncElement -> intoOut,
                 ref -> Map.of(
                         FromRef.literal("a_src"), List.of("a_src"),
                         FromRef.literal("b_src"), List.of("b_src"),
                         FromRef.literal("u"), List.of("u")).getOrDefault(ref, List.of()));
 
+        CollectingSinkWriter.reset("out");
         member.getJet().newJob(PipelineDagBuilder.build(pipeline, bindings)).join();
 
-        IList<Integer> out = member.getList("out");
-        assertThat(out).containsExactlyInAnyOrder(1, 2, 10, 20);
+        assertThat(CollectingSinkWriter.collected("out")).containsExactlyInAnyOrder(1, 2, 10, 20);
     }
 
     /** A source that builds insert envelopes on the member from a serializable list of ids. */
     private static ProcessorMetaSupplier insertsSource(List<Integer> ids, String src) {
         return ProcessorMetaSupplier.forceTotalParallelismOne(
                 ProcessorSupplier.of((SupplierEx<Processor>) () -> new InsertsSource(ids, src)));
-    }
-
-    /** A sink that records each envelope's {@code id} into a named list, keeping values serializable. */
-    private static ProcessorMetaSupplier collectIdsSink(String listName) {
-        return ProcessorMetaSupplier.of((SupplierEx<Processor>) () -> new CollectIdsSink(listName));
     }
 
     private static final class InsertsSource extends AbstractProcessor {
@@ -152,26 +152,6 @@ class PipelineDagRunTest {
                 }
                 next++;
             }
-            return true;
-        }
-    }
-
-    private static final class CollectIdsSink extends AbstractProcessor {
-        private final String listName;
-        private transient IList<Integer> list;
-
-        CollectIdsSink(String listName) {
-            this.listName = listName;
-        }
-
-        @Override
-        protected void init(Context context) {
-            list = context.hazelcastInstance().getList(listName);
-        }
-
-        @Override
-        protected boolean tryProcess(int ordinal, Object item) {
-            list.add((Integer) ((Envelope) item).after().get("id"));
             return true;
         }
     }

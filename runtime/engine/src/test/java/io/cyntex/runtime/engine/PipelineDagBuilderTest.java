@@ -10,6 +10,7 @@ import com.hazelcast.jet.core.Edge;
 import com.hazelcast.jet.core.ProcessorMetaSupplier;
 import com.hazelcast.jet.core.Vertex;
 import com.hazelcast.jet.core.processor.Processors;
+import io.cyntex.core.event.Envelope;
 import io.cyntex.core.model.FieldRule;
 import io.cyntex.core.model.FromClause;
 import io.cyntex.core.model.FromRef;
@@ -18,10 +19,14 @@ import io.cyntex.core.model.ServeBlock;
 import io.cyntex.core.model.Step;
 import io.cyntex.core.model.SyncElement;
 import io.cyntex.core.model.TransformBody;
+import io.cyntex.spi.sink.SinkWriter;
+import io.cyntex.spi.sink.WriteResult;
 import io.cyntex.spi.transform.TransformPort;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
 import java.util.function.Function;
 import org.junit.jupiter.api.Test;
 
@@ -114,7 +119,7 @@ class PipelineDagBuilderTest {
                 step -> {
                     throw new AssertionError("union must not consult transformPorts");
                 },
-                syncElement -> stubMeta(),
+                syncElement -> stubWriter(),
                 ref -> Map.of(
                         FromRef.literal("a_src"), List.of("a_src"),
                         FromRef.literal("b_src"), List.of("b_src"),
@@ -261,13 +266,29 @@ class PipelineDagBuilderTest {
         return new DagBindings(
                 srcId -> stubMeta(),
                 step -> (SupplierEx<TransformPort>) () -> ev -> List.of(ev),
-                syncElement -> stubMeta(),
+                syncElement -> stubWriter(),
                 Function.<FromRef>identity().andThen(ref -> upstreams.getOrDefault(ref, List.of())));
     }
 
     /** A structurally valid, behaviourally irrelevant vertex supplier for graph-shape assertions. */
     private static ProcessorMetaSupplier stubMeta() {
         return ProcessorMetaSupplier.of(Processors.mapP(FunctionEx.identity()));
+    }
+
+    /** A behaviourally irrelevant sink-writer factory; the builder wraps it but never opens it here. */
+    private static SupplierEx<SinkWriter> stubWriter() {
+        return NoOpSinkWriter::new;
+    }
+
+    private static final class NoOpSinkWriter implements SinkWriter {
+        @Override
+        public CompletionStage<WriteResult> write(List<Envelope> records) {
+            return CompletableFuture.completedFuture(new WriteResult(records.size()));
+        }
+
+        @Override
+        public void close() {
+        }
     }
 
     private static ServeBlock serve(FromRef from, SyncElement... sync) {

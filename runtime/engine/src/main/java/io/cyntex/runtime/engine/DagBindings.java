@@ -5,6 +5,7 @@ import com.hazelcast.jet.core.ProcessorMetaSupplier;
 import io.cyntex.core.model.FromRef;
 import io.cyntex.core.model.Step;
 import io.cyntex.core.model.SyncElement;
+import io.cyntex.spi.sink.SinkWriter;
 import io.cyntex.spi.transform.TransformPort;
 import java.util.List;
 import java.util.function.Function;
@@ -21,8 +22,10 @@ import java.util.function.Function;
  *   <li>{@code transformPorts} - a stateless step (filter / map / a scripted row transform) to the
  *       factory of the pure port it runs. A bare port factory, not a vertex: the builder alone wraps
  *       it in the one generic adapter, so no caller can substitute a per-operator processor.
- *   <li>{@code sinkVertices} - one {@code serve.sync} element to the Jet sink vertex that writes it.
- *       Opaque like the source: write mode, ddl policy and the target connector fold in behind it.
+ *   <li>{@code sinkWriters} - one {@code serve.sync} element to the factory of the sink writer that
+ *       writes it. A bare writer factory, not a vertex: the builder alone wraps it in the one generic
+ *       sink adapter, so no caller can substitute a per-connector sink processor. Write mode, ddl
+ *       policy and the target connector fold in behind the writer the factory opens on the member.
  *   <li>{@code upstreams} - a resolved {@code from:} reference to the producer vertex keys it names
  *       (source ids or step ids). Reference resolution against the source universe lives with the
  *       caller, so the engine never sees the table universe.
@@ -31,6 +34,6 @@ import java.util.function.Function;
 public record DagBindings(
         Function<String, ProcessorMetaSupplier> sourceVertices,
         Function<Step, SupplierEx<? extends TransformPort>> transformPorts,
-        Function<SyncElement, ProcessorMetaSupplier> sinkVertices,
+        Function<SyncElement, SupplierEx<? extends SinkWriter>> sinkWriters,
         Function<FromRef, List<String>> upstreams) {
 }
