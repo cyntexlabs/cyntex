@@ -138,6 +138,24 @@ final class Synthetic {
         return SyntheticJar.compileToJar(dir, "synthetic.InsertsOnly", source("InsertsOnly", "", register));
     }
 
+    /** A sink whose writeRecord reports the target table's primary-key count — proves the key reached it. */
+    static Path keyCountingSink(Path dir) {
+        String register = "functions.supportWriteRecord((context, events, table, consumer) -> {"
+                + "  int pk = table.primaryKeys() == null ? 0 : table.primaryKeys().size();"
+                + "  consumer.accept(new io.tapdata.pdk.apis.entity.WriteListResult<>((long) pk, 0L, 0L));"
+                + "});";
+        return SyntheticJar.compileToJar(dir, "synthetic.KeyCounting", source("KeyCounting", "", register));
+    }
+
+    /** A sink whose writeRecord reports the target table's column count — proves the schema reached it. */
+    static Path fieldCountingSink(Path dir) {
+        String register = "functions.supportWriteRecord((context, events, table, consumer) -> {"
+                + "  int cols = table.getNameFieldMap() == null ? 0 : table.getNameFieldMap().size();"
+                + "  consumer.accept(new io.tapdata.pdk.apis.entity.WriteListResult<>((long) cols, 0L, 0L));"
+                + "});";
+        return SyntheticJar.compileToJar(dir, "synthetic.FieldCounting", source("FieldCounting", "", register));
+    }
+
     /** A sink connector whose writeRecord throws — a connector-side write failure. */
     static Path throwingWriteSink(Path dir) {
         String register = "functions.supportWriteRecord((context, events, table, consumer) -> {"
