@@ -12,9 +12,14 @@
 
   <artifactId>runtime-probe</artifactId>
   <name>Cyntex :: Runtime :: Connection Probe</name>
-  <description>The one synchronous control-to-runtime seam (the connection-probe whitelist): the interface plus the first-landing stub. Carries no third-party so control-core stays clean when it holds this single reference.</description>
+  <description>The one synchronous control-to-runtime seam (the connection-probe whitelist): the probe interface plus the runtime-side delegate that drives the connector-plane connection tester. Carries no third-party so control-core stays clean when it holds this single reference.</description>
 
   <dependencies>
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>spi-store</artifactId>
+      <version>${revision}</version>
+    </dependency>
     <dependency>
       <groupId>org.junit.jupiter</groupId>
       <artifactId>junit-jupiter</artifactId>

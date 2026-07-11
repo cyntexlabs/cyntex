@@ -234,11 +234,11 @@ class RingDependencyRulesTest {
     @DisplayName("R5 (exactness): the control-to-runtime sync whitelist is exactly the connection probe — no second channel")
     void r5_controlToRuntimeSyncWhitelistHasNoSecondChannel() {
         // A control-to-runtime sync channel is a runtime interface control reaches for. The whitelist is
-        // a closed set of exactly one such interface (the connection probe); the probe's value types
-        // (ProbeTarget / ProbeVerdict) are its payload, not channels of their own. This gate bans a
-        // second channel — a further probe interface control depends on. Widening the whitelist must
-        // change this gate and the sync-whitelist decision, not slip in beside it (a second probe
-        // interface control reaches for turns this red).
+        // a closed set of exactly one such interface (the connection probe); the probe's value types are
+        // storage-port types (the connection config it takes, the test result it returns), carried as
+        // payload, not channels of their own. This gate bans a second channel — a further probe interface
+        // control depends on. Widening the whitelist must change this gate and the sync-whitelist
+        // decision, not slip in beside it (a second probe interface control reaches for turns this red).
         DescribedPredicate<JavaClass> aRuntimeSyncChannelOtherThanTheConnectionProbe =
                 resideInAPackage("io.cyntex.runtime.probe..")
                         .and(DescribedPredicate.describe("interfaces", JavaClass::isInterface))
