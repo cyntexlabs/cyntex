@@ -12,7 +12,6 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
-import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -60,20 +59,31 @@ class MongoDesiredStoreIT {
     }
 
     @Test
-    void listReturnsEveryStoredDesiredIntent() {
+    void pipelineIdsReturnsEveryStoredPipelineId() {
         withStore((store, collection) -> {
-            DesiredState orders = new DesiredState("orders_sync", PipelineState.RUNNING, "rev-1");
-            DesiredState users = new DesiredState("users_sync", PipelineState.PAUSED, "rev-2");
-            store.save(orders);
-            store.save(users);
+            store.save(new DesiredState("orders_sync", PipelineState.RUNNING, "rev-1"));
+            store.save(new DesiredState("users_sync", PipelineState.PAUSED, "rev-2"));
 
-            assertThat(store.list()).containsExactlyInAnyOrder(orders, users);
+            assertThat(store.pipelineIds()).containsExactlyInAnyOrder("orders_sync", "users_sync");
         });
     }
 
     @Test
-    void listReturnsEmptyWhenNoIntentIsStored() {
-        withStore((store, collection) -> assertThat(store.list()).isEmpty());
+    void pipelineIdsReturnsEmptyWhenNoIntentIsStored() {
+        withStore((store, collection) -> assertThat(store.pipelineIds()).isEmpty());
+    }
+
+    @Test
+    void pipelineIdsSurvivesACorruptDocument() {
+        withStore((store, collection) -> {
+            store.save(new DesiredState("orders_sync", PipelineState.RUNNING, "rev-1"));
+            // A document whose target state this version does not recognize: listing ids reads only the
+            // _id, so the corrupt row is enumerated rather than failing the whole reconcile set.
+            collection.insertOne(new Document("_id", "legacy")
+                    .append("targetState", "TELEPORTING").append("revision", "rev-x"));
+
+            assertThat(store.pipelineIds()).containsExactlyInAnyOrder("orders_sync", "legacy");
+        });
     }
 
     private interface StoreTest {

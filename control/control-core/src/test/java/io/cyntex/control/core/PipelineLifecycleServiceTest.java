@@ -242,8 +242,8 @@ class PipelineLifecycleServiceTest {
         }
 
         @Override
-        public List<DesiredState> list() {
-            return List.copyOf(byId.values());
+        public List<String> pipelineIds() {
+            return List.copyOf(byId.keySet());
         }
     }
 

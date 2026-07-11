@@ -25,7 +25,7 @@ final class InMemoryDesiredStore implements DesiredStore {
     }
 
     @Override
-    public List<DesiredState> list() {
-        return new ArrayList<>(docs.values());
+    public List<String> pipelineIds() {
+        return new ArrayList<>(docs.keySet());
     }
 }

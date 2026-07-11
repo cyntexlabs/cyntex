@@ -24,7 +24,7 @@ final class InMemoryDesiredStore implements DesiredStore {
     }
 
     @Override
-    public List<DesiredState> list() {
-        return List.copyOf(docs.values());
+    public List<String> pipelineIds() {
+        return List.copyOf(docs.keySet());
     }
 }

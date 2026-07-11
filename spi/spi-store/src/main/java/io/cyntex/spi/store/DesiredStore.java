@@ -14,7 +14,8 @@ import java.util.Optional;
  * plain intent, not a fenced transition, so it is a plain upsert by pipeline id rather than a
  * compare-and-swap. {@link #save} upserts the desired doc for its pipeline (last write wins);
  * {@link #read} returns the current desired doc for a pipeline, or empty when none is set;
- * {@link #list} returns every stored desired intent, the set the converge side reconciles.
+ * {@link #pipelineIds} returns the id of every pipeline with a stored intent, the set the converge
+ * side reconciles.
  */
 public interface DesiredStore {
 
@@ -24,6 +25,10 @@ public interface DesiredStore {
     /** Returns the current desired intent for a pipeline, or empty if none is set. */
     Optional<DesiredState> read(String pipelineId);
 
-    /** Lists every stored desired intent — the pipelines the converge side has to reconcile. */
-    List<DesiredState> list();
+    /**
+     * Lists the id of every pipeline that has a stored desired intent — the set the converge side
+     * reconciles. It returns ids only, not reconstructed intents, so enumerating the set never fails on
+     * a single corrupt document; a corrupt intent surfaces per pipeline when its {@link #read} is taken.
+     */
+    List<String> pipelineIds();
 }

@@ -1,6 +1,7 @@
 package io.cyntex.adapters.mongostore;
 
 import com.mongodb.client.MongoCollection;
+import com.mongodb.client.model.Projections;
 import com.mongodb.client.model.ReplaceOptions;
 import io.cyntex.core.common.CyntexException;
 import io.cyntex.core.lifecycle.DesiredState;
@@ -50,11 +51,14 @@ public final class MongoDesiredStore implements DesiredStore {
     }
 
     @Override
-    public List<DesiredState> list() {
-        // The driver read is wrapped so no MongoException escapes the module (rule R3); each document is
-        // reconstructed outside it, so a corrupt one still surfaces as a coded io diagnostic, not a bare crash.
-        List<Document> documents = StoreIo.call(() -> collection.find().into(new ArrayList<>()));
-        return documents.stream().map(MongoDesiredStore::toDesired).toList();
+    public List<String> pipelineIds() {
+        // Only the id (the document _id) is read, never the target state or revision, so enumerating the
+        // reconcile set never reconstructs — and so never fails — on a document whose content is corrupt.
+        // A corrupt intent surfaces per pipeline when its intent is actually read, not for the whole batch.
+        return StoreIo.call(() -> collection.find()
+                .projection(Projections.include("_id"))
+                .map(document -> document.getString("_id"))
+                .into(new ArrayList<>()));
     }
 
     /** Maps a desired state to its stored document: the pipeline id as {@code _id}, the rest as fields. */

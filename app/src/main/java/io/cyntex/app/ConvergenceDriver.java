@@ -1,6 +1,5 @@
 package io.cyntex.app;
 
-import io.cyntex.core.lifecycle.DesiredState;
 import io.cyntex.runtime.scheduler.PipelineConverger;
 import io.cyntex.spi.store.DesiredStore;
 import org.slf4j.Logger;
@@ -27,12 +26,11 @@ final class ConvergenceDriver {
 
     @Scheduled(fixedDelayString = "${cyntex.converge.interval-ms:1000}")
     void reconcile() {
-        for (DesiredState intent : desired.list()) {
+        for (String pipelineId : desired.pipelineIds()) {
             try {
-                converger.converge(intent.pipelineId());
+                converger.converge(pipelineId);
             } catch (RuntimeException e) {
-                LOG.warn("Convergence pass for pipeline {} failed; retrying on the next tick",
-                        intent.pipelineId(), e);
+                LOG.warn("Convergence pass for pipeline {} failed; retrying on the next tick", pipelineId, e);
             }
         }
     }

@@ -309,8 +309,8 @@ class StorePortTest {
                 }
 
                 @Override
-                public List<DesiredState> list() {
-                    return List.copyOf(desired.values());
+                public List<String> pipelineIds() {
+                    return List.copyOf(desired.keySet());
                 }
             };
         }
