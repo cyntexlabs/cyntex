@@ -110,6 +110,29 @@ class PipelineConvergerTest {
     }
 
     @Test
+    @DisplayName("a fenced converger concedes without re-swapping when a competitor already reached its target")
+    void fencedConvergerConcedesWhenACompetitorReachedTheTarget() {
+        state.create("p1", StateJson.of(NEW), T0); // seed at epoch 0
+        desired.save(new DesiredState("p1", RUNNING, REV));
+
+        // A competitor writes the converger's OWN target (RUNNING) at epoch 0, just before its swap.
+        AtomicBoolean fired = new AtomicBoolean(false);
+        state.onBeforeSwap(() -> {
+            if (fired.compareAndSet(false, true)) {
+                state.applySwap("p1", 0L, StateJson.of(RUNNING), T0);
+            }
+        });
+
+        ConvergeResult result = converger.converge("p1");
+
+        assertThat(result.status()).isEqualTo(CONVERGED);
+        CheckpointDoc actual = state.read("p1").orElseThrow();
+        assertThat(actual.stateJson()).isEqualTo(StateJson.of(RUNNING));
+        assertThat(actual.epoch()).isEqualTo(1); // the competitor's write; the converger did not bump it again
+        assertThat(state.swapAttempts()).isEqualTo(1); // one fenced attempt, then it conceded — no redundant re-swap
+    }
+
+    @Test
     @DisplayName("a relentlessly fenced converger gives up after a bounded number of retries rather than spinning")
     void boundedRetriesGiveUpWhenPersistentlyFenced() {
         state.create("p1", StateJson.of(NEW), T0);

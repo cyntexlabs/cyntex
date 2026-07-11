@@ -48,7 +48,9 @@ public final class PipelineConverger {
     /**
      * Marks a running pipeline terminal once its bounded source is exhausted — a converge-side
      * transition, never a user verb. The exhaustion signal that calls this comes from the execution
-     * engine; a pipeline that has never run has no checkpoint and is left untouched.
+     * engine; a pipeline that has never run has no checkpoint and is left untouched. A pipeline marked
+     * completed must then be dropped from the reconcile set (or its desired intent advanced to match),
+     * or a later convergence pass would drive its actual state back toward a non-terminal desired target.
      */
     public ConvergeResult markCompleted(String pipelineId) {
         return driveTo(pipelineId, PipelineState.COMPLETED, false);
