@@ -119,6 +119,12 @@
       <version>${revision}</version>
       <scope>test</scope>
     </dependency>
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>adapter-transform</artifactId>
+      <version>${revision}</version>
+      <scope>test</scope>
+    </dependency>
 
     <!-- runtime ring: registered so the R4 rule scans the runtime classes -->
     <dependency>

@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>io.cyntex</groupId>
+    <artifactId>adapters</artifactId>
+    <version>${revision}</version>
+  </parent>
+
+  <artifactId>adapter-transform</artifactId>
+  <name>Cyntex :: Adapters :: Transform</name>
+  <!-- Evaluates the stateless row transforms (filter / map) into transform ports the engine runs.
+       It lives in the adapters ring, not the runtime, because evaluation needs the CEL runtime and
+       the runtime ring admits neither third-party engine (rule R4); an adapter port has open-ended
+       third-party freedom (rule R3), the same reason the PDK and Mongo bridges live here. The port
+       is Hazelcast-free: the app assembly root wraps it in the Jet supplier that carries it to a
+       member, so no engine type crosses into this ring. -->
+  <description>Stateless row-transform adapter: evaluates a filter (CEL predicate, non-row events
+    bypass) and a map (field projection — rename / drop / literal / computed CEL value, unlisted
+    fields pass through) into the transform port the engine runs, reusing the one CEL compiler
+    environment the validate layer type-checks against so a validated expression is the one that
+    evaluates</description>
+
+  <dependencies>
+    <!-- The event envelope every transform port sees (Op / before / after / schema). -->
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>core-event</artifactId>
+      <version>${revision}</version>
+    </dependency>
+    <!-- The transform-body model (filter / map bodies + field rules) a binding reads at wire time. -->
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>core-model</artifactId>
+      <version>${revision}</version>
+    </dependency>
+    <!-- The one CEL compiler environment (the same the validate layer type-checks against): this
+         module takes the checked AST and evaluates it, so validate-time and runtime never drift. -->
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>core-dsl</artifactId>
+      <version>${revision}</version>
+    </dependency>
+    <!-- The transform port this adapter implements (a pure stateless row function; no engine type). -->
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>spi-transform</artifactId>
+      <version>${revision}</version>
+    </dependency>
+    <!-- The CEL runtime: this adapter evaluates the AST core-dsl compiled. Version from the BOM. -->
+    <dependency>
+      <groupId>dev.cel</groupId>
+      <artifactId>cel</artifactId>
+    </dependency>
+
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.assertj</groupId>
+      <artifactId>assertj-core</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+</project>
