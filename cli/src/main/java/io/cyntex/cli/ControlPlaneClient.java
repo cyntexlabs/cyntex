@@ -2,6 +2,7 @@ package io.cyntex.cli;
 
 import java.net.URI;
 import java.util.List;
+import java.util.Map;
 
 /**
  * The CLI's transport seam to a running Cyntex server (rule R6: the CLI reaches services over HTTP
@@ -43,4 +44,14 @@ interface ControlPlaneClient {
      * coded rejection, or unreachable on any I/O failure. Never throws.
      */
     ListOutcome list(URI baseUrl, String credential, String kind);
+
+    /**
+     * Runs a connection test via {@code POST {baseUrl}/api/connections:test}, authenticated by the bearer
+     * {@code credential}: the request carries the connection {@code id} (the key its result is stored under),
+     * the {@code connectorId} it configures, and the {@code settings} to run that connector with. Returns the
+     * structured report on success (pass or fail alike), a coded rejection when the server refuses, or
+     * unreachable on any I/O failure. Never throws.
+     */
+    ConnectionTestOutcome test(
+            URI baseUrl, String credential, String id, String connectorId, Map<String, Object> settings);
 }

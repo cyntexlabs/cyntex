@@ -14,6 +14,7 @@ import java.nio.file.attribute.PosixFilePermissions;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -77,9 +78,11 @@ class ReplTest {
         ApplyOutcome applyOutcome = new ApplyOutcome.Unreachable();
         GetOutcome getOutcome = new GetOutcome.Unreachable();
         ListOutcome listOutcome = new ListOutcome.Unreachable();
+        ConnectionTestOutcome testOutcome = new ConnectionTestOutcome.Unreachable();
         final List<String> applyCalls = new ArrayList<>();
         final List<String> getCalls = new ArrayList<>();
         final List<String> listCalls = new ArrayList<>();
+        final List<String> testCalls = new ArrayList<>();
 
         FakeControlPlane(URI... healthy) {
             this.healthy = new LinkedHashSet<>(List.of(healthy));
@@ -119,6 +122,13 @@ class ReplTest {
         public ListOutcome list(URI baseUrl, String credential, String kind) {
             listCalls.add(credential + "@" + baseUrl + "?" + kind);
             return healthy.contains(baseUrl) ? listOutcome : new ListOutcome.Unreachable();
+        }
+
+        @Override
+        public ConnectionTestOutcome test(
+                URI baseUrl, String credential, String id, String connectorId, Map<String, Object> settings) {
+            testCalls.add(credential + "@" + baseUrl + "/" + id + "[" + connectorId + " " + settings + "]");
+            return healthy.contains(baseUrl) ? testOutcome : new ConnectionTestOutcome.Unreachable();
         }
     }
 
@@ -769,6 +779,145 @@ class ReplTest {
         Harness h = onlineSession(Path.of("cyn-work"), client);
         h.repl().dispatch("ls source");
         assertThat(client.listCalls).containsExactly("jwt-tok@http://node1:7900?source");
+    }
+
+    // --- connection test: `test <id>` sources the stored connection, then probes it and renders the report ---
+
+    /** A stored source connection whose canonical form carries the connector id and its connection config. */
+    private static GetOutcome.Found storedConnection() {
+        return new GetOutcome.Found(new RemoteArtifact("my-mongo", "source",
+                "kind: source\nid: my-mongo\nconnector: mongodb\nconfig:\n  host: db.internal\n  username: cdc\n"));
+    }
+
+    private static ConnectionTestOutcome.Tested passedReport() {
+        return new ConnectionTestOutcome.Tested(new ConnectionReport("my-mongo", "mongodb", "PASSED",
+                List.of(new ConnectionReport.Check("ping", "PASSED", null, null, null, null),
+                        new ConnectionReport.Check("version", "WARNING", "server is old", null, null, null)),
+                1752000000000L));
+    }
+
+    @Test
+    void testFetchesTheStoredConnectionThenProbesItAndRendersTheReport() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.getOutcome = storedConnection();
+        client.testOutcome = passedReport();
+        Harness h = onlineSession(Path.of("cyn-work"), client);
+        int mark = h.sink().toString().length();
+
+        assertThat(h.repl().dispatch("test my-mongo")).isTrue();
+
+        String out = h.sink().toString().substring(mark);
+        // the report renders the overall outcome, the connection + connector, and each check
+        assertThat(out).contains("PASSED").contains("my-mongo").contains("mongodb");
+        assertThat(out).contains("ping").contains("version").contains("WARNING").contains("server is old");
+        // server-as-truth: it fetched the stored connection first, then posted the probe with the parsed
+        // connector + settings under the session credential
+        assertThat(client.getCalls).containsExactly("jwt-tok@http://node1:7900/my-mongo");
+        assertThat(client.testCalls).containsExactly(
+                "jwt-tok@http://node1:7900/my-mongo[mongodb {host=db.internal, username=cdc}]");
+    }
+
+    @Test
+    void testRendersTheReportAsJsonWithTheOutputFlag() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.getOutcome = storedConnection();
+        client.testOutcome = passedReport();
+        Harness h = onlineSession(Path.of("cyn-work"), client);
+        int mark = h.sink().toString().length();
+
+        assertThat(h.repl().dispatch("test my-mongo -o json")).isTrue();
+
+        String out = h.sink().toString().substring(mark);
+        assertThat(out).contains("\"connectionId\"").contains("\"my-mongo\"")
+                .contains("\"outcome\"").contains("\"PASSED\"").contains("\"ping\"");
+    }
+
+    @Test
+    void testRendersTheReportAsYamlWithTheOutputFlag() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.getOutcome = storedConnection();
+        client.testOutcome = passedReport();
+        Harness h = onlineSession(Path.of("cyn-work"), client);
+        int mark = h.sink().toString().length();
+
+        assertThat(h.repl().dispatch("test my-mongo -o yaml")).isTrue();
+
+        String out = h.sink().toString().substring(mark);
+        assertThat(out).contains("connectionId: my-mongo").contains("outcome: PASSED").contains("name: ping");
+    }
+
+    @Test
+    void testOnANonSourceIdReportsNotATestableConnectionAndDoesNotProbe() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.getOutcome = new GetOutcome.Found(
+                new RemoteArtifact("kfk2my", "pipeline", "kind: pipeline\nid: kfk2my\n"));
+        Harness h = onlineSession(Path.of("cyn-work"), client);
+        int mark = h.sink().toString().length();
+
+        assertThat(h.repl().dispatch("test kfk2my")).isTrue();
+
+        String out = h.sink().toString().substring(mark);
+        assertThat(out).contains("kfk2my").containsIgnoringCase("not a testable connection").contains("pipeline");
+        assertThat(client.testCalls).isEmpty();   // a non-connection is never probed
+    }
+
+    @Test
+    void testForAMissingConnectionReportsNotFoundAndDoesNotProbe() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.getOutcome = new GetOutcome.Absent();
+        Harness h = onlineSession(Path.of("cyn-work"), client);
+
+        h.repl().dispatch("test nope");
+
+        assertThat(h.sink().toString()).contains("not found").contains("nope");
+        assertThat(client.testCalls).isEmpty();
+    }
+
+    @Test
+    void testWithNoIdReportsMissingOperandAndDoesNotCallTheServer() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        Harness h = onlineSession(Path.of("cyn-work"), client);
+        int mark = h.sink().toString().length();
+
+        assertThat(h.repl().dispatch("test")).isTrue();
+
+        assertThat(h.sink().toString().substring(mark)).contains("test:").contains("missing operand");
+        assertThat(client.getCalls).isEmpty();
+        assertThat(client.testCalls).isEmpty();
+    }
+
+    @Test
+    void testWhileConnectedButNotAuthenticatedReportsAndDoesNotCallTheServer() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        Harness h = harness(Path.of("cyn-work"), client, new ScriptedPrompter());
+        h.repl().dispatch("connect node1:7900");   // connected, never logged in
+
+        assertThat(h.repl().dispatch("test x")).isTrue();
+
+        assertThat(h.sink().toString()).contains("cli.not-authenticated").contains("test");
+        assertThat(client.getCalls).isEmpty();
+        assertThat(client.testCalls).isEmpty();
+    }
+
+    @Test
+    void testRenderingAServerRejectionShowsTheCodeAndMessage() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.getOutcome = storedConnection();
+        client.testOutcome = new ConnectionTestOutcome.Rejected("control.forbidden", "You lack the grade.");
+        Harness h = onlineSession(Path.of("cyn-work"), client);
+
+        h.repl().dispatch("test my-mongo");
+
+        assertThat(h.sink().toString()).contains("control.forbidden").contains("You lack the grade.");
+    }
+
+    @Test
+    void testOfflineReportsThatAConnectionIsRequired() {
+        Harness h = harness(Path.of("cyn-work"));
+
+        assertThat(h.repl().dispatch("test my-mongo")).isTrue();
+
+        assertThat(h.sink().toString()).contains("requires a connection").contains("test");
     }
 
     // --- server-as-truth: a connected read verb sources the server store, never the local workspace ---

@@ -155,6 +155,72 @@ final class HttpControlPlaneClient implements ControlPlaneClient {
         }
     }
 
+    @Override
+    public ConnectionTestOutcome test(
+            URI baseUrl, String credential, String id, String connectorId, Map<String, Object> settings) {
+        try {
+            HttpRequest request = authed(baseUrl, "/api/connections:test", credential)
+                    .header("Content-Type", "application/json")
+                    .POST(HttpRequest.BodyPublishers.ofString(
+                            testBody(id, connectorId, settings), StandardCharsets.UTF_8))
+                    .build();
+            HttpResponse<String> response =
+                    client().send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            if (response.statusCode() == 200) {
+                ConnectionReport report = connectionReport(response.body());
+                // a 200 that is not a usable report (a proxy / non-Cyntex reply) is treated as unreachable
+                return report == null
+                        ? new ConnectionTestOutcome.Unreachable()
+                        : new ConnectionTestOutcome.Tested(report);
+            }
+            Rejection r = rejection(response.body(), "The server refused the connection test.");
+            return new ConnectionTestOutcome.Rejected(r.code(), r.message());
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return new ConnectionTestOutcome.Unreachable();
+        } catch (IOException | RuntimeException e) {
+            return new ConnectionTestOutcome.Unreachable();
+        }
+    }
+
+    /** The connection-test request body: {@code {"id":..,"connectorId":..,"settings":{..}}}. */
+    private static String testBody(String id, String connectorId, Map<String, Object> settings) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("id", id);
+        body.put("connectorId", connectorId);
+        body.put("settings", settings == null ? Map.of() : settings);
+        return JsonOut.write(body);
+    }
+
+    /** The connection report decoded from a 200 body, or {@code null} if the body is not a usable report. */
+    private static ConnectionReport connectionReport(String body) {
+        if (JsonReader.parse(body) instanceof Map<?, ?> m
+                && m.get("connectionId") instanceof String connectionId
+                && m.get("connectorId") instanceof String connectorId
+                && m.get("outcome") instanceof String outcome) {
+            long testedAt = m.get("testedAt") instanceof Number n ? n.longValue() : 0L;
+            List<ConnectionReport.Check> checks = new ArrayList<>();
+            if (m.get("checks") instanceof List<?> items) {
+                for (Object o : items) {
+                    if (o instanceof Map<?, ?> c
+                            && c.get("name") instanceof String name
+                            && c.get("status") instanceof String status) {
+                        checks.add(new ConnectionReport.Check(name, status,
+                                stringOrNull(c.get("message")), stringOrNull(c.get("reason")),
+                                stringOrNull(c.get("solution")), stringOrNull(c.get("connectorErrorCode"))));
+                    }
+                }
+            }
+            return new ConnectionReport(connectionId, connectorId, outcome, checks, testedAt);
+        }
+        return null;
+    }
+
+    /** The value as a string when it is one, else {@code null} (an absent / JSON-null optional field). */
+    private static String stringOrNull(Object value) {
+        return value instanceof String s ? s : null;
+    }
+
     /** A request builder for {@code path} against a base, carrying the timeout and the bearer credential. */
     private static HttpRequest.Builder authed(URI baseUrl, String path, String credential) {
         return HttpRequest.newBuilder(endpoint(baseUrl, path))

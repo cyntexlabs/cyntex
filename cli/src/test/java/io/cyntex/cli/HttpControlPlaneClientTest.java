@@ -374,4 +374,69 @@ class HttpControlPlaneClientTest {
         assertThat(new HttpControlPlaneClient().list(URI.create("http://127.0.0.1:" + closedPort), "tok", null))
                 .isInstanceOf(ListOutcome.Unreachable.class);
     }
+
+    // --- connection test: POST /api/connections:test, authenticated, decodes the structured report -----
+
+    @Test
+    void testPostsTheConnectionAndDecodesTheStructuredReport() throws Exception {
+        AtomicReference<CapturedRequest> seen = new AtomicReference<>();
+        HttpServer server = apiServer("/api/connections:test", 200,
+                "{\"connectionId\":\"conn_ora\",\"connectorId\":\"oracle\",\"outcome\":\"PASSED\",\"checks\":["
+                        + "{\"name\":\"ping\",\"status\":\"PASSED\",\"message\":null,\"reason\":null,"
+                        + "\"solution\":null,\"connectorErrorCode\":null},"
+                        + "{\"name\":\"version\",\"status\":\"WARNING\",\"message\":\"server is old\",\"reason\":null,"
+                        + "\"solution\":null,\"connectorErrorCode\":null}],\"testedAt\":1752000000000}",
+                seen);
+        try {
+            ConnectionTestOutcome outcome = new HttpControlPlaneClient()
+                    .test(baseOf(server), "tok-abc", "conn_ora", "oracle", Map.of("host", "10.20.0.15"));
+
+            assertThat(outcome).isInstanceOf(ConnectionTestOutcome.Tested.class);
+            ConnectionReport report = ((ConnectionTestOutcome.Tested) outcome).report();
+            assertThat(report.connectionId()).isEqualTo("conn_ora");
+            assertThat(report.connectorId()).isEqualTo("oracle");
+            assertThat(report.outcome()).isEqualTo("PASSED");
+            assertThat(report.testedAt()).isEqualTo(1752000000000L);
+            assertThat(report.checks()).containsExactly(
+                    new ConnectionReport.Check("ping", "PASSED", null, null, null, null),
+                    new ConnectionReport.Check("version", "WARNING", "server is old", null, null, null));
+
+            // the request carried the connection id, its connector and settings under a bearer credential
+            assertThat(seen.get().method()).isEqualTo("POST");
+            assertThat(seen.get().path()).isEqualTo("/api/connections:test");
+            assertThat(seen.get().authorization()).isEqualTo("Bearer tok-abc");
+            Map<?, ?> sent = (Map<?, ?>) JsonReader.parse(seen.get().body());
+            assertThat(sent.get("id")).isEqualTo("conn_ora");
+            assertThat(sent.get("connectorId")).isEqualTo("oracle");
+            assertThat(sent.get("settings")).isEqualTo(Map.of("host", "10.20.0.15"));
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void testReturnsRejectedWithTheServerCodeAndMessageOnACodedErrorStatus() throws Exception {
+        HttpServer server = apiServer("/api/connections:test", 400,
+                "{\"code\":\"control.malformed-request\",\"params\":{},\"message\":\"a connectorId is required\"}",
+                new AtomicReference<>());
+        try {
+            ConnectionTestOutcome outcome = new HttpControlPlaneClient()
+                    .test(baseOf(server), "tok", "conn_ora", "oracle", Map.of());
+            assertThat(outcome).isEqualTo(
+                    new ConnectionTestOutcome.Rejected("control.malformed-request", "a connectorId is required"));
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void testReturnsUnreachableWhenTheServerIsDownWithoutThrowing() throws Exception {
+        int closedPort;
+        try (ServerSocket socket = new ServerSocket(0)) {
+            closedPort = socket.getLocalPort();
+        }
+        assertThat(new HttpControlPlaneClient()
+                .test(URI.create("http://127.0.0.1:" + closedPort), "tok", "c", "oracle", Map.of()))
+                .isInstanceOf(ConnectionTestOutcome.Unreachable.class);
+    }
 }

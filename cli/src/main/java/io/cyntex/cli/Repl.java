@@ -1,5 +1,8 @@
 package io.cyntex.cli;
 
+import io.cyntex.core.dsl.DslParser;
+import io.cyntex.core.model.Resource;
+import io.cyntex.core.model.SourceResource;
 import io.cyntex.core.schema.SchemaNavigator;
 import org.jline.reader.EndOfFileException;
 import org.jline.reader.LineReader;
@@ -17,6 +20,7 @@ import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -43,13 +47,13 @@ final class Repl {
 
     /**
      * Registry verbs a connected session routes to the server instead of the offline command table. Each
-     * is the CLI projection of an {@code artifact.*} operation ({@code apply} = {@code artifact.apply},
-     * {@code get} = {@code artifact.get}, {@code ls} = {@code artifact.list}). Offline they fall through to
-     * the table, where {@code apply} / {@code get} report "requires a connection" and {@code ls} browses
-     * the local workspace. {@code validate} is not here — it runs the full local stack in either state
-     * until a server validate endpoint exists.
+     * is the CLI projection of a control operation ({@code apply} = {@code artifact.apply}, {@code get} =
+     * {@code artifact.get}, {@code ls} = {@code artifact.list}, {@code test} = {@code connection.test}).
+     * Offline they fall through to the table, where {@code apply} / {@code get} / {@code test} report
+     * "requires a connection" and {@code ls} browses the local workspace. {@code validate} is not here — it
+     * runs the full local stack in either state until a server validate endpoint exists.
      */
-    private static final List<String> ONLINE_VERBS = List.of("apply", "get", "ls");
+    private static final List<String> ONLINE_VERBS = List.of("apply", "get", "ls", "test");
 
     private final CommandLine commandLine;
 
@@ -174,7 +178,13 @@ final class Repl {
             Diagnostics.printText(err, CliError.NOT_AUTHENTICATED, Map.of("verb", words.get(0)));
             return;
         }
-        // The connected verbs take positional operands only; a dash-option (e.g. `-o json`) is not yet
+        // `test` returns a structured report that is worth machine-reading, so it accepts an `-o` output
+        // flag and parses its own options — routed before the positional-only guard the other verbs share.
+        if (words.get(0).equals("test")) {
+            testOnline(words);
+            return;
+        }
+        // The other connected verbs take positional operands only; a dash-option (e.g. `-o json`) is not yet
         // supported and must not be silently misread as an id / kind / path.
         for (int i = 1; i < words.size(); i++) {
             if (words.get(i).startsWith("-")) {
@@ -285,6 +295,166 @@ final class Repl {
             }
             case ListOutcome.Rejected rejected -> renderRejection(rejected.code(), rejected.message());
             case ListOutcome.Unreachable ignored -> reportRequestFailed();
+        }
+    }
+
+    /**
+     * {@code test <id> [-o text|json|yaml]} — tests a stored connection. It reads the connection from the
+     * server first (server-as-truth), parses the connector and connection config it holds, then posts the
+     * connection test and renders the report the connector returned. A missing operand or an unknown option
+     * is a benign usage line; an id that resolves to nothing is a benign "not found"; an id that is not a
+     * source connection is a benign "not a testable connection"; a coded refusal renders its code and
+     * message. A failed connection is still a rendered report (the test ran), not an error.
+     */
+    private void testOnline(List<String> words) {
+        PrintWriter err = commandLine.getErr();
+        String id = null;
+        OutputFormat format = OutputFormat.TEXT;
+        for (int i = 1; i < words.size(); i++) {
+            String word = words.get(i);
+            if (word.equals("-o") || word.equals("--output")) {
+                if (i + 1 >= words.size()) {
+                    err.println("test: " + word + " needs a format (text|json|yaml)");
+                    err.flush();
+                    return;
+                }
+                OutputFormat parsed = outputFormat(words.get(++i));
+                if (parsed == null) {
+                    err.println("test: unknown output format '" + words.get(i) + "' (expected text|json|yaml)");
+                    err.flush();
+                    return;
+                }
+                format = parsed;
+            } else if (word.startsWith("-")) {
+                err.println("test: unknown option " + word);
+                err.flush();
+                return;
+            } else if (id == null) {
+                id = word;
+            } else {
+                err.println("test: too many operands (usage: test <id> [-o text|json|yaml])");
+                err.flush();
+                return;
+            }
+        }
+        if (id == null || id.isBlank()) {
+            err.println("test: missing operand (usage: test <id> [-o text|json|yaml])");
+            err.flush();
+            return;
+        }
+
+        // server-as-truth: read the stored connection, so the probe runs against exactly what is stored
+        final String connectionId = id;
+        GetOutcome got = withFailover(() ->
+                controlPlane.get(session.landingNode(), session.credential(), connectionId),
+                o -> o instanceof GetOutcome.Unreachable);
+        if (!(got instanceof GetOutcome.Found found)) {
+            switch (got) {
+                case GetOutcome.Absent ignored -> {
+                    err.println("not found: " + connectionId);
+                    err.flush();
+                }
+                case GetOutcome.Rejected rejected -> renderRejection(rejected.code(), rejected.message());
+                case GetOutcome.Unreachable ignored -> reportRequestFailed();
+                case GetOutcome.Found ignored -> { }   // handled by the outer guard; unreachable here
+            }
+            return;
+        }
+
+        // a testable connection is a kind: source; reject any other kind up front using the reliable stored
+        // kind, without parsing a body (e.g. a pipeline) that is not a connection at all
+        if (!found.artifact().kind().equals("source")) {
+            err.println("test: '" + connectionId + "' is a " + found.artifact().kind()
+                    + ", not a testable connection");
+            err.flush();
+            return;
+        }
+        Resource resource;
+        try {
+            resource = new DslParser().parse(found.artifact().canonicalForm());
+        } catch (RuntimeException malformed) {
+            // a stored connection whose body no longer parses is a diagnosable state, not a crash
+            err.println("test: cannot read connection '" + connectionId + "'");
+            err.flush();
+            return;
+        }
+        if (!(resource instanceof SourceResource source)) {
+            // the stored kind claimed source but the body did not parse to one — treat as unreadable
+            err.println("test: cannot read connection '" + connectionId + "'");
+            err.flush();
+            return;
+        }
+
+        OutputFormat chosen = format;
+        ConnectionTestOutcome outcome = withFailover(() -> controlPlane.test(
+                session.landingNode(), session.credential(), connectionId, source.connector(), source.config()),
+                o -> o instanceof ConnectionTestOutcome.Unreachable);
+        switch (outcome) {
+            case ConnectionTestOutcome.Tested tested -> renderReport(tested.report(), chosen);
+            case ConnectionTestOutcome.Rejected rejected -> renderRejection(rejected.code(), rejected.message());
+            case ConnectionTestOutcome.Unreachable ignored -> reportRequestFailed();
+        }
+    }
+
+    /** The {@code -o} format spelled text / json / yaml (case-insensitive), or {@code null} if unrecognised. */
+    private static OutputFormat outputFormat(String raw) {
+        return switch (raw.toLowerCase(Locale.ROOT)) {
+            case "text" -> OutputFormat.TEXT;
+            case "json" -> OutputFormat.JSON;
+            case "yaml" -> OutputFormat.YAML;
+            default -> null;
+        };
+    }
+
+    /** Renders a connection report on the chosen surface: a human summary, or the structured machine form. */
+    private void renderReport(ConnectionReport report, OutputFormat format) {
+        PrintWriter out = commandLine.getOut();
+        switch (format) {
+            case TEXT -> renderReportText(out, report);
+            case JSON -> out.println(JsonOut.write(reportMap(report)));
+            case YAML -> out.println(YamlOut.write(reportMap(report)));
+        }
+        out.flush();
+    }
+
+    /** The human summary: an outcome header naming the connection + connector, then one line per check. */
+    private static void renderReportText(PrintWriter out, ConnectionReport report) {
+        out.println(report.outcome() + "  " + report.connectionId() + " (" + report.connectorId() + ")");
+        for (ConnectionReport.Check check : report.checks()) {
+            StringBuilder line = new StringBuilder(String.format("  %-7s %s", check.status(), check.name()));
+            if (check.message() != null && !check.message().isBlank()) {
+                line.append("  ").append(check.message());
+            }
+            out.println(line);
+        }
+    }
+
+    /** The report as an ordered tree for the machine surfaces, omitting the optional check fields left null. */
+    private static Map<String, Object> reportMap(ConnectionReport report) {
+        Map<String, Object> map = new LinkedHashMap<>();
+        map.put("connectionId", report.connectionId());
+        map.put("connectorId", report.connectorId());
+        map.put("outcome", report.outcome());
+        List<Object> checks = new ArrayList<>();
+        for (ConnectionReport.Check check : report.checks()) {
+            Map<String, Object> entry = new LinkedHashMap<>();
+            entry.put("name", check.name());
+            entry.put("status", check.status());
+            putIfPresent(entry, "message", check.message());
+            putIfPresent(entry, "reason", check.reason());
+            putIfPresent(entry, "solution", check.solution());
+            putIfPresent(entry, "connectorErrorCode", check.connectorErrorCode());
+            checks.add(entry);
+        }
+        map.put("checks", checks);
+        map.put("testedAt", report.testedAt());
+        return map;
+    }
+
+    /** Puts a string value under {@code key} only when it is present (non-null, non-blank). */
+    private static void putIfPresent(Map<String, Object> map, String key, String value) {
+        if (value != null && !value.isBlank()) {
+            map.put(key, value);
         }
     }
 
