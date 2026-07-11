@@ -25,6 +25,14 @@
       <artifactId>spi-capture</artifactId>
       <version>${revision}</version>
     </dependency>
+    <!-- The durable coordination store's value model: the consumer cursors the durable-frontier bound
+         reads (each consumer's sink-acked source position), and the meta store the source read offset is
+         persisted through. -->
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>spi-store</artifactId>
+      <version>${revision}</version>
+    </dependency>
     <!-- The change ring's substrate: a per-table Hazelcast Ringbuffer holds the in-memory cdc buffer
          (rule R4 allows the runtime ring to depend on Hazelcast). -->
     <dependency>
