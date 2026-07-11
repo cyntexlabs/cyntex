@@ -12,5 +12,30 @@
 
   <artifactId>engine</artifactId>
   <name>Cyntex :: Runtime :: Engine</name>
-  <description>Data-plane execution (the pipeline runtime); placeholder, jobs and processors land later</description>
+  <description>Data-plane execution: the Jet job lifecycle actuator (submit / suspend / resume / cancel)</description>
+
+  <dependencies>
+    <!-- The execution substrate: Jet job submit/suspend/resume/cancel (rule R4: Hazelcast is the one allowed substrate). -->
+    <dependency>
+      <groupId>com.hazelcast</groupId>
+      <artifactId>hazelcast</artifactId>
+    </dependency>
+    <!-- The error-code contract for diagnosable job-operation failures (rule R4: core only). -->
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>core-common</artifactId>
+      <version>${revision}</version>
+    </dependency>
+
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.assertj</groupId>
+      <artifactId>assertj-core</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
 </project>

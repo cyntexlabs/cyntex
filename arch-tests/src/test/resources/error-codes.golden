@@ -37,6 +37,7 @@ dsl.missing-reference
 dsl.mode-mismatch
 dsl.unknown-field
 dsl.unsupported-mode
+engine.no-such-job
 io.document-unreadable
 io.store-unauthorized
 io.store-unavailable

@@ -143,3 +143,6 @@ control.malformed-request:
 control.unauthenticated:
   message: "This operation requires authentication."
   solution: "Sign in with `login` to obtain a session token, or present a machine token with `--token`."
+engine.no-such-job:
+  message: "Pipeline {pipeline} has no running job to act on."
+  solution: "Start the pipeline before pausing or resuming it, and check the id for typos."
