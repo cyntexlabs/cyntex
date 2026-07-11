@@ -55,6 +55,30 @@ class SnapshotPhaseTest {
     }
 
     @Test
+    void drainPassesTheSnapshotBatchStraightToTheSinkWithoutRecordingACdcStart() {
+        List<Envelope> rows = List.of(row(1), row(2), row(3));
+        FakePort port = new FakePort(new FakeBatch(rows));
+        List<Envelope> sink = new ArrayList<>();
+
+        // drain is the pure pass-through with no meta collaborator: it never records a cdc-start position.
+        // It is the path a snapshot_only or srs-disabled read takes, where there is no shared chain a cdc
+        // tail would resume against, so there is nothing to position.
+        long count = SnapshotPhase.drain(port, config(), sink::add);
+
+        assertThat(sink).containsExactlyElementsOf(rows);
+        assertThat(count).isEqualTo(3);
+    }
+
+    @Test
+    void drainClosesTheSnapshotBatch() {
+        FakeBatch batch = new FakeBatch(List.of(row(1)));
+
+        SnapshotPhase.drain(new FakePort(batch), config(), e -> {});
+
+        assertThat(batch.closed).isTrue();
+    }
+
+    @Test
     void closesTheSnapshotBatchAfterDraining() {
         FakeBatch batch = new FakeBatch(List.of(row(1)));
 

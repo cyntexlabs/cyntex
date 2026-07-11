@@ -48,6 +48,20 @@ public final class SnapshotPhase {
         Objects.requireNonNull(sink, "sink");
 
         meta.setCdcStartPosition(miningChainId, cdcStart.token());
+        return drain(port, config, sink);
+    }
+
+    /**
+     * Drains the bounded snapshot read straight to {@code sink}, returning the number of events passed
+     * through. Pure pass-through: it records no cdc-start position and touches no meta record — the path a
+     * {@code snapshot_only} or srs-disabled read takes, where there is no shared chain a cdc tail resumes
+     * against. Events go one by one, never buffered in the change ring, and the batch is always closed.
+     */
+    public static long drain(CapturePort port, CaptureConfig config, Consumer<Envelope> sink) {
+        Objects.requireNonNull(port, "port");
+        Objects.requireNonNull(config, "config");
+        Objects.requireNonNull(sink, "sink");
+
         long count = 0;
         try (CaptureBatch batch = port.snapshot(config)) {
             while (batch.hasNext()) {

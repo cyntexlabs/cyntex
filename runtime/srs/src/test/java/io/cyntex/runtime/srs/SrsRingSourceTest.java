@@ -19,7 +19,9 @@ import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -127,6 +129,42 @@ class SrsRingSourceTest {
         IList<SrsItem> second = streamRingToList("srs.chain.replay", "srs-sink-replay-2", 4, StartFrom.earliest());
 
         assertThat(second).extracting(i -> i.after().get("id")).containsExactly(0, 1, 2, 3);
+    }
+
+    /**
+     * Collects read-cursor sequences a source publishes during a job. A {@code static} sink reached by a
+     * factory that resolves a static-method-ref sink member-side: the factory is serialized onto the source
+     * and, in this single-JVM member, resolves back to this same static — the seam a durable cursor write
+     * hangs off in the assembly layer.
+     */
+    private static final List<Long> PUBLISHED = new CopyOnWriteArrayList<>();
+
+    private static void collect(long lastReadSeq) {
+        PUBLISHED.add(lastReadSeq);
+    }
+
+    @Test
+    void publishesTheReadCursorAsTheSourceDrainsTheRing() throws InterruptedException {
+        PUBLISHED.clear();
+        fill("srs.chain.cursor", 5);
+
+        SrsReadCursorPublisherFactory factory = member -> SrsRingSourceTest::collect;
+        Pipeline p = Pipeline.create();
+        p.readFrom(SrsRingSource.create("srs.chain.cursor", StartFrom.earliest(), factory))
+                .withoutTimestamps().writeTo(Sinks.list("srs-sink-cursor"));
+        IList<SrsItem> sink = hz.getList("srs-sink-cursor");
+        Job job = hz.getJet().newJob(p);
+        try {
+            awaitSize(sink, 5);
+        } finally {
+            job.cancel();
+        }
+
+        // The source reports its read progress member-side as it drains: the last sequence it read (4, the
+        // 5th change) is published, the signal the write-side headroom gate reads back as this consumer's.
+        assertThat(sink).extracting(i -> i.after().get("id")).containsExactly(0, 1, 2, 3, 4);
+        assertThat(PUBLISHED).isNotEmpty();
+        assertThat(PUBLISHED.get(PUBLISHED.size() - 1)).isEqualTo(4L);
     }
 
     @Test

@@ -163,6 +163,52 @@ class SrsRingReaderTest {
     }
 
     @Test
+    void publishesTheLastReadSequenceAfterAdvancingOnANonEmptyFill() {
+        List<Long> published = new ArrayList<>();
+        SrsRingReader reader = new SrsRingReader(filled("srs.pub.basic", 3), 0, published::add);
+
+        // The reader reports its read cursor as it advances: after draining a batch it publishes the last
+        // sequence it read, the progress signal the write-side headroom gate reads back as this consumer's.
+        int n = reader.fill(i -> {}, 10);
+
+        assertThat(n).isEqualTo(3);
+        assertThat(published).containsExactly(2L);
+    }
+
+    @Test
+    void publishesOncePerFillBatchCarryingItsLastSequence() {
+        List<Long> published = new ArrayList<>();
+        SrsRingReader reader = new SrsRingReader(filled("srs.pub.batched", 3), 0, published::add);
+
+        // One publish per non-empty fill carrying that batch's last sequence — not one per change — so the
+        // durable cursor write is amortized over the batch a bounded fill already draws.
+        assertThat(reader.fill(i -> {}, 2)).isEqualTo(2);
+        assertThat(reader.fill(i -> {}, 2)).isEqualTo(1);
+        assertThat(published).containsExactly(1L, 2L);
+    }
+
+    @Test
+    void doesNotPublishWhenAFillEmitsNothing() {
+        List<Long> published = new ArrayList<>();
+        // Start past the tail: nothing to read, the cursor does not move, so nothing is published.
+        SrsRingReader reader = new SrsRingReader(filled("srs.pub.empty", 2), 2, published::add);
+
+        assertThat(reader.fill(i -> {}, 10)).isEqualTo(0);
+        assertThat(published).isEmpty();
+    }
+
+    @Test
+    void fromResolvesAStartPointAndPublishesFromThere() {
+        List<Long> published = new ArrayList<>();
+        // from() carries the publish callback too: an earliest reader replays from the head and reports the
+        // last sequence it read there.
+        SrsRingReader reader = SrsRingReader.from(filled("srs.pub.from", 3), StartFrom.earliest(), published::add);
+
+        assertThat(reader.fill(i -> {}, 10)).isEqualTo(3);
+        assertThat(published).containsExactly(2L);
+    }
+
+    @Test
     void fromEarliestReplaysEveryBufferedChange() {
         SrsRingReader reader = SrsRingReader.from(filled("srs.start.earliest", 3), StartFrom.earliest());
         List<SrsItem> out = new ArrayList<>();
