@@ -1,12 +1,23 @@
 package io.cyntex.app;
 
 import com.hazelcast.config.Config;
+import com.hazelcast.config.InMemoryFormat;
 import com.hazelcast.config.JoinConfig;
+import com.hazelcast.config.RingbufferConfig;
 import com.hazelcast.core.HazelcastInstance;
+import io.cyntex.runtime.srs.CaptureRunUnit;
+import io.cyntex.runtime.srs.SrsItem;
+import io.cyntex.runtime.srs.SrsItemSerializer;
+import io.cyntex.spi.store.ConsumerOffset;
+import io.cyntex.spi.store.SchemaVersion;
+import io.cyntex.spi.store.SrsMeta;
+import io.cyntex.spi.store.SrsMetaStore;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.WebApplicationType;
 import org.springframework.boot.builder.SpringApplicationBuilder;
 import org.springframework.context.ConfigurableApplicationContext;
+
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -82,6 +93,59 @@ class HazelcastMemberTest {
     }
 
     @Test
+    void memberConfigRegistersTheSrsChangeRingItemSerializer() {
+        // The change-ring item is not zero-config serializable (its heterogeneous row map defeats Compact),
+        // so its stream serializer must be registered on the member for ring storage and Jet transport alike.
+        Config config = HazelcastConfiguration.memberConfig(new HazelcastProperties());
+        assertThat(config.getSerializationConfig().getSerializerConfigs())
+                .anySatisfy(serializer -> {
+                    assertThat(serializer.getTypeClass()).isEqualTo(SrsItem.class);
+                    assertThat(serializer.getImplementation()).isInstanceOf(SrsItemSerializer.class);
+                });
+    }
+
+    @Test
+    void memberConfigDefinesTheBoundedSrsChangeRing() {
+        // The per-table change rings (srs.<chain>.<table>) are the SRS's only hot buffer: bounded, in
+        // memory, no time expiry (headroom backpressure -- not TTL -- guards unread overwrites), no backups
+        // (single node). The wildcard config applies to every ring the capture runtime names under srs.*.
+        Config config = HazelcastConfiguration.memberConfig(new HazelcastProperties());
+        RingbufferConfig ring = config.getRingbufferConfigs().get("srs.*");
+        assertThat(ring).isNotNull();
+        assertThat(ring.getTimeToLiveSeconds()).isZero();
+        assertThat(ring.getBackupCount()).isZero();
+        assertThat(ring.getInMemoryFormat()).isEqualTo(InMemoryFormat.OBJECT);
+        assertThat(ring.getCapacity()).isEqualTo(1024);
+    }
+
+    @Test
+    void hazelcastMemberBindsTheMetaStoreIntoTheUserContext() {
+        SrsMetaStore meta = new SentinelMetaStore();
+        HazelcastInstance member = new HazelcastConfiguration()
+                .hazelcastMember(new HazelcastProperties(), meta);
+        try {
+            // The read-cursor publisher factory resolves the store member-side from the user context, so the
+            // assembly root binds it under the well-known key -- otherwise cursor publishing silently no-ops.
+            assertThat(member.getUserContext().get(CaptureRunUnit.SRS_META_USER_CONTEXT_KEY)).isSameAs(meta);
+        } finally {
+            member.shutdown();
+        }
+    }
+
+    @Test
+    void hazelcastMemberLeavesTheUserContextUnboundWhenNoStoreIsConfigured() {
+        HazelcastInstance member = new HazelcastConfiguration()
+                .hazelcastMember(new HazelcastProperties(), null);
+        try {
+            // A run with no store (mongo disabled) binds nothing; the publisher then resolves no store and
+            // cursor publishing is a documented no-op rather than a failure.
+            assertThat(member.getUserContext()).doesNotContainKey(CaptureRunUnit.SRS_META_USER_CONTEXT_KEY);
+        } finally {
+            member.shutdown();
+        }
+    }
+
+    @Test
     void embeddedMemberAndJetComeUpAndDownWithTheContext() {
         HazelcastInstance member;
         try (ConfigurableApplicationContext context = new SpringApplicationBuilder(Bootstrap.class)
@@ -103,5 +167,36 @@ class HazelcastMemberTest {
         }
         // The member's lifecycle is bound to the context: closing the context shuts it down.
         assertThat(member.getLifecycleService().isRunning()).isFalse();
+    }
+
+    /** A sentinel meta store: an identity to assert the user-context binding; its facets are never invoked here. */
+    private static final class SentinelMetaStore implements SrsMetaStore {
+        @Override public Optional<SrsMeta> read(String miningChainId) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override public void create(String miningChainId, String retention) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override public void upsertConsumerOffset(String miningChainId, ConsumerOffset offset) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override public void advanceConsumerReadSeq(String miningChainId, String pipelineId, String table, long lastReadSeq) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override public void advanceSourceReadOffset(String miningChainId, String sourceReadOffset) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override public void setCdcStartPosition(String miningChainId, String cdcStartPosition) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override public void appendSchemaVersion(String miningChainId, SchemaVersion version) {
+            throw new UnsupportedOperationException();
+        }
     }
 }
