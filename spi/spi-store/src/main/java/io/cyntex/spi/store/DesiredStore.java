@@ -1,6 +1,7 @@
 package io.cyntex.spi.store;
 
 import io.cyntex.core.lifecycle.DesiredState;
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -12,7 +13,8 @@ import java.util.Optional;
  * <p>Desired intent is the split-off counterpart to the epoch-fencing pipeline state store: it is
  * plain intent, not a fenced transition, so it is a plain upsert by pipeline id rather than a
  * compare-and-swap. {@link #save} upserts the desired doc for its pipeline (last write wins);
- * {@link #read} returns the current desired doc for a pipeline, or empty when none is set.
+ * {@link #read} returns the current desired doc for a pipeline, or empty when none is set;
+ * {@link #list} returns every stored desired intent, the set the converge side reconciles.
  */
 public interface DesiredStore {
 
@@ -21,4 +23,7 @@ public interface DesiredStore {
 
     /** Returns the current desired intent for a pipeline, or empty if none is set. */
     Optional<DesiredState> read(String pipelineId);
+
+    /** Lists every stored desired intent — the pipelines the converge side has to reconcile. */
+    List<DesiredState> list();
 }

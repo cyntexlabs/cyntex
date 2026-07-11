@@ -4,6 +4,7 @@ import io.cyntex.core.lifecycle.DesiredState;
 import io.cyntex.spi.store.DesiredStore;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
@@ -20,5 +21,10 @@ final class InMemoryDesiredStore implements DesiredStore {
     @Override
     public Optional<DesiredState> read(String pipelineId) {
         return Optional.ofNullable(docs.get(pipelineId));
+    }
+
+    @Override
+    public List<DesiredState> list() {
+        return List.copyOf(docs.values());
     }
 }

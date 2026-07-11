@@ -12,6 +12,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
+import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -56,6 +57,23 @@ class MongoDesiredStoreIT {
             assertThat(collection.countDocuments()).isEqualTo(1);
             assertThat(store.read("orders_sync")).contains(changed);
         });
+    }
+
+    @Test
+    void listReturnsEveryStoredDesiredIntent() {
+        withStore((store, collection) -> {
+            DesiredState orders = new DesiredState("orders_sync", PipelineState.RUNNING, "rev-1");
+            DesiredState users = new DesiredState("users_sync", PipelineState.PAUSED, "rev-2");
+            store.save(orders);
+            store.save(users);
+
+            assertThat(store.list()).containsExactlyInAnyOrder(orders, users);
+        });
+    }
+
+    @Test
+    void listReturnsEmptyWhenNoIntentIsStored() {
+        withStore((store, collection) -> assertThat(store.list()).isEmpty());
     }
 
     private interface StoreTest {

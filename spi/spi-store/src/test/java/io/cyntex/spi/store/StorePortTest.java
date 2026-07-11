@@ -307,6 +307,11 @@ class StorePortTest {
                 public Optional<DesiredState> read(String pipelineId) {
                     return Optional.ofNullable(desired.get(pipelineId));
                 }
+
+                @Override
+                public List<DesiredState> list() {
+                    return List.copyOf(desired.values());
+                }
             };
         }
     }

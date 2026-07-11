@@ -8,6 +8,8 @@ import io.cyntex.core.lifecycle.PipelineState;
 import io.cyntex.spi.store.DesiredStore;
 import org.bson.Document;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -45,6 +47,14 @@ public final class MongoDesiredStore implements DesiredStore {
         Objects.requireNonNull(pipelineId, "pipelineId");
         Document document = StoreIo.call(() -> collection.find(new Document("_id", pipelineId)).first());
         return document == null ? Optional.empty() : Optional.of(toDesired(document));
+    }
+
+    @Override
+    public List<DesiredState> list() {
+        // The driver read is wrapped so no MongoException escapes the module (rule R3); each document is
+        // reconstructed outside it, so a corrupt one still surfaces as a coded io diagnostic, not a bare crash.
+        List<Document> documents = StoreIo.call(() -> collection.find().into(new ArrayList<>()));
+        return documents.stream().map(MongoDesiredStore::toDesired).toList();
     }
 
     /** Maps a desired state to its stored document: the pipeline id as {@code _id}, the rest as fields. */

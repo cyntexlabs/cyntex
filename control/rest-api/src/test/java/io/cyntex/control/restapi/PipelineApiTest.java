@@ -470,6 +470,11 @@ class PipelineApiTest {
         public Optional<DesiredState> read(String pipelineId) {
             return Optional.ofNullable(byId.get(pipelineId));
         }
+
+        @Override
+        public List<DesiredState> list() {
+            return List.copyOf(byId.values());
+        }
     }
 
     /** An audit store that captures every record written through it. */
