@@ -146,3 +146,6 @@ control.unauthenticated:
 engine.no-such-job:
   message: "Pipeline {pipeline} has no running job to act on."
   solution: "Start the pipeline before pausing or resuming it, and check the id for typos."
+monitor.no-observation:
+  message: "No observation is available for pipeline {pipeline}."
+  solution: "Check the pipeline id for typos; a freshly started pipeline may take a moment to publish its first observation."

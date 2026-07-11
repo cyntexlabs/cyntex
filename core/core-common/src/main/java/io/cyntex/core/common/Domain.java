@@ -36,7 +36,10 @@ public enum Domain {
     CONTROL,
     // runtime execution: driving the Jet job that runs a pipeline (submit / suspend / resume /
     // cancel); diagnosable failures such as acting on a pipeline that has no running job (runtime)
-    ENGINE;
+    ENGINE,
+    // observation read faces: reading a pipeline's store-backed status / metrics / snapshot;
+    // diagnosable failures such as reading a pipeline that has published no observation (control)
+    MONITOR;
 
     /** The lower-case identifier used as the {@code <domain>} segment of a canonical code. */
     public String id() {
