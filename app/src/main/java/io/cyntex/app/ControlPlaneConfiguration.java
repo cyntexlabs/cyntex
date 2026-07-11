@@ -2,10 +2,15 @@ package io.cyntex.app;
 
 import io.cyntex.adapters.mongostore.MongoAuthStores;
 import io.cyntex.adapters.mongostore.MongoConnection;
+import io.cyntex.adapters.pdk.ConnectorIntrospector;
+import io.cyntex.adapters.pdk.ConnectorProvisioner;
+import io.cyntex.adapters.pdk.PdkConnectionTester;
+import io.cyntex.adapters.pdk.RegistryConnectorProvisioner;
 import io.cyntex.control.core.ApplyService;
 import io.cyntex.control.core.ArtifactQueryService;
 import io.cyntex.control.core.AuditGate;
 import io.cyntex.control.core.BootstrapService;
+import io.cyntex.control.core.ConnectionTestService;
 import io.cyntex.control.core.ControlOperations;
 import io.cyntex.control.core.CredentialAuthenticator;
 import io.cyntex.control.core.LoginService;
@@ -16,7 +21,12 @@ import io.cyntex.control.core.TokenService;
 import io.cyntex.control.core.TokenSigner;
 import io.cyntex.control.restapi.ControlHttpFace;
 import io.cyntex.core.catalog.CyntexCatalog;
+import io.cyntex.runtime.probe.ConnectionProbe;
+import io.cyntex.runtime.probe.DelegatingConnectionProbe;
 import io.cyntex.spi.store.AuditStore;
+import io.cyntex.spi.store.ConnectionTestResultStore;
+import io.cyntex.spi.store.ConnectionTester;
+import io.cyntex.spi.store.ConnectorRegistry;
 import io.cyntex.spi.store.StorePort;
 import io.cyntex.spi.store.TokenStore;
 import io.cyntex.spi.store.UserStore;
@@ -47,7 +57,7 @@ import java.time.Clock;
  */
 @Configuration
 @ConditionalOnProperty(prefix = "cyntex.store.mongo", name = "enabled", matchIfMissing = true)
-@EnableConfigurationProperties(ControlAuthProperties.class)
+@EnableConfigurationProperties({ControlAuthProperties.class, ConnectorPluginProperties.class})
 @Import(ControlHttpFace.class)
 class ControlPlaneConfiguration {
 
@@ -140,6 +150,47 @@ class ControlPlaneConfiguration {
     @Bean
     ArtifactQueryService artifactQueryService(StorePort storePort) {
         return new ArtifactQueryService(storePort.artifacts());
+    }
+
+    // ---- the connector plane: the R5 synchronous connection-test verb, wired end to end ----
+    // control-core service -> runtime probe -> adapter-pdk tester -> provisioner -> connector registry.
+    // The PDK types stay inside the adapter-pdk beans; the runtime and control rings see only ports.
+
+    @Bean
+    ConnectorRegistry connectorRegistry(StorePort storePort) {
+        return storePort.connectors();
+    }
+
+    @Bean
+    ConnectionTestResultStore connectionTestResultStore(StorePort storePort) {
+        return storePort.connectionTestResults();
+    }
+
+    @Bean
+    ConnectorIntrospector connectorIntrospector() {
+        return new ConnectorIntrospector();
+    }
+
+    @Bean
+    ConnectorProvisioner connectorProvisioner(
+            ConnectorRegistry registry, ConnectorIntrospector introspector, ConnectorPluginProperties properties) {
+        return new RegistryConnectorProvisioner(registry, introspector, properties.getPluginsDir());
+    }
+
+    @Bean
+    ConnectionTester connectionTester(ConnectorProvisioner provisioner, Clock clock) {
+        return new PdkConnectionTester(provisioner, clock);
+    }
+
+    @Bean
+    ConnectionProbe connectionProbe(ConnectionTester tester) {
+        return new DelegatingConnectionProbe(tester);
+    }
+
+    @Bean
+    ConnectionTestService connectionTestService(
+            ConnectionProbe probe, ConnectionTestResultStore resultStore, AuditGate auditGate) {
+        return new ConnectionTestService(probe, resultStore, auditGate);
     }
 
     /**

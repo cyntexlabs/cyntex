@@ -4,6 +4,8 @@ import io.cyntex.control.core.ApplyResult;
 import io.cyntex.control.core.ApplyService;
 import io.cyntex.control.core.ArtifactOutcome;
 import io.cyntex.control.core.ArtifactQueryService;
+import io.cyntex.control.core.AuditGate;
+import io.cyntex.control.core.ConnectionTestService;
 import io.cyntex.control.core.ControlOperations;
 import io.cyntex.control.core.Frontend;
 import io.cyntex.control.core.Maturity;
@@ -13,7 +15,10 @@ import io.cyntex.core.catalog.CyntexCatalog;
 import io.cyntex.core.model.Resource;
 import io.cyntex.core.model.canonical.CanonicalWriter;
 import io.cyntex.core.dsl.DslParser;
+import io.cyntex.runtime.probe.ConnectionProbe;
 import io.cyntex.spi.store.ArtifactStore;
+import io.cyntex.spi.store.ConnectionTestResult;
+import io.cyntex.spi.store.ConnectionTestResultStore;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -36,6 +41,7 @@ import org.springframework.web.client.RestClient;
 import org.springframework.web.method.HandlerMethod;
 import org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping;
 
+import java.time.Clock;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -50,7 +56,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * The HTTP face over the control verbs: each endpoint is a thin projection of a registered operation
  * onto {@code POST/GET /api/...}, and the endpoint table is a derivation of the registry — no endpoint
  * invents a verb. The apply / get / list verbs round-trip through the (fake-store-backed) control-core
- * services; the connection-test verb is routed but reserved. The context is booted programmatically so
+ * services; the connection-test verb is routed onto its (fake-backed) service. The context is booted programmatically so
  * the module stays on the reactor's JUnit line.
  */
 class ControlApiTest {
@@ -217,17 +223,6 @@ class ControlApiTest {
         assertThat(body).doesNotContainKey("code");
     }
 
-    @Test
-    void connectionTestIsRoutedButNotYetImplemented() {
-        // The R5 synchronous verb is reserved and routed; its probe and result-store land later, so it
-        // answers 501 rather than fabricating a result.
-        HttpStatusCode status = client().post().uri("/api/connections:test")
-                .contentType(MediaType.APPLICATION_JSON).body(Map.of())
-                .exchange((request, response) -> response.getStatusCode());
-
-        assertThat(status).isEqualTo(HttpStatus.NOT_IMPLEMENTED);
-    }
-
     // ---- the anonymous probe lives outside the verb surface ----
 
     @Test
@@ -332,6 +327,29 @@ class ControlApiTest {
         @Bean
         ArtifactQueryService artifactQueryService(ArtifactStore store) {
             return new ArtifactQueryService(store);
+        }
+
+        // The connection-test controller is imported, so its service must be present for the context to
+        // stand up. Its behaviour is proven in ConnectionApiTest; here it only needs to construct, so the
+        // probe and stores are inert.
+        @Bean
+        ConnectionTestService connectionTestService() {
+            ConnectionProbe probe = config -> {
+                throw new UnsupportedOperationException("connection.test is not exercised in this test");
+            };
+            ConnectionTestResultStore resultStore = new ConnectionTestResultStore() {
+                @Override
+                public void save(ConnectionTestResult result) {
+                }
+
+                @Override
+                public Optional<ConnectionTestResult> find(String connectionId) {
+                    return Optional.empty();
+                }
+            };
+            AuditGate auditGate = new AuditGate(record -> {
+            }, Clock.systemUTC());
+            return new ConnectionTestService(probe, resultStore, auditGate);
         }
     }
 

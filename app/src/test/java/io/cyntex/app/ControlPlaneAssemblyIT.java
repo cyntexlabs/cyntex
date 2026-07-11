@@ -89,6 +89,34 @@ class ControlPlaneAssemblyIT {
         assertThat(got.get("canonicalForm")).isEqualTo(offlineCanonical(SOURCE));
     }
 
+    @Test
+    void connectionTestIsWiredThroughToTheConnectorRegistryOverARealStore() {
+        int port = start();
+        RestClient client = RestClient.create("http://localhost:" + port);
+
+        // Bootstrap the first admin over loopback and sign in; the admin session covers the write verb.
+        client.post().uri("/auth/bootstrap").contentType(MediaType.APPLICATION_JSON)
+                .body(Map.of("username", "admin", "password", "s3cret")).retrieve().toBodilessEntity();
+        Map<?, ?> login = client.post().uri("/auth/login").contentType(MediaType.APPLICATION_JSON)
+                .body(Map.of("username", "admin", "password", "s3cret")).retrieve().body(Map.class);
+        String token = (String) login.get("token");
+
+        // The whole connection plane is assembled over the real store: control verb -> runtime probe ->
+        // adapter-pdk tester -> provisioner -> connector registry. Testing a connector that was never
+        // registered resolves to no artifact and comes back as the coded connector-domain refusal, proving
+        // the chain reaches the registry rather than a stub.
+        Map<?, ?> body = client.post().uri("/api/connections:test")
+                .header("Authorization", "Bearer " + token)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(Map.of("id", "conn_x", "connectorId", "never_registered", "settings", Map.of()))
+                .exchange((request, response) -> {
+                    assertThat(response.getStatusCode()).isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR);
+                    return response.bodyTo(Map.class);
+                });
+        assertThat(body.get("code")).isEqualTo("connector.not-registered");
+        assertThat(((Map<?, ?>) body.get("params")).get("connector")).isEqualTo("never_registered");
+    }
+
     private int start() {
         context = new SpringApplicationBuilder(AssemblyApp.class)
                 .properties(

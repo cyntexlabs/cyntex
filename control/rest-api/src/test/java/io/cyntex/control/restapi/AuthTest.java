@@ -4,6 +4,7 @@ import io.cyntex.control.core.ApplyService;
 import io.cyntex.control.core.ArtifactQueryService;
 import io.cyntex.control.core.AuditGate;
 import io.cyntex.control.core.BootstrapService;
+import io.cyntex.control.core.ConnectionTestService;
 import io.cyntex.control.core.ControlOperations;
 import io.cyntex.control.core.CredentialAuthenticator;
 import io.cyntex.control.core.LoginService;
@@ -19,8 +20,11 @@ import io.cyntex.core.catalog.CyntexCatalog;
 import io.cyntex.core.model.Resource;
 import io.cyntex.core.model.canonical.CanonicalWriter;
 import io.cyntex.core.dsl.DslParser;
+import io.cyntex.runtime.probe.ConnectionProbe;
 import io.cyntex.spi.store.AuditRecord;
 import io.cyntex.spi.store.AuditStore;
+import io.cyntex.spi.store.ConnectionTestResult;
+import io.cyntex.spi.store.ConnectionTestResultStore;
 import io.cyntex.spi.store.TokenRecord;
 import io.cyntex.spi.store.TokenStore;
 import io.cyntex.spi.store.User;
@@ -448,6 +452,27 @@ class AuthTest {
         @Bean
         ArtifactQueryService artifactQueryService(InMemoryArtifactStore store) {
             return new ArtifactQueryService(store);
+        }
+
+        // The connection-test controller comes in with the whole ControlHttpFace bundle, so its service must
+        // be present for the context to stand up. This suite exercises the auth matrix, not the probe, so the
+        // service only needs to construct — its probe and result store are inert.
+        @Bean
+        ConnectionTestService connectionTestService(AuditGate auditGate) {
+            ConnectionProbe probe = config -> {
+                throw new UnsupportedOperationException("connection.test is not exercised in this test");
+            };
+            ConnectionTestResultStore resultStore = new ConnectionTestResultStore() {
+                @Override
+                public void save(ConnectionTestResult result) {
+                }
+
+                @Override
+                public Optional<ConnectionTestResult> find(String connectionId) {
+                    return Optional.empty();
+                }
+            };
+            return new ConnectionTestService(probe, resultStore, auditGate);
         }
     }
 

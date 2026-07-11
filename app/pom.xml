@@ -114,6 +114,13 @@
       <artifactId>spi-store</artifactId>
       <version>${revision}</version>
     </dependency>
+    <!-- The runtime probe seam: the connection-test verb drives the runtime probe, whose adapter-backed
+         connection tester is composed here at the assembly root. -->
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>runtime-probe</artifactId>
+      <version>${revision}</version>
+    </dependency>
 
     <dependency>
       <groupId>org.junit.jupiter</groupId>

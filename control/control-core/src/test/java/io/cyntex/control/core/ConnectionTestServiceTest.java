@@ -40,10 +40,15 @@ class ConnectionTestServiceTest {
         RecordingAuditStore auditStore = new RecordingAuditStore();
         ConnectionTestService service = new ConnectionTestService(probe, store, gate(auditStore));
 
-        ConnectionTestResult returned = service.test(CONFIG, "alice");
+        ConnectionTestReport returned = service.test(CONFIG.id(), CONFIG.connectorId(), CONFIG.settings(), "alice");
 
-        assertThat(returned).isSameAs(RESULT);
-        assertThat(probed.get()).isSameAs(CONFIG);
+        // The returned report is the control-ring projection of the probe's result.
+        assertThat(returned.connectionId()).isEqualTo("conn-orders");
+        assertThat(returned.connectorId()).isEqualTo("mongodb");
+        assertThat(returned.outcome()).isEqualTo(ConnectionTestReport.Outcome.PASSED);
+        // The probe was driven with a config carrying exactly the given connection.
+        assertThat(probed.get()).isEqualTo(CONFIG);
+        // The storage-port result is what gets persisted, unchanged.
         assertThat(store.saved).isSameAs(RESULT);
     }
 
@@ -53,7 +58,7 @@ class ConnectionTestServiceTest {
         ConnectionTestService service =
                 new ConnectionTestService(config -> RESULT, new RecordingResultStore(), gate(auditStore));
 
-        service.test(CONFIG, "alice");
+        service.test(CONFIG.id(), CONFIG.connectorId(), CONFIG.settings(), "alice");
 
         assertThat(auditStore.records).hasSize(1);
         AuditRecord record = auditStore.records.get(0);
@@ -75,7 +80,8 @@ class ConnectionTestServiceTest {
         };
         ConnectionTestService service = new ConnectionTestService(probe, store, gate(failing));
 
-        assertThatThrownBy(() -> service.test(CONFIG, "alice")).isInstanceOf(CyntexException.class);
+        assertThatThrownBy(() -> service.test(CONFIG.id(), CONFIG.connectorId(), CONFIG.settings(), "alice"))
+                .isInstanceOf(CyntexException.class);
         assertThat(probed).isFalse();
         assertThat(store.saved).isNull();
     }

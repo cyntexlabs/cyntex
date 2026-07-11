@@ -4,6 +4,7 @@ import io.cyntex.runtime.probe.ConnectionProbe;
 import io.cyntex.spi.store.ConnectionConfig;
 import io.cyntex.spi.store.ConnectionTestResult;
 import io.cyntex.spi.store.ConnectionTestResultStore;
+import java.util.Map;
 import java.util.Objects;
 
 /**
@@ -33,19 +34,23 @@ public final class ConnectionTestService {
     }
 
     /**
-     * Tests {@code config}'s connection through the runtime probe under the audit gate, saves the result as
-     * the connection's latest, and returns it. {@code principal} is the authenticated subject the audit
-     * record is attributed to; the audited resource is the connection's own id.
+     * Tests the given connection through the runtime probe under the audit gate, saves the result as the
+     * connection's latest, and returns the surface report. {@code connectionId} is the connection's id (the
+     * result-store key and the audited resource), {@code connectorId} the connector it configures and
+     * {@code settings} its configured values. {@code principal} is the authenticated subject the audit
+     * record is attributed to. The stored result keeps the storage-port shape; the returned report is the
+     * control ring's own projection, so the faces never reach into the storage ports.
      */
-    public ConnectionTestResult test(ConnectionConfig config, String principal) {
-        Objects.requireNonNull(config, "config");
+    public ConnectionTestReport test(
+            String connectionId, String connectorId, Map<String, Object> settings, String principal) {
+        ConnectionConfig config = new ConnectionConfig(connectionId, connectorId, settings);
         return auditGate.dispatch(
                 ControlOperations.CONNECTION_TEST,
                 new AuditContext(principal, config.id()),
                 () -> {
                     ConnectionTestResult result = probe.probe(config);
                     resultStore.save(result);
-                    return result;
+                    return ConnectionTestReport.from(result);
                 });
     }
 }
