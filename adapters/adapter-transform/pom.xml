@@ -12,17 +12,18 @@
 
   <artifactId>adapter-transform</artifactId>
   <name>Cyntex :: Adapters :: Transform</name>
-  <!-- Evaluates the stateless row transforms (filter / map) into transform ports the engine runs.
-       It lives in the adapters ring, not the runtime, because evaluation needs the CEL runtime and
-       the runtime ring admits neither third-party engine (rule R4); an adapter port has open-ended
-       third-party freedom (rule R3), the same reason the PDK and Mongo bridges live here. The port
-       is Hazelcast-free: the app assembly root wraps it in the Jet supplier that carries it to a
-       member, so no engine type crosses into this ring. -->
+  <!-- Evaluates the stateless row transforms (filter / map / js) into transform ports the engine runs.
+       It lives in the adapters ring, not the runtime, because evaluation needs third-party engines (the
+       CEL runtime for filter / map, GraalVM for js) and the runtime ring admits none (rule R4); an
+       adapter port has open-ended third-party freedom (rule R3), the same reason the PDK and Mongo
+       bridges live here. The port is Hazelcast-free: the app assembly root wraps it in the Jet supplier
+       that carries it to a member, so no engine type crosses into this ring. -->
   <description>Stateless row-transform adapter: evaluates a filter (CEL predicate, non-row events
-    bypass) and a map (field projection — rename / drop / literal / computed CEL value, unlisted
-    fields pass through) into the transform port the engine runs, reusing the one CEL compiler
-    environment the validate layer type-checks against so a validated expression is the one that
-    evaluates</description>
+    bypass), a map (field projection — rename / drop / literal / computed CEL value, unlisted fields
+    pass through) and a js escape hatch (a GraalVM script that sees every event, via process / filter
+    functions and a ctx.emit / ctx.log surface) into the transform port the engine runs, reusing the one
+    CEL compiler environment the validate layer type-checks against so a validated expression is the one
+    that evaluates</description>
 
   <dependencies>
     <!-- The event envelope every transform port sees (Op / before / after / schema). -->
@@ -54,6 +55,21 @@
     <dependency>
       <groupId>dev.cel</groupId>
       <artifactId>cel</artifactId>
+    </dependency>
+    <!-- The GraalVM polyglot API: the js port compiles a script into a Context and evaluates it per
+         event. The API artifact this module compiles against; version from the BOM. -->
+    <dependency>
+      <groupId>org.graalvm.polyglot</groupId>
+      <artifactId>polyglot</artifactId>
+    </dependency>
+    <!-- The JavaScript language (community build) the Context runs: a pom that pulls the Truffle
+         language + runtime closure. Runtime-only — the adapter names no language type, only the
+         polyglot API — but the language must be on the classpath for a js Context to build. -->
+    <dependency>
+      <groupId>org.graalvm.polyglot</groupId>
+      <artifactId>js-community</artifactId>
+      <type>pom</type>
+      <scope>runtime</scope>
     </dependency>
 
     <dependency>

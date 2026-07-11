@@ -21,4 +21,9 @@ public final class StatelessTransforms {
     public static TransformPort map(MapSpec spec) {
         return new MapPort(spec);
     }
+
+    /** The {@code js} port for a GraalVM script captured as its source text. */
+    public static TransformPort js(String script) {
+        return new JsPort(script);
+    }
 }
