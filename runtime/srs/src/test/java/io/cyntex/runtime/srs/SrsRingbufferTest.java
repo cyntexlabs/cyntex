@@ -126,6 +126,26 @@ class SrsRingbufferTest {
     }
 
     @Test
+    void readOneReturnsTheItemAtASequence() {
+        SrsRingbuffer buffer = new SrsRingbuffer(hz.getRingbuffer("srs.chain-1.readone"));
+        long a = buffer.append(insert("a"));
+        long b = buffer.append(insert("b"));
+        assertThat(buffer.readOne(a)).isEqualTo(insert("a"));
+        assertThat(buffer.readOne(b)).isEqualTo(insert("b"));
+    }
+
+    @Test
+    void headSequenceMarksTheOldestReadableSequence() {
+        SrsRingbuffer buffer = new SrsRingbuffer(hz.getRingbuffer("srs.chain-1.head"));
+        // A fresh ring's head is 0 — where a replaying reader starts. Within capacity nothing is evicted,
+        // so the head stays put as changes are appended.
+        assertThat(buffer.headSequence()).isEqualTo(0L);
+        buffer.append(insert("a"));
+        buffer.append(insert("b"));
+        assertThat(buffer.headSequence()).isEqualTo(0L);
+    }
+
+    @Test
     void rejectsANullItem() {
         SrsRingbuffer buffer = new SrsRingbuffer(hz.getRingbuffer("srs.chain-1.nullitem"));
         assertThatThrownBy(() -> buffer.append(null)).isInstanceOf(NullPointerException.class);

@@ -46,6 +46,26 @@ public final class SrsRingbuffer {
         return ringbuffer.add(item);
     }
 
+    /**
+     * Reads the change at {@code seq}. A reader advances a cursor only up to {@link #tailSequence()}, and
+     * every sequence at or before the tail is already present, so this returns immediately rather than
+     * blocking for a not-yet-written change. An interrupt while reading an already-present change is not
+     * expected; it is restored and surfaced bare rather than swallowed.
+     */
+    public SrsItem readOne(long seq) {
+        try {
+            return ringbuffer.readOne(seq);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("interrupted reading srs ring at seq " + seq, e);
+        }
+    }
+
+    /** The sequence of the oldest change still in the ring — where a fresh reader starts its replay. */
+    public long headSequence() {
+        return ringbuffer.headSequence();
+    }
+
     /** The sequence of the most recent item, or {@code -1} when the ring is empty. */
     public long tailSequence() {
         return ringbuffer.tailSequence();
