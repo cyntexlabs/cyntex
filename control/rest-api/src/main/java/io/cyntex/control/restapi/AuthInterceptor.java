@@ -38,6 +38,13 @@ import java.util.Optional;
  */
 final class AuthInterceptor implements HandlerInterceptor {
 
+    /**
+     * Request attribute the interceptor stashes the authenticated caller's subject under, so a handler can
+     * name the real caller when it audits a write. Set only after authentication and authorization pass, so
+     * a handler that reads it runs only for an authorized caller.
+     */
+    static final String PRINCIPAL_ATTRIBUTE = "io.cyntex.control.principal";
+
     private static final String BEARER_PREFIX = "Bearer ";
 
     private final OperationRegistry registry;
@@ -69,6 +76,8 @@ final class AuthInterceptor implements HandlerInterceptor {
             throw new CyntexException(ControlError.UNAUTHENTICATED, Map.of(), null);
         }
         Authorization.require(credential.get(), op);
+        // Expose the authenticated subject to the handler so an audited verb records the real caller.
+        request.setAttribute(PRINCIPAL_ATTRIBUTE, credential.get().subject());
         return true;
     }
 

@@ -9,6 +9,7 @@ import io.cyntex.control.core.CredentialAuthenticator;
 import io.cyntex.control.core.LoginService;
 import io.cyntex.control.core.OperationRegistry;
 import io.cyntex.control.core.PasswordHasher;
+import io.cyntex.control.core.PipelineLifecycleService;
 import io.cyntex.control.core.Scope;
 import io.cyntex.control.core.TokenService;
 import io.cyntex.control.core.TokenSigner;
@@ -16,11 +17,13 @@ import io.cyntex.control.core.TokenSecrets;
 import io.cyntex.control.core.GeneratedSecret;
 import io.cyntex.control.core.VerifiedToken;
 import io.cyntex.core.catalog.CyntexCatalog;
+import io.cyntex.core.lifecycle.DesiredState;
 import io.cyntex.core.model.Resource;
 import io.cyntex.core.model.canonical.CanonicalWriter;
 import io.cyntex.core.dsl.DslParser;
 import io.cyntex.spi.store.AuditRecord;
 import io.cyntex.spi.store.AuditStore;
+import io.cyntex.spi.store.DesiredStore;
 import io.cyntex.spi.store.TokenRecord;
 import io.cyntex.spi.store.TokenStore;
 import io.cyntex.spi.store.User;
@@ -449,6 +452,17 @@ class AuthTest {
         ArtifactQueryService artifactQueryService(InMemoryArtifactStore store) {
             return new ArtifactQueryService(store);
         }
+
+        @Bean
+        DesiredStore desiredStore() {
+            return new FakeDesiredStore();
+        }
+
+        @Bean
+        PipelineLifecycleService pipelineLifecycleService(
+                ArtifactQueryService artifacts, DesiredStore desired, AuditGate auditGate) {
+            return new PipelineLifecycleService(artifacts, desired, auditGate);
+        }
     }
 
     // ---- fakes ----
@@ -553,6 +567,21 @@ class AuthTest {
                 return Optional.empty();
             }
             return Optional.of(new VerifiedToken(token.substring(0, bar), Scope.valueOf(token.substring(bar + 1))));
+        }
+    }
+
+    /** An in-memory desired store, last write wins per pipeline id — enough to bring up the lifecycle service. */
+    private static final class FakeDesiredStore implements DesiredStore {
+        private final Map<String, DesiredState> byId = new LinkedHashMap<>();
+
+        @Override
+        public void save(DesiredState desired) {
+            byId.put(desired.pipelineId(), desired);
+        }
+
+        @Override
+        public Optional<DesiredState> read(String pipelineId) {
+            return Optional.ofNullable(byId.get(pipelineId));
         }
     }
 
