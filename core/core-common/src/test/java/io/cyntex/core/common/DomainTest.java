@@ -15,7 +15,7 @@ class DomainTest {
     @Test
     void registryHoldsTheRegisteredDomains() {
         assertThat(Domain.ids())
-                .containsExactlyInAnyOrder("dsl", "cli", "core", "catalog", "schema", "lifecycle", "role", "boot", "store", "connector", "io", "control");
+                .containsExactlyInAnyOrder("dsl", "cli", "core", "catalog", "schema", "lifecycle", "role", "boot", "store", "connector", "io", "control", "engine");
     }
 
     @Test

@@ -33,7 +33,10 @@ public enum Domain {
     IO,
     // control layer: the resource-type-agnostic verb layer (apply / audit / auth); diagnosable
     // failures such as an operation refused because its mandatory audit record could not be written
-    CONTROL;
+    CONTROL,
+    // runtime execution: driving the Jet job that runs a pipeline (submit / suspend / resume /
+    // cancel); diagnosable failures such as acting on a pipeline that has no running job (runtime)
+    ENGINE;
 
     /** The lower-case identifier used as the {@code <domain>} segment of a canonical code. */
     public String id() {
