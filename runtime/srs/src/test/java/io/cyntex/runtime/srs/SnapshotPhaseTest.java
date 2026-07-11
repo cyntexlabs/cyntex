@@ -201,6 +201,11 @@ class SnapshotPhaseTest {
         }
 
         @Override
+        public void advanceConsumerReadSeq(String miningChainId, String pipelineId, String table, long lastReadSeq) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
         public void appendSchemaVersion(String miningChainId, SchemaVersion version) {
             throw new UnsupportedOperationException();
         }

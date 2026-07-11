@@ -101,4 +101,16 @@ class MongoSrsMetaStoreTest {
         assertThat(classified).isInstanceOf(CyntexException.class);
         assertThat(((CyntexException) classified).code()).isEqualTo(IoError.STORE_UNAVAILABLE);
     }
+
+    @Test
+    void consumerReadSeqUpdateTargetsOnlyThatTablesCursorPathNotTheWholeConsumer() {
+        // The reader's per-table cursor advance is a path-scoped $set: it touches only
+        // consumerOffsets.<pipelineId>.perTableSeq.<table>, so a reader advancing its cursor never clobbers
+        // the sink-acked position the sink writes to the same consumer document -- the two are independent
+        // writers on one consumer record.
+        Document update = MongoSrsMetaStore.consumerReadSeqUpdate("p1", "orders", 42L);
+
+        assertThat(update.get("$set", Document.class))
+                .containsExactly(Map.entry("consumerOffsets.p1.perTableSeq.orders", 42L));
+    }
 }

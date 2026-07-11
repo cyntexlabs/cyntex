@@ -221,6 +221,11 @@ class SrsCoordinatorTest {
         }
 
         @Override
+        public void advanceConsumerReadSeq(String miningChainId, String pipelineId, String table, long lastReadSeq) {
+            mutations.add("readSeq:" + miningChainId + ":" + pipelineId + ":" + table);
+        }
+
+        @Override
         public void setCdcStartPosition(String miningChainId, String cdcStartPosition) {
             mutations.add("cdcStart:" + miningChainId);
         }

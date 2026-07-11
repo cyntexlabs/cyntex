@@ -98,6 +98,37 @@ class MongoSrsMetaStoreIT {
     }
 
     @Test
+    void advanceConsumerReadSeqAdvancesTheReadCursorWithoutClobberingTheSinkAckedPosition() {
+        withStore(store -> {
+            store.create(CHAIN, null);
+            // The sink has acked a position for p1's cursor; the reader then advances its per-table read
+            // cursor. The read cursor and the sink-ack are independent writers of one consumer record, so
+            // the reader's advance must leave the acked position untouched.
+            store.upsertConsumerOffset(CHAIN, new ConsumerOffset("p1", Map.of("orders", 5L), "gtid:aaa-1:100"));
+
+            store.advanceConsumerReadSeq(CHAIN, "p1", "orders", 42L);
+
+            ConsumerOffset p1 = onlyConsumer(store);
+            assertThat(p1.perTableSeq()).containsEntry("orders", 42L);
+            assertThat(p1.sinkAckedSrcpos()).isEqualTo("gtid:aaa-1:100");
+        });
+    }
+
+    @Test
+    void advanceConsumerReadSeqCreatesTheCursorWhenTheConsumerHasNoneYet() {
+        withStore(store -> {
+            store.create(CHAIN, null);
+            // A reader may advance before the pipeline's sink first acks: the deep set creates the consumer
+            // entry, and its acked position stays absent until a sink writes one.
+            store.advanceConsumerReadSeq(CHAIN, "p1", "orders", 7L);
+
+            ConsumerOffset p1 = onlyConsumer(store);
+            assertThat(p1.perTableSeq()).containsEntry("orders", 7L);
+            assertThat(p1.sinkAckedSrcpos()).isNull();
+        });
+    }
+
+    @Test
     void setCdcStartPositionPersistsTheSeamPosition() {
         withStore(store -> {
             store.create(CHAIN, null);
@@ -132,11 +163,20 @@ class MongoSrsMetaStoreIT {
                     .isInstanceOf(IllegalStateException.class);
             assertThatThrownBy(() -> store.upsertConsumerOffset("nope", new ConsumerOffset("p", Map.of(), null)))
                     .isInstanceOf(IllegalStateException.class);
+            assertThatThrownBy(() -> store.advanceConsumerReadSeq("nope", "p", "orders", 1L))
+                    .isInstanceOf(IllegalStateException.class);
             assertThatThrownBy(() -> store.setCdcStartPosition("nope", "x"))
                     .isInstanceOf(IllegalStateException.class);
             assertThatThrownBy(() -> store.appendSchemaVersion("nope", new SchemaVersion(0, Map.of(), 0)))
                     .isInstanceOf(IllegalStateException.class);
         });
+    }
+
+    /** The single consumer cursor on the test chain — the shape the per-consumer advance tests read back. */
+    private static ConsumerOffset onlyConsumer(MongoSrsMetaStore store) {
+        List<ConsumerOffset> cursors = store.read(CHAIN).orElseThrow().consumerOffsets();
+        assertThat(cursors).hasSize(1);
+        return cursors.get(0);
     }
 
     private interface StoreTest {

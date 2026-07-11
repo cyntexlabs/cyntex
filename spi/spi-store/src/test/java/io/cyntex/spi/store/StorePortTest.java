@@ -406,6 +406,30 @@ class StorePortTest {
                 }
 
                 @Override
+                public void advanceConsumerReadSeq(String miningChainId, String pipelineId, String table, long lastReadSeq) {
+                    SrsMeta current = require(miningChainId);
+                    List<ConsumerOffset> merged = new ArrayList<>();
+                    boolean advanced = false;
+                    for (ConsumerOffset existing : current.consumerOffsets()) {
+                        if (existing.pipelineId().equals(pipelineId)) {
+                            Map<String, Long> perTable = new HashMap<>(existing.perTableSeq());
+                            perTable.put(table, lastReadSeq);
+                            // Advance the read cursor only; the consumer's sink-acked position is untouched.
+                            merged.add(new ConsumerOffset(pipelineId, perTable, existing.sinkAckedSrcpos()));
+                            advanced = true;
+                        } else {
+                            merged.add(existing);
+                        }
+                    }
+                    if (!advanced) {
+                        // A reader may advance before the sink first acks: create the entry, acked absent.
+                        merged.add(new ConsumerOffset(pipelineId, Map.of(table, lastReadSeq), null));
+                    }
+                    srsMeta.put(miningChainId, new SrsMeta(current.miningChainId(), current.sourceReadOffset(),
+                            merged, current.cdcStartPosition(), current.schemaHistory(), current.retention()));
+                }
+
+                @Override
                 public void setCdcStartPosition(String miningChainId, String cdcStartPosition) {
                     SrsMeta current = require(miningChainId);
                     srsMeta.put(miningChainId, new SrsMeta(current.miningChainId(), current.sourceReadOffset(),

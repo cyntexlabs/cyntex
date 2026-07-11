@@ -79,6 +79,26 @@ public final class MongoSrsMetaStore implements SrsMetaStore {
     }
 
     @Override
+    public void advanceConsumerReadSeq(String miningChainId, String pipelineId, String table, long lastReadSeq) {
+        update(miningChainId, consumerReadSeqUpdate(pipelineId, table, lastReadSeq));
+    }
+
+    /**
+     * The path-scoped update advancing one consumer's read cursor for one table: it sets only
+     * {@code consumerOffsets.<pipelineId>.perTableSeq.<table>}, so the consumer's sink-acked position is
+     * left untouched by a read-cursor advance. Both keys are dot-free — the pipeline id is a resource id
+     * the grammar forbids a dot in, and an L1 stream name is a bare identifier — so the dotted path
+     * addresses exactly one field. A deep {@code $set} creates the intermediate objects, so a reader may
+     * advance before the consumer has any other cursor state.
+     */
+    static Document consumerReadSeqUpdate(String pipelineId, String table, long lastReadSeq) {
+        Objects.requireNonNull(pipelineId, "pipelineId");
+        Objects.requireNonNull(table, "table");
+        return new Document("$set",
+                new Document("consumerOffsets." + pipelineId + ".perTableSeq." + table, lastReadSeq));
+    }
+
+    @Override
     public void setCdcStartPosition(String miningChainId, String cdcStartPosition) {
         Objects.requireNonNull(cdcStartPosition, "cdcStartPosition");
         update(miningChainId, new Document("$set", new Document("cdcStartPosition", cdcStartPosition)));

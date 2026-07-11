@@ -256,6 +256,11 @@ class CdcPhaseTest {
         }
 
         @Override
+        public void advanceConsumerReadSeq(String miningChainId, String pipelineId, String table, long lastReadSeq) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
         public void setCdcStartPosition(String miningChainId, String cdcStartPosition) {
             throw new UnsupportedOperationException();
         }
