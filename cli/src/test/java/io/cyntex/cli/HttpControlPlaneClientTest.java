@@ -268,6 +268,51 @@ class HttpControlPlaneClientTest {
         assertThat(outcome).isInstanceOf(ApplyOutcome.Unreachable.class);
     }
 
+    // --- lifecycle: POST /api/pipelines/{id}:{verb} under /api, authenticated ----------------------
+
+    @Test
+    void lifecyclePostsToTheColonMethodPathWithTheBearerAndReturnsTheNewState() throws Exception {
+        AtomicReference<CapturedRequest> seen = new AtomicReference<>();
+        HttpServer server = apiServer("/api/pipelines/pl1:start", 200,
+                "{\"pipelineId\":\"pl1\",\"targetState\":\"RUNNING\",\"revision\":\"rev-abc\"}", seen);
+        try {
+            LifecycleOutcome outcome =
+                    new HttpControlPlaneClient().lifecycle(baseOf(server), "tok-abc", "pl1", "start");
+            assertThat(outcome).isEqualTo(new LifecycleOutcome.Accepted("pl1", "RUNNING", "rev-abc"));
+            assertThat(seen.get().method()).isEqualTo("POST");
+            assertThat(seen.get().path()).isEqualTo("/api/pipelines/pl1:start");
+            assertThat(seen.get().authorization()).isEqualTo("Bearer tok-abc");
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void lifecycleReturnsRejectedWithTheServerCodeAndMessageOnAConflict() throws Exception {
+        HttpServer server = apiServer("/api/pipelines/pl1:pause", 409,
+                "{\"code\":\"lifecycle.illegal-transition\",\"params\":{},\"message\":\"Not running.\"}",
+                new AtomicReference<>());
+        try {
+            LifecycleOutcome outcome =
+                    new HttpControlPlaneClient().lifecycle(baseOf(server), "tok", "pl1", "pause");
+            assertThat(outcome).isEqualTo(
+                    new LifecycleOutcome.Rejected("lifecycle.illegal-transition", "Not running."));
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void lifecycleReturnsUnreachableWhenTheServerIsDownWithoutThrowing() throws Exception {
+        int closedPort;
+        try (ServerSocket socket = new ServerSocket(0)) {
+            closedPort = socket.getLocalPort();
+        }
+        LifecycleOutcome outcome = new HttpControlPlaneClient()
+                .lifecycle(URI.create("http://127.0.0.1:" + closedPort), "tok", "pl1", "start");
+        assertThat(outcome).isInstanceOf(LifecycleOutcome.Unreachable.class);
+    }
+
     @Test
     void getReturnsFoundWithTheStoredArtifactAndSendsTheCredential() throws Exception {
         AtomicReference<CapturedRequest> seen = new AtomicReference<>();

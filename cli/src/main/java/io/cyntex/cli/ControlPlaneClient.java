@@ -43,4 +43,13 @@ interface ControlPlaneClient {
      * coded rejection, or unreachable on any I/O failure. Never throws.
      */
     ListOutcome list(URI baseUrl, String credential, String kind);
+
+    /**
+     * Issues a pipeline lifecycle verb ({@code start} / {@code stop} / {@code pause} / {@code resume}) via
+     * {@code POST {baseUrl}/api/pipelines/{pipelineId}:{verb}}, authenticated by the bearer
+     * {@code credential}: the pipeline's new desired state on success, a coded rejection when the server
+     * refuses (an unknown pipeline, a forbidden transition, or a stale revision), or unreachable on any I/O
+     * failure. Never throws.
+     */
+    LifecycleOutcome lifecycle(URI baseUrl, String credential, String pipelineId, String verb);
 }

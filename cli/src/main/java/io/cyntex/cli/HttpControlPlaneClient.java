@@ -155,6 +155,40 @@ final class HttpControlPlaneClient implements ControlPlaneClient {
         }
     }
 
+    @Override
+    public LifecycleOutcome lifecycle(URI baseUrl, String credential, String pipelineId, String verb) {
+        try {
+            HttpRequest request = authed(baseUrl, "/api/pipelines/" + pipelineId + ":" + verb, credential)
+                    .POST(HttpRequest.BodyPublishers.noBody())
+                    .build();
+            HttpResponse<String> response =
+                    client().send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            if (response.statusCode() == 200) {
+                LifecycleOutcome.Accepted accepted = desiredState(response.body());
+                // a 200 that is not a usable desired-state reply (a proxy / non-Cyntex answer) is unreachable
+                return accepted == null ? new LifecycleOutcome.Unreachable() : accepted;
+            }
+            Rejection r = rejection(response.body(), "The server refused the lifecycle verb.");
+            return new LifecycleOutcome.Rejected(r.code(), r.message());
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return new LifecycleOutcome.Unreachable();
+        } catch (IOException | RuntimeException e) {
+            return new LifecycleOutcome.Unreachable();
+        }
+    }
+
+    /** The new desired state decoded from a 200 body, or {@code null} unless it carries all three string fields. */
+    private static LifecycleOutcome.Accepted desiredState(String body) {
+        if (JsonReader.parse(body) instanceof Map<?, ?> m
+                && m.get("pipelineId") instanceof String id
+                && m.get("targetState") instanceof String state
+                && m.get("revision") instanceof String revision) {
+            return new LifecycleOutcome.Accepted(id, state, revision);
+        }
+        return null;
+    }
+
     /** A request builder for {@code path} against a base, carrying the timeout and the bearer credential. */
     private static HttpRequest.Builder authed(URI baseUrl, String path, String credential) {
         return HttpRequest.newBuilder(endpoint(baseUrl, path))

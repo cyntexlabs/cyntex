@@ -77,9 +77,11 @@ class ReplTest {
         ApplyOutcome applyOutcome = new ApplyOutcome.Unreachable();
         GetOutcome getOutcome = new GetOutcome.Unreachable();
         ListOutcome listOutcome = new ListOutcome.Unreachable();
+        LifecycleOutcome lifecycleOutcome = new LifecycleOutcome.Unreachable();
         final List<String> applyCalls = new ArrayList<>();
         final List<String> getCalls = new ArrayList<>();
         final List<String> listCalls = new ArrayList<>();
+        final List<String> lifecycleCalls = new ArrayList<>();
 
         FakeControlPlane(URI... healthy) {
             this.healthy = new LinkedHashSet<>(List.of(healthy));
@@ -119,6 +121,12 @@ class ReplTest {
         public ListOutcome list(URI baseUrl, String credential, String kind) {
             listCalls.add(credential + "@" + baseUrl + "?" + kind);
             return healthy.contains(baseUrl) ? listOutcome : new ListOutcome.Unreachable();
+        }
+
+        @Override
+        public LifecycleOutcome lifecycle(URI baseUrl, String credential, String pipelineId, String verb) {
+            lifecycleCalls.add(credential + "@" + baseUrl + " " + verb + " " + pipelineId);
+            return healthy.contains(baseUrl) ? lifecycleOutcome : new LifecycleOutcome.Unreachable();
         }
     }
 
@@ -905,6 +913,95 @@ class ReplTest {
         Harness h = harness();   // offline: get is a connected verb, discoverable rather than unknown
         assertThat(h.repl().dispatch("get x")).isTrue();
         assertThat(h.sink().toString()).contains("requires a connection");
+    }
+
+    // --- pipeline lifecycle verbs route online to POST /api/pipelines/{id}:{verb} ------------------
+
+    @Test
+    void startWhileAuthenticatedRoutesToTheServerAndPrintsTheNewState() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.lifecycleOutcome = new LifecycleOutcome.Accepted("pl1", "RUNNING", "rev-abc");
+        Harness h = onlineSession(Path.of("cyn-work"), client);
+        int mark = h.sink().toString().length();
+        assertThat(h.repl().dispatch("start pl1")).isTrue();
+        assertThat(h.sink().toString().substring(mark)).contains("pl1").contains("running");
+        assertThat(client.lifecycleCalls).containsExactly("jwt-tok@http://node1:7900 start pl1");
+    }
+
+    @Test
+    void theFourLifecycleVerbsEachRouteToTheirOwnServerVerb() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.lifecycleOutcome = new LifecycleOutcome.Accepted("pl1", "RUNNING", "rev-abc");
+        Harness h = onlineSession(Path.of("cyn-work"), client);
+        h.repl().dispatch("start pl1");
+        h.repl().dispatch("pause pl1");
+        h.repl().dispatch("resume pl1");
+        h.repl().dispatch("stop pl1");
+        assertThat(client.lifecycleCalls).containsExactly(
+                "jwt-tok@http://node1:7900 start pl1",
+                "jwt-tok@http://node1:7900 pause pl1",
+                "jwt-tok@http://node1:7900 resume pl1",
+                "jwt-tok@http://node1:7900 stop pl1");
+    }
+
+    @Test
+    void aLifecycleVerbWithoutAPipelineIdIsABenignUsageLineAndCallsNothing() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        Harness h = onlineSession(Path.of("cyn-work"), client);
+        int mark = h.sink().toString().length();
+        assertThat(h.repl().dispatch("start")).isTrue();
+        assertThat(h.sink().toString().substring(mark)).contains("start").contains("missing operand");
+        assertThat(client.lifecycleCalls).isEmpty();
+    }
+
+    @Test
+    void aLifecycleVerbRejectionShowsTheCodeAndMessageAndDoesNotFailOver() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.lifecycleOutcome = new LifecycleOutcome.Rejected(
+                "lifecycle.illegal-transition", "Cannot pause a pipeline that is not running.");
+        Harness h = onlineSession(Path.of("cyn-work"), client);
+        int probesBefore = client.probed.size();
+        int mark = h.sink().toString().length();
+        h.repl().dispatch("pause pl1");
+        String out = h.sink().toString().substring(mark);
+        assertThat(out).contains("lifecycle.illegal-transition").contains("Cannot pause");
+        // a coded refusal is not a transport failure: it must not trigger failover
+        assertThat(out).doesNotContain("reconnected").doesNotContain("connection lost");
+        assertThat(client.probed.size()).isEqualTo(probesBefore);
+    }
+
+    @Test
+    void anUnauthenticatedLifecycleVerbSaysRunLoginAndCallsNothing() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        Harness h = harness(Path.of("cyn-work"), client, new ScriptedPrompter("pw"));
+        h.repl().dispatch("connect node1:7900");   // connected, not authenticated
+        int mark = h.sink().toString().length();
+        assertThat(h.repl().dispatch("start pl1")).isTrue();
+        assertThat(h.sink().toString().substring(mark)).contains("login");
+        assertThat(client.lifecycleCalls).isEmpty();
+    }
+
+    @Test
+    void startWhileOfflineFallsThroughToTheConnectionRequiredNotice() {
+        Harness h = harness();   // offline: start is a connected verb, discoverable rather than unknown
+        assertThat(h.repl().dispatch("start pl1")).isTrue();
+        assertThat(h.sink().toString()).contains("requires a connection");
+    }
+
+    @Test
+    void aLifecycleVerbFailsOverToAHealthyMemberAndRetriesOnceOnTheNewNode() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://n1:7900"), URI.create("http://n2:7900"));
+        client.loginOutcome = new LoginOutcome.Success("jwt-tok");
+        client.lifecycleOutcome = new LifecycleOutcome.Accepted("pl1", "RUNNING", "rev-abc");
+        Harness h = harness(Path.of("cyn-work"), client, new ScriptedPrompter("pw"));
+        h.repl().dispatch("connect n1:7900,n2:7900");   // land n1, members [n1, n2]
+        h.repl().dispatch("login alice");
+        client.setHealthy(URI.create("http://n2:7900"));   // n1 goes down before the request
+        int mark = h.sink().toString().length();
+        h.repl().dispatch("start pl1");
+        String out = h.sink().toString().substring(mark);
+        assertThat(out).contains("reconnected to n2:7900");
+        assertThat(out).contains("pl1").contains("running");
     }
 
     // --- online verbs fail over on a request the landing node cannot answer ------------------------

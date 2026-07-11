@@ -42,14 +42,16 @@ final class Repl {
             List.of("help", "exit", "quit", "cd", "pwd", "connect", "disconnect", "login", "logout");
 
     /**
-     * Registry verbs a connected session routes to the server instead of the offline command table. Each
-     * is the CLI projection of an {@code artifact.*} operation ({@code apply} = {@code artifact.apply},
-     * {@code get} = {@code artifact.get}, {@code ls} = {@code artifact.list}). Offline they fall through to
-     * the table, where {@code apply} / {@code get} report "requires a connection" and {@code ls} browses
-     * the local workspace. {@code validate} is not here — it runs the full local stack in either state
-     * until a server validate endpoint exists.
+     * Registry verbs a connected session routes to the server instead of the offline command table. The
+     * artifact verbs ({@code apply} = {@code artifact.apply}, {@code get} = {@code artifact.get},
+     * {@code ls} = {@code artifact.list}) and the four pipeline lifecycle verbs ({@code start} / {@code stop}
+     * / {@code pause} / {@code resume} = {@code pipeline.*}). Offline they fall through to the table, where
+     * {@code apply} / {@code get} and the lifecycle verbs report "requires a connection" and {@code ls}
+     * browses the local workspace. {@code validate} is not here — it runs the full local stack in either
+     * state until a server validate endpoint exists.
      */
-    private static final List<String> ONLINE_VERBS = List.of("apply", "get", "ls");
+    private static final List<String> ONLINE_VERBS =
+            List.of("apply", "get", "ls", "start", "stop", "pause", "resume");
 
     private final CommandLine commandLine;
 
@@ -187,7 +189,39 @@ final class Repl {
             case "apply" -> applyOnline(words);
             case "get" -> getOnline(words);
             case "ls" -> lsOnline(words);
+            case "start", "stop", "pause", "resume" -> lifecycleOnline(words);
             default -> throw new IllegalStateException("not an online verb: " + words.get(0));
+        }
+    }
+
+    /**
+     * {@code <verb> <pipeline-id>} — issues a pipeline lifecycle verb (start / stop / pause / resume) on the
+     * server and prints the pipeline's new desired state ({@code <id>  <state>}). A missing id is a benign
+     * usage line; a coded refusal — an unknown pipeline, a transition the state machine forbids, or a
+     * start/resume at a stale revision — renders its code and message. On a request the landing node cannot
+     * answer, {@link #withFailover} re-lands and retries once. There is no {@code rewind} verb: a re-dig is
+     * the explicit two-step {@code stop} then {@code start}.
+     */
+    private void lifecycleOnline(List<String> words) {
+        String verb = words.get(0);
+        PrintWriter err = commandLine.getErr();
+        if (words.size() < 2 || words.get(1).isBlank()) {
+            err.println(verb + ": missing operand (usage: " + verb + " <pipeline-id>)");
+            err.flush();
+            return;
+        }
+        String id = words.get(1);
+        LifecycleOutcome outcome = withFailover(() ->
+                controlPlane.lifecycle(session.landingNode(), session.credential(), id, verb),
+                o -> o instanceof LifecycleOutcome.Unreachable);
+        PrintWriter out = commandLine.getOut();
+        switch (outcome) {
+            case LifecycleOutcome.Accepted accepted -> {
+                out.println(accepted.pipelineId() + "  " + accepted.targetState().toLowerCase(Locale.ROOT));
+                out.flush();
+            }
+            case LifecycleOutcome.Rejected rejected -> renderRejection(rejected.code(), rejected.message());
+            case LifecycleOutcome.Unreachable ignored -> reportRequestFailed();
         }
     }
 
