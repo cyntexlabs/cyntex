@@ -769,14 +769,14 @@ public final class DslParser {
     /** A {@code filter} predicate (§12): must compile to {@code bool} against the §6 envelope (B4). */
     private static void checkPredicate(YamlMap owner, String key, String expr) {
         if (expr != null) {
-            failExpression(owner, key, expr, CelChecker.predicateError(expr));
+            failExpression(owner, key, expr, RowExpressions.predicateError(expr));
         }
     }
 
     /** A computed value — {@code map} field or push {@code format} (§12): must compile against the envelope (B4). */
     private static void checkValue(YamlMap owner, String key, String expr) {
         if (expr != null) {
-            failExpression(owner, key, expr, CelChecker.valueError(expr));
+            failExpression(owner, key, expr, RowExpressions.valueError(expr));
         }
     }
 
