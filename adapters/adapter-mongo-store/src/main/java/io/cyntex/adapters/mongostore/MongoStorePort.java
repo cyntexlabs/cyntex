@@ -1,8 +1,10 @@
 package io.cyntex.adapters.mongostore;
 
 import com.mongodb.client.MongoDatabase;
+import com.mongodb.client.gridfs.GridFSBuckets;
 import io.cyntex.spi.store.ArtifactStore;
 import io.cyntex.spi.store.CatalogStore;
+import io.cyntex.spi.store.ConnectorRegistry;
 import io.cyntex.spi.store.SchemaStore;
 import io.cyntex.spi.store.StateStore;
 import io.cyntex.spi.store.StorePort;
@@ -11,10 +13,11 @@ import java.util.Objects;
 
 /**
  * The MongoDB implementation of the persistence port: it aggregates the sub-stores — the artifact
- * truth layer, the epoch-fencing pipeline state store, the connection catalog, and the discovered
- * source-schema store — each bound to its own collection on the verified connection's database. This
- * is the store bridge the assembly root wires into the platform under {@code --role=all}; the app sees
- * only the driver-free {@link StorePort}, so no driver type escapes this module (rule R3).
+ * truth layer, the epoch-fencing pipeline state store, the connection catalog, the discovered
+ * source-schema store, and the connector distribution registry — each bound to its own collection (or
+ * GridFS bucket) on the verified connection's database. This is the store bridge the assembly root
+ * wires into the platform under {@code --role=all}; the app sees only the driver-free {@link StorePort},
+ * so no driver type escapes this module (rule R3).
  */
 public final class MongoStorePort implements StorePort {
 
@@ -26,11 +29,14 @@ public final class MongoStorePort implements StorePort {
     public static final String CONNECTIONS = "connections";
     /** The collection holding one discovered source model per connection. */
     public static final String SOURCE_SCHEMAS = "source_schemas";
+    /** The GridFS bucket holding one registered connector artifact per content hash. */
+    public static final String CONNECTOR_ARTIFACTS = "connector_artifacts";
 
     private final ArtifactStore artifacts;
     private final StateStore state;
     private final CatalogStore catalog;
     private final SchemaStore schemas;
+    private final ConnectorRegistry connectors;
 
     /**
      * Binds the sub-stores to their own collections on the verified connection's database. The
@@ -44,6 +50,7 @@ public final class MongoStorePort implements StorePort {
         this.state = new MongoStateStore(database.getCollection(PIPELINE_STATE));
         this.catalog = new MongoCatalogStore(database.getCollection(CONNECTIONS));
         this.schemas = new MongoSchemaStore(database.getCollection(SOURCE_SCHEMAS));
+        this.connectors = new MongoConnectorRegistry(GridFSBuckets.create(database, CONNECTOR_ARTIFACTS));
     }
 
     @Override
@@ -64,5 +71,10 @@ public final class MongoStorePort implements StorePort {
     @Override
     public SchemaStore schemas() {
         return schemas;
+    }
+
+    @Override
+    public ConnectorRegistry connectors() {
+        return connectors;
     }
 }

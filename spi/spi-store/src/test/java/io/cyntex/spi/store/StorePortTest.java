@@ -8,9 +8,11 @@ import io.cyntex.core.lifecycle.EpochCas;
 import io.cyntex.core.model.Resource;
 import io.cyntex.core.model.SourceResource;
 import io.cyntex.core.model.ViewResource;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -20,7 +22,8 @@ import org.junit.jupiter.api.Test;
  * The store port seen through an in-memory implementation: proves the persistence contract is
  * implementable and usable, and pins the shape it documents — an artifact truth layer
  * (save / get / list of canonical resources), a state store whose only write path is the
- * epoch-fencing compare-and-swap, a connection catalog store, and a discovered source-schema store.
+ * epoch-fencing compare-and-swap, a connection catalog store, a discovered source-schema store, and a
+ * connector distribution registry.
  */
 class StorePortTest {
 
@@ -34,13 +37,14 @@ class StorePortTest {
     // --- facade ---
 
     @Test
-    void facadeExposesTheFourStores() {
+    void facadeExposesTheFiveStores() {
         StorePort store = new InMemoryStore();
 
         assertThat(store.artifacts()).isNotNull();
         assertThat(store.state()).isNotNull();
         assertThat(store.catalog()).isNotNull();
         assertThat(store.schemas()).isNotNull();
+        assertThat(store.connectors()).isNotNull();
     }
 
     // --- artifacts (the canonical truth layer) ---
@@ -215,9 +219,47 @@ class StorePortTest {
         assertThat(schemas.get("orders-db")).contains(rediscovered);
     }
 
+    // --- connectors (the distribution registry) ---
+
+    @Test
+    void connectorRegisterIsContentHashIdempotent() {
+        ConnectorRegistry connectors = new InMemoryStore().connectors();
+        byte[] jar = "jar-bytes".getBytes(StandardCharsets.UTF_8);
+
+        RegistrationOutcome first = connectors.register("mysql", "1.3.5", RegistrationSource.REGISTER, jar);
+        RegistrationOutcome again = connectors.register("mysql", "1.3.5", RegistrationSource.REGISTER, jar);
+
+        assertThat(first.newlyRegistered()).isTrue();
+        assertThat(again.newlyRegistered()).isFalse();
+        assertThat(again.registration()).isEqualTo(first.registration());
+    }
+
+    @Test
+    void connectorRegisterStoresRetrievableArtifactBytes() {
+        ConnectorRegistry connectors = new InMemoryStore().connectors();
+        byte[] jar = "jar-bytes".getBytes(StandardCharsets.UTF_8);
+
+        RegistrationOutcome outcome = connectors.register("mysql", "1.3.5", RegistrationSource.SEED, jar);
+
+        assertThat(connectors.artifact(outcome.registration().contentHash()).orElseThrow()).isEqualTo(jar);
+    }
+
+    @Test
+    void connectorListReturnsEveryRegistered() {
+        ConnectorRegistry connectors = new InMemoryStore().connectors();
+        connectors.register("mysql", "1.3.5", RegistrationSource.SEED, "a".getBytes(StandardCharsets.UTF_8));
+        connectors.register("postgres", "1.3.5", RegistrationSource.REGISTER, "b".getBytes(StandardCharsets.UTF_8));
+
+        assertThat(connectors.list())
+                .extracting(ConnectorRegistration::connectorId)
+                .containsExactlyInAnyOrder("mysql", "postgres");
+    }
+
     /**
      * An in-memory store: one map behind each sub-port. The state store applies the real fencing CAS,
-     * so the port composes with the core checkpoint contract, not a re-implementation.
+     * so the port composes with the core checkpoint contract, not a re-implementation. The registry
+     * keys artifacts by a deterministic content key (raw-byte hex here, SHA-256 in the real store), so
+     * it witnesses the register-if-absent contract without depending on the hash algorithm.
      */
     private static final class InMemoryStore implements StorePort {
 
@@ -225,6 +267,8 @@ class StorePortTest {
         private final Map<String, CheckpointDoc> checkpoints = new HashMap<>();
         private final Map<String, ConnectionConfig> connections = new HashMap<>();
         private final Map<String, SourceModel> schemas = new HashMap<>();
+        private final Map<String, ConnectorRegistration> registrations = new HashMap<>();
+        private final Map<String, byte[]> connectorArtifacts = new HashMap<>();
 
         @Override
         public ArtifactStore artifacts() {
@@ -308,6 +352,37 @@ class StorePortTest {
                 @Override
                 public Optional<SourceModel> get(String connectionId) {
                     return Optional.ofNullable(schemas.get(connectionId));
+                }
+            };
+        }
+
+        @Override
+        public ConnectorRegistry connectors() {
+            return new ConnectorRegistry() {
+                @Override
+                public RegistrationOutcome register(
+                        String connectorId, String pdkApiVersion, RegistrationSource source, byte[] artifact) {
+                    String contentHash = HexFormat.of().formatHex(artifact);
+                    ConnectorRegistration existing = registrations.get(contentHash);
+                    if (existing != null) {
+                        return new RegistrationOutcome(existing, false);
+                    }
+                    ConnectorRegistration registration =
+                            new ConnectorRegistration(connectorId, contentHash, pdkApiVersion, source);
+                    registrations.put(contentHash, registration);
+                    connectorArtifacts.put(contentHash, artifact.clone());
+                    return new RegistrationOutcome(registration, true);
+                }
+
+                @Override
+                public List<ConnectorRegistration> list() {
+                    return new ArrayList<>(registrations.values());
+                }
+
+                @Override
+                public Optional<byte[]> artifact(String contentHash) {
+                    byte[] bytes = connectorArtifacts.get(contentHash);
+                    return bytes == null ? Optional.empty() : Optional.of(bytes.clone());
                 }
             };
         }
