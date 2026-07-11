@@ -34,6 +34,7 @@ class ConnectorErrorTest {
         assertThat(ConnectorError.PROJECTION_FAILED.code()).isEqualTo("connector.projection-failed");
         assertThat(ConnectorError.CAPTURE_FAILED.code()).isEqualTo("connector.capture-failed");
         assertThat(ConnectorError.TEST_FAILED.code()).isEqualTo("connector.test-failed");
+        assertThat(ConnectorError.DISCOVER_FAILED.code()).isEqualTo("connector.discover-failed");
         assertThat(ConnectorError.WRITE_FAILED.code()).isEqualTo("connector.write-failed");
     }
 
@@ -46,6 +47,7 @@ class ConnectorErrorTest {
         assertThat(ConnectorError.PROJECTION_FAILED.placeholders()).isEqualTo(Set.of("connector", "detail"));
         assertThat(ConnectorError.CAPTURE_FAILED.placeholders()).isEqualTo(Set.of("connector", "detail"));
         assertThat(ConnectorError.TEST_FAILED.placeholders()).isEqualTo(Set.of("connector", "detail"));
+        assertThat(ConnectorError.DISCOVER_FAILED.placeholders()).isEqualTo(Set.of("connector", "detail"));
         assertThat(ConnectorError.WRITE_FAILED.placeholders()).isEqualTo(Set.of("connector", "detail"));
     }
 

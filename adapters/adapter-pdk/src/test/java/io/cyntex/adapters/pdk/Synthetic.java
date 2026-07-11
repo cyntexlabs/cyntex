@@ -288,4 +288,60 @@ final class Synthetic {
         String body = "throw new RuntimeException(\"test boom\");";
         return SyntheticJar.compileToJar(dir, "synthetic.ThrowingTest", connectionTestSource("ThrowingTest", body));
     }
+
+    // ---- discover-schema connectors (drive TapConnector.discoverSchema) ---------------------------
+
+    /**
+     * A minimal connector whose discoverSchema body the caller fills in — no read/write functions, inert
+     * lifecycle and connection test. The body streams TapTables to the consumer, or throws to exercise
+     * the coded discover-failure path.
+     */
+    private static String discoverSource(String simpleName, String discoverBody) {
+        return ""
+                + "package synthetic;"
+                + "import io.tapdata.pdk.apis.TapConnector;"
+                + "import io.tapdata.pdk.apis.functions.ConnectorFunctions;"
+                + "import io.tapdata.entity.codec.TapCodecsRegistry;"
+                + "import io.tapdata.pdk.apis.context.TapConnectionContext;"
+                + "import io.tapdata.pdk.apis.entity.ConnectionOptions;"
+                + "import io.tapdata.pdk.apis.entity.TestItem;"
+                + "import io.tapdata.entity.schema.TapTable;"
+                + "import io.tapdata.entity.schema.TapField;"
+                + "import io.tapdata.entity.schema.TapIndex;"
+                + "import io.tapdata.entity.schema.TapIndexField;"
+                + "import java.util.ArrayList;"
+                + "import java.util.List;"
+                + "import java.util.function.Consumer;"
+                + "public class " + simpleName + " implements TapConnector {"
+                + "  public void registerCapabilities(ConnectorFunctions functions, TapCodecsRegistry codecs) {}"
+                + "  public void init(TapConnectionContext c) {}"
+                + "  public void stop(TapConnectionContext c) {}"
+                + "  public ConnectionOptions connectionTest(TapConnectionContext c, Consumer<TestItem> s) { return ConnectionOptions.create(); }"
+                + "  public int tableCount(TapConnectionContext c) { return 1; }"
+                + "  public void discoverSchema(TapConnectionContext c, List<String> t, int n, Consumer<List<TapTable>> s) {" + discoverBody + "}"
+                + "}";
+    }
+
+    /**
+     * A connector whose discoverSchema reports one table with a primary-key field, a plain field and a
+     * non-unique secondary index — enough to prove field, primary-key and index normalization.
+     */
+    static Path discoverableSource(Path dir) {
+        String body = ""
+                + "TapTable table = new TapTable(\"orders\");"
+                + "table.add(new TapField(\"id\", \"int\").isPrimaryKey(true).primaryKeyPos(1));"
+                + "table.add(new TapField(\"amount\", \"decimal\"));"
+                + "table.add(new TapIndex().name(\"idx_amount\").unique(false)"
+                + "    .indexField(new TapIndexField().name(\"amount\").fieldAsc(true)));"
+                + "List<TapTable> tables = new ArrayList<>();"
+                + "tables.add(table);"
+                + "s.accept(tables);";
+        return SyntheticJar.compileToJar(dir, "synthetic.Discoverable", discoverSource("Discoverable", body));
+    }
+
+    /** A connector whose discoverSchema throws — discovery could not complete, a coded drive failure. */
+    static Path throwingDiscoverSource(Path dir) {
+        String body = "throw new RuntimeException(\"discover boom\");";
+        return SyntheticJar.compileToJar(dir, "synthetic.ThrowingDiscover", discoverSource("ThrowingDiscover", body));
+    }
 }

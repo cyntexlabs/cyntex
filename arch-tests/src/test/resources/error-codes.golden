@@ -14,6 +14,7 @@ cli.unknown-connector
 connector.api-level-incompatible
 connector.capture-failed
 connector.class-not-found
+connector.discover-failed
 connector.load-failed
 connector.projection-failed
 connector.test-failed

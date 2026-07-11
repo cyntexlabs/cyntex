@@ -65,6 +65,13 @@ public enum ConnectorError implements CyntexErrorCode {
     TEST_FAILED("connector.test-failed", Set.of("connector", "detail")),
 
     /**
+     * The connector's schema discovery could not be run to completion — the connector threw out of
+     * {@code discoverSchema}. {@code connector} is the connector id; {@code detail} is the failure the
+     * connector reported.
+     */
+    DISCOVER_FAILED("connector.discover-failed", Set.of("connector", "detail")),
+
+    /**
      * The connector failed while writing a batch. {@code connector} is the connector id;
      * {@code detail} is the failure the connector reported.
      */
