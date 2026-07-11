@@ -25,12 +25,14 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.LongSupplier;
 import java.util.function.Supplier;
@@ -98,6 +100,18 @@ class CdcPhaseTest {
     /** A change-ring item used to fill the ring in the backpressure test; a plain insert at the given position. */
     private static SrsItem cdcItem(String token) {
         return new SrsItem(new SourcePosition(token), Op.INSERT, 1L, null, Map.of("id", 1), 0L);
+    }
+
+    /** Polls {@code thread}'s state until it reaches {@code target} or the timeout elapses; the final state decides. */
+    private static boolean awaitState(Thread thread, Thread.State target, Duration timeout) throws InterruptedException {
+        long deadline = System.nanoTime() + timeout.toNanos();
+        while (System.nanoTime() < deadline) {
+            if (thread.getState() == target) {
+                return true;
+            }
+            Thread.sleep(5);
+        }
+        return thread.getState() == target;
     }
 
     @Test
@@ -168,6 +182,40 @@ class CdcPhaseTest {
         assertThat(raw.tailSequence()).isEqualTo(8L);
         assertThat(raw.readOne(8).srcPos()).isEqualTo(new SourcePosition("w1"));
         assertThat(polls.get()).isGreaterThan(1L);
+    }
+
+    @Test
+    void parksOffCpuWhileBackpressuredRatherThanBusySpinning() throws Exception {
+        Ringbuffer<SrsItem> raw = hz.getRingbuffer("srs.chain.park");
+        SrsWriteGate gate = new SrsWriteGate(new SrsRingbuffer(raw));
+        // Fill the ring to capacity with changes no consumer has read, so the next cdc write is refused.
+        for (int i = 0; i < 8; i++) {
+            assertThat(gate.append(cdcItem("f" + i), -1L)).isPresent();
+        }
+        // The slowest consumer reads nothing until the test frees a slot: the write stays backpressured.
+        AtomicBoolean freed = new AtomicBoolean(false);
+        LongSupplier minRead = () -> freed.get() ? 0L : -1L;
+        CdcChain chain = new CdcChain(gate, new RecordingMeta(), "chain", monotonicWatermark(), NUMERIC_ORDER, 0L);
+        FakeCdcPort port = new FakeCdcPort(List.of(Envelope.insert(9, "orders", Map.of("id", 9), Map.of())));
+
+        Thread writer = new Thread(() -> CdcPhase.run(port, config(), chain, minRead, List::of), "cdc-writer");
+        writer.setDaemon(true);
+        try {
+            writer.start();
+            // A backpressured write parks off-CPU (TIMED_WAITING); it does not burn a core spinning (RUNNABLE).
+            boolean parked = awaitState(writer, Thread.State.TIMED_WAITING, Duration.ofSeconds(2));
+            // Freeing a slot lets the parked writer wake, land the change and finish -- paused, never dropped.
+            freed.set(true);
+            writer.join(2000);
+
+            assertThat(parked).isTrue();
+            assertThat(writer.isAlive()).isFalse();
+            assertThat(raw.tailSequence()).isEqualTo(8L);
+            assertThat(raw.readOne(8).srcPos()).isEqualTo(new SourcePosition("w1"));
+        } finally {
+            freed.set(true);
+            writer.interrupt();
+        }
     }
 
     @Test

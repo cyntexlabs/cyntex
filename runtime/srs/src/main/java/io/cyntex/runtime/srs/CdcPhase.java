@@ -9,6 +9,7 @@ import io.cyntex.spi.store.ConsumerOffset;
 
 import java.util.Collection;
 import java.util.Objects;
+import java.util.concurrent.locks.LockSupport;
 import java.util.function.LongSupplier;
 import java.util.function.Supplier;
 
@@ -23,6 +24,14 @@ import java.util.function.Supplier;
  * monotonic generator standing in for the connector-defined position order.
  */
 public final class CdcPhase {
+
+    /**
+     * The off-CPU pause between headroom re-checks while a cdc write is backpressured. Parking for a coarse
+     * fixed interval, rather than busy-spinning, keeps a stalled write from burning a core; each wake re-reads
+     * the slowest consumer's read cursor, so the write resumes within one interval of a consumer freeing a slot.
+     * A signal-driven wake on true consumer advance is a later refinement.
+     */
+    private static final long BACKPRESSURE_PARK_NANOS = 1_000_000L;
 
     private CdcPhase() {
     }
@@ -61,11 +70,12 @@ public final class CdcPhase {
         SourcePosition pos = chain.watermark().get();
         SrsItem item = new SrsItem(
                 pos, event.op(), event.ts(), event.before(), event.after(), chain.schemaVer());
-        // Admit the change through the headroom gate. A refused write is backpressure, not a drop: keep
-        // retrying against the live consumer cursor so this call -- and with it the source read -- pauses
-        // until a consumer frees a slot, rather than overwriting a change no consumer has read.
+        // Admit the change through the headroom gate. A refused write is backpressure, not a drop: park
+        // off-CPU and re-check against the live consumer cursor so this call -- and with it the source read --
+        // pauses until a consumer frees a slot, rather than overwriting a change no consumer has read or
+        // burning a core spinning while it waits.
         while (chain.gate().append(item, minConsumerReadSeq.getAsLong()).isEmpty()) {
-            Thread.onSpinWait();
+            LockSupport.parkNanos(BACKPRESSURE_PARK_NANOS);
         }
         // The change is in the ring; advance the durable read offset to its position, clamped so it never
         // passes the slowest consumer's sink-acked position -- a change only ever in the volatile ring must
