@@ -114,6 +114,14 @@
       <artifactId>spi-store</artifactId>
       <version>${revision}</version>
     </dependency>
+    <!-- The runtime convergence loop the assembly root drives: the app is the one place a runtime-ring
+         module is wired in (rule R7), and the Spring scheduler that ticks it lives here, not in the
+         runtime ring where the framework is banned. -->
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>scheduler</artifactId>
+      <version>${revision}</version>
+    </dependency>
 
     <dependency>
       <groupId>org.junit.jupiter</groupId>
