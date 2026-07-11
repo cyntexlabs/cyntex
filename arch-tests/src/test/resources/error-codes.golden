@@ -11,12 +11,15 @@ cli.not-authenticated
 cli.not-connected
 cli.resource-not-found
 cli.unknown-connector
+connector.ambiguous-connector-class
 connector.api-level-incompatible
 connector.capture-failed
 connector.class-not-found
 connector.discover-failed
 connector.load-failed
+connector.no-connector-class
 connector.projection-failed
+connector.spec-not-found
 connector.test-failed
 connector.write-failed
 control.audit-blocked

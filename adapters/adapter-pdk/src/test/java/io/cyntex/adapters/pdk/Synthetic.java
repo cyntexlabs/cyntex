@@ -1,6 +1,7 @@
 package io.cyntex.adapters.pdk;
 
 import java.nio.file.Path;
+import java.util.Map;
 
 /**
  * Compiles full synthetic {@code TapConnector}s at test time (via {@link SyntheticJar}), so the PDK
@@ -373,5 +374,106 @@ final class Synthetic {
     static Path throwingDiscoverSource(Path dir) {
         String body = "throw new RuntimeException(\"discover boom\");";
         return SyntheticJar.compileToJar(dir, "synthetic.ThrowingDiscover", discoverSource("ThrowingDiscover", body));
+    }
+
+    // ---- self-scan connectors (drive ConnectorIntrospector) ---------------------------------------
+
+    /** The imports every self-scan fixture's source needs. */
+    private static final String SELF_SCAN_IMPORTS = ""
+            + "package synthetic;"
+            + "import io.tapdata.pdk.apis.TapConnector;"
+            + "import io.tapdata.pdk.apis.annotations.TapConnectorClass;"
+            + "import io.tapdata.pdk.apis.functions.ConnectorFunctions;"
+            + "import io.tapdata.entity.codec.TapCodecsRegistry;"
+            + "import io.tapdata.pdk.apis.context.TapConnectionContext;"
+            + "import io.tapdata.pdk.apis.entity.ConnectionOptions;"
+            + "import io.tapdata.pdk.apis.entity.TestItem;"
+            + "import io.tapdata.entity.schema.TapTable;"
+            + "import java.util.List;"
+            + "import java.util.function.Consumer;";
+
+    /** The frozen TapConnector methods, all inert: introspection reads a class's annotation, spec and
+     *  manifest and never drives it, so a successful introspect proves none of these ran. */
+    private static final String INERT_CONNECTOR_BODY = ""
+            + "  public void registerCapabilities(ConnectorFunctions f, TapCodecsRegistry c) {}"
+            + "  public void init(TapConnectionContext c) {}"
+            + "  public void stop(TapConnectionContext c) {}"
+            + "  public void discoverSchema(TapConnectionContext c, List<String> t, int n, Consumer<List<TapTable>> s) {}"
+            + "  public ConnectionOptions connectionTest(TapConnectionContext c, Consumer<TestItem> s) { return ConnectionOptions.create(); }"
+            + "  public int tableCount(TapConnectionContext c) { return 0; }";
+
+    /**
+     * A single-connector jar: one {@code @TapConnectorClass} entry class, the {@code orders-spec.json}
+     * resource its annotation names, and a {@code PDK-API-Version} manifest attribute — the exact shape
+     * a real connector dist jar has, and what self-scan introspects.
+     */
+    static Path annotatedConnector(Path dir) {
+        String src = SELF_SCAN_IMPORTS
+                + "@TapConnectorClass(\"orders-spec.json\")"
+                + "public class OrdersConnector implements TapConnector {" + INERT_CONNECTOR_BODY + "}";
+        return SyntheticJar.compileToJar(dir, "synthetic.OrdersConnector", src,
+                Map.of("orders-spec.json", "{\"id\":\"orders\"}"),
+                Map.of("PDK-API-Version", "1.3.5"));
+    }
+
+    /** A jar with a plain class and no {@code @TapConnectorClass} anywhere — not a connector artifact. */
+    static Path jarWithoutConnectorClass(Path dir) {
+        return SyntheticJar.compileToJar(dir, "synthetic.NotAConnector",
+                "package synthetic; public class NotAConnector {}");
+    }
+
+    /** An annotated connector whose {@code @TapConnectorClass} names a spec the jar does not contain. */
+    static Path annotatedConnectorMissingSpec(Path dir) {
+        String src = SELF_SCAN_IMPORTS
+                + "@TapConnectorClass(\"absent-spec.json\")"
+                + "public class GhostConnector implements TapConnector {" + INERT_CONNECTOR_BODY + "}";
+        return SyntheticJar.compileToJar(dir, "synthetic.GhostConnector", src,
+                Map.of(), // the annotation names a spec, but none is packaged
+                Map.of("PDK-API-Version", "1.3.5"));
+    }
+
+    /** One jar carrying two unrelated annotated connectors — an ambiguous artifact for registration. */
+    static Path twoDistinctConnectors(Path dir) {
+        String src = SELF_SCAN_IMPORTS
+                + "@TapConnectorClass(\"a-spec.json\")"
+                + "public class ConnectorA implements TapConnector {" + INERT_CONNECTOR_BODY + "}"
+                + "@TapConnectorClass(\"b-spec.json\")"
+                + "class ConnectorB implements TapConnector {" + INERT_CONNECTOR_BODY + "}";
+        return SyntheticJar.compileToJar(dir, "synthetic.ConnectorA", src,
+                Map.of("a-spec.json", "{\"id\":\"a\"}", "b-spec.json", "{\"id\":\"b\"}"),
+                Map.of("PDK-API-Version", "1.3.5"));
+    }
+
+    /** An annotated connector that registers a read capability — proves an introspected artifact drives
+     *  capability derivation, closing the self-scan to capability-derive seam. */
+    static Path annotatedEmittingConnector(Path dir) {
+        String body = ""
+                + "  public void registerCapabilities(ConnectorFunctions f, TapCodecsRegistry c) {"
+                + "    f.supportBatchRead((context, table, offset, size, consumer) -> {});"
+                + "  }"
+                + "  public void init(TapConnectionContext c) {}"
+                + "  public void stop(TapConnectionContext c) {}"
+                + "  public void discoverSchema(TapConnectionContext c, List<String> t, int n, Consumer<List<TapTable>> s) {}"
+                + "  public ConnectionOptions connectionTest(TapConnectionContext c, Consumer<TestItem> s) { return ConnectionOptions.create(); }"
+                + "  public int tableCount(TapConnectionContext c) { return 0; }";
+        String src = SELF_SCAN_IMPORTS
+                + "@TapConnectorClass(\"reader-spec.json\")"
+                + "public class ReaderConnector implements TapConnector {" + body + "}";
+        // A registered PDK API version, so the introspected version passes the deriver's level gate.
+        return SyntheticJar.compileToJar(dir, "synthetic.ReaderConnector", src,
+                Map.of("reader-spec.json", "{\"id\":\"reader\"}"),
+                Map.of("PDK-API-Version", "2.0.8"));
+    }
+
+    /** An annotated connector that subclasses an also-annotated base — the variant is the real entry. */
+    static Path baseAndVariantConnector(Path dir) {
+        String src = SELF_SCAN_IMPORTS
+                + "@TapConnectorClass(\"base-spec.json\")"
+                + "class BaseConnector implements TapConnector {" + INERT_CONNECTOR_BODY + "}"
+                + "@TapConnectorClass(\"variant-spec.json\")"
+                + "public class VariantConnector extends BaseConnector {}";
+        return SyntheticJar.compileToJar(dir, "synthetic.VariantConnector", src,
+                Map.of("base-spec.json", "{\"id\":\"base\"}", "variant-spec.json", "{\"id\":\"variant\"}"),
+                Map.of("PDK-API-Version", "1.3.5"));
     }
 }

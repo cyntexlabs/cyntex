@@ -38,6 +38,27 @@ public enum ConnectorError implements CyntexErrorCode {
     CLASS_NOT_FOUND("connector.class-not-found", Set.of("connector", "class")),
 
     /**
+     * A registered artifact carries no connector entry class — no class it contains is annotated as a
+     * connector. {@code artifact} names the artifact that was scanned. Self-scan raises this before a
+     * connector id is known, so it is keyed by the artifact rather than by an id.
+     */
+    NO_CONNECTOR_CLASS("connector.no-connector-class", Set.of("artifact")),
+
+    /**
+     * A registered artifact carries more than one unrelated connector entry class, so which connector
+     * it registers is ambiguous (variants that subclass a shared base are not: the most-derived wins).
+     * {@code artifact} names the artifact; {@code classes} lists the competing entry classes.
+     */
+    AMBIGUOUS_CONNECTOR_CLASS("connector.ambiguous-connector-class", Set.of("artifact", "classes")),
+
+    /**
+     * A connector's {@code @TapConnectorClass} annotation names a spec resource the artifact does not
+     * contain. {@code artifact} names the artifact; {@code spec} is the resource path the annotation
+     * named.
+     */
+    SPEC_NOT_FOUND("connector.spec-not-found", Set.of("artifact", "spec")),
+
+    /**
      * The connector requires a newer PDK API level than the bridge provides, so it is refused rather
      * than silently downgraded. {@code connector} is the connector id; {@code required} is the level
      * it asked for; {@code provided} is the level the bridge provides.
