@@ -65,13 +65,13 @@ final class RowScript {
         try {
             context.eval("js", source);
         } catch (PolyglotException e) {
-            throw new IllegalStateException("js transform script failed to compile", e);
+            throw TransformErrors.scriptCompileFailed(e);
         }
         this.toBool = context.eval("js", "(x) => !!x");
         Value bindings = context.getBindings("js");
         this.process = bindings.getMember("process");
         if (process == null || !process.canExecute()) {
-            throw new IllegalArgumentException("js transform must define a process(record, ctx) function");
+            throw TransformErrors.scriptNoProcess();
         }
         Value declaredFilter = bindings.getMember("filter");
         this.filter = declaredFilter != null && declaredFilter.canExecute() ? declaredFilter : null;
@@ -98,9 +98,8 @@ final class RowScript {
             return out;
         } catch (PolyglotException e) {
             // A guest-side failure (a thrown error, a bad property access) is a user-diagnosable
-            // condition; the error surface renders it as a coded diagnostic. Until then it propagates
-            // and fails the job rather than being silently swallowed.
-            throw new IllegalStateException("js transform evaluation failed", e);
+            // condition: surface it as a coded diagnostic, not a bare crash that fails the job opaquely.
+            throw TransformErrors.scriptFailed(e);
         }
     }
 
@@ -117,18 +116,32 @@ final class RowScript {
 
     private Envelope toEnvelope(Object converted, Envelope source) {
         if (!(converted instanceof Map<?, ?> record)) {
-            throw new IllegalStateException("js output must be a record object");
+            throw TransformErrors.scriptOutputInvalid("output must be a record object");
         }
         Object op = record.get("op");
         Object ts = record.get("ts");
         Object src = record.get("src");
         return new Envelope(
-                op != null ? Op.fromSymbol(String.valueOf(op)) : source.op(),
+                opOf(op, source),
                 ts instanceof Number number ? number.longValue() : source.ts(),
                 src != null ? String.valueOf(src) : source.src(),
                 dataMap(record.get("before")),
                 dataMap(record.get("after")),
                 dataMap(record.get("schema")));
+    }
+
+    // The output op: the source's when the script left it alone, else the wire symbol it wrote. An op
+    // the envelope cannot parse is author-controlled invalid output, coded like any other bad output
+    // shape rather than the bare crash Op.fromSymbol raises for an unknown symbol.
+    private static Op opOf(Object op, Envelope source) {
+        if (op == null) {
+            return source.op();
+        }
+        try {
+            return Op.fromSymbol(String.valueOf(op));
+        } catch (IllegalArgumentException e) {
+            throw TransformErrors.scriptOutputInvalid("output op '" + op + "' is not a known change kind");
+        }
     }
 
     @SuppressWarnings("unchecked")
@@ -139,7 +152,7 @@ final class RowScript {
         if (value instanceof Map<?, ?> map) {
             return (Map<String, Object>) map;
         }
-        throw new IllegalStateException("js output before / after / schema must be an object or null");
+        throw TransformErrors.scriptOutputInvalid("before / after / schema must be an object or null");
     }
 
     // Guest value -> Java, host-preserving. A record / array still backed by the host maps we handed in

@@ -1,7 +1,9 @@
 package io.cyntex.adapters.transform;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import io.cyntex.core.common.CyntexException;
 import io.cyntex.core.event.Envelope;
 import io.cyntex.spi.transform.TransformPort;
 import java.util.Map;
@@ -62,5 +64,24 @@ class FilterTransformTest {
         Envelope ddl = Envelope.ddl(1L, "orders", Map.of("kind", "add-column"));
 
         assertThat(filter.transform(ddl)).containsExactly(ddl);
+    }
+
+    @Test
+    @DisplayName("a row expression that fails to evaluate surfaces a coded transform.expression-failed")
+    void codesRowExpressionEvaluationFailure() {
+        // now() type-checks (it is declared in the compile environment) but is unbound in the runtime,
+        // so the predicate compiles and then fails at eval — the operator must see a coded diagnostic
+        // naming the expression, not a bare crash.
+        TransformPort filter = StatelessTransforms.filter("now() == now()");
+        Envelope row = Envelope.insert(1L, "orders", Map.of("id", 1), null);
+
+        assertThatThrownBy(() -> filter.transform(row))
+                .isInstanceOf(CyntexException.class)
+                .satisfies(thrown -> {
+                    CyntexException e = (CyntexException) thrown;
+                    assertThat(e.code().code()).isEqualTo("transform.expression-failed");
+                    assertThat(e.args().get("expr")).isEqualTo("now() == now()");
+                    assertThat(e.args()).containsKey("detail");
+                });
     }
 }

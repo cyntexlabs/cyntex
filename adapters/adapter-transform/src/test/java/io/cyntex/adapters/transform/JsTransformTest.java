@@ -3,6 +3,7 @@ package io.cyntex.adapters.transform;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import io.cyntex.core.common.CyntexException;
 import io.cyntex.core.event.Envelope;
 import io.cyntex.core.event.Op;
 import io.cyntex.spi.transform.TransformPort;
@@ -145,17 +146,74 @@ class JsTransformTest {
     }
 
     @Test
-    @DisplayName("a script with no process function is rejected when the port is built")
-    void rejectsScriptWithoutProcess() {
+    @DisplayName("a script with no process function surfaces a coded transform.script-no-process")
+    void codesScriptWithoutProcess() {
         assertThatThrownBy(() -> js("function filter(r) { return true; }"))
-                .isInstanceOf(IllegalArgumentException.class);
+                .isInstanceOf(CyntexException.class)
+                .satisfies(thrown -> assertThat(((CyntexException) thrown).code().code())
+                        .isEqualTo("transform.script-no-process"));
     }
 
     @Test
-    @DisplayName("a script that does not compile is rejected when the port is built")
-    void rejectsUncompilableScript() {
+    @DisplayName("a script that does not compile surfaces a coded transform.script-compile-failed")
+    void codesUncompilableScript() {
         assertThatThrownBy(() -> js("function process(r, ctx) { return "))
-                .isInstanceOf(IllegalStateException.class);
+                .isInstanceOf(CyntexException.class)
+                .satisfies(thrown -> assertThat(((CyntexException) thrown).code().code())
+                        .isEqualTo("transform.script-compile-failed"));
+    }
+
+    @Test
+    @DisplayName("a script that throws at runtime surfaces a coded transform.script-failed")
+    void codesScriptRuntimeFailure() {
+        TransformPort js = js("function process(r, ctx) { throw new Error('boom'); }");
+        Envelope row = Envelope.insert(1L, "t", Map.of("id", 1), null);
+
+        assertThatThrownBy(() -> js.transform(row))
+                .isInstanceOf(CyntexException.class)
+                .satisfies(thrown -> {
+                    CyntexException e = (CyntexException) thrown;
+                    assertThat(e.code().code()).isEqualTo("transform.script-failed");
+                    assertThat(String.valueOf(e.args().get("detail"))).contains("boom");
+                });
+    }
+
+    @Test
+    @DisplayName("a script that returns a non-record surfaces a coded transform.script-output-invalid")
+    void codesInvalidScriptOutput() {
+        TransformPort js = js("function process(r, ctx) { return 42; }");
+        Envelope row = Envelope.insert(1L, "t", Map.of("id", 1), null);
+
+        assertThatThrownBy(() -> js.transform(row))
+                .isInstanceOf(CyntexException.class)
+                .satisfies(thrown -> assertThat(((CyntexException) thrown).code().code())
+                        .isEqualTo("transform.script-output-invalid"));
+    }
+
+    @Test
+    @DisplayName("a script that emits an unknown op symbol surfaces a coded transform.script-output-invalid")
+    void codesUnknownOutputOp() {
+        // 'insert' is not a wire op symbol (the symbols are i / u / d / r / ddl); an author-set op the
+        // envelope cannot parse is invalid output, coded like any other bad output shape.
+        TransformPort js = js("function process(r, ctx) { r.op = 'insert'; return r; }");
+        Envelope row = Envelope.insert(1L, "t", Map.of("id", 1), null);
+
+        assertThatThrownBy(() -> js.transform(row))
+                .isInstanceOf(CyntexException.class)
+                .satisfies(thrown -> assertThat(((CyntexException) thrown).code().code())
+                        .isEqualTo("transform.script-output-invalid"));
+    }
+
+    @Test
+    @DisplayName("a script whose output before is not an object surfaces a coded transform.script-output-invalid")
+    void codesNonObjectOutputBefore() {
+        TransformPort js = js("function process(r, ctx) { r.before = 'oops'; return r; }");
+        Envelope row = Envelope.update(1L, "t", Map.of("id", 1), Map.of("id", 2), null);
+
+        assertThatThrownBy(() -> js.transform(row))
+                .isInstanceOf(CyntexException.class)
+                .satisfies(thrown -> assertThat(((CyntexException) thrown).code().code())
+                        .isEqualTo("transform.script-output-invalid"));
     }
 
     @Test

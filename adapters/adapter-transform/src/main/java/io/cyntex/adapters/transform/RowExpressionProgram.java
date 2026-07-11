@@ -27,24 +27,27 @@ final class RowExpressionProgram {
     private static final CelRuntime RUNTIME = CelRuntimeFactory.standardCelRuntimeBuilder().build();
 
     private final CelRuntime.Program program;
+    // The source expression, kept so an evaluation failure can name the expression that failed.
+    private final String expr;
 
-    private RowExpressionProgram(CelRuntime.Program program) {
+    private RowExpressionProgram(CelRuntime.Program program, String expr) {
         this.program = program;
+        this.expr = expr;
     }
 
     /** Compiles a predicate (bool) expression into an evaluable program. */
     static RowExpressionProgram predicate(String expr) {
-        return of(RowExpressions.predicateAst(expr));
+        return of(RowExpressions.predicateAst(expr), expr);
     }
 
     /** Compiles a computed-value expression (any type) into an evaluable program. */
     static RowExpressionProgram value(String expr) {
-        return of(RowExpressions.valueAst(expr));
+        return of(RowExpressions.valueAst(expr), expr);
     }
 
-    private static RowExpressionProgram of(CelAbstractSyntaxTree ast) {
+    private static RowExpressionProgram of(CelAbstractSyntaxTree ast, String expr) {
         try {
-            return new RowExpressionProgram(RUNTIME.createProgram(ast));
+            return new RowExpressionProgram(RUNTIME.createProgram(ast), expr);
         } catch (CelEvaluationException e) {
             // A checked AST builds into a program; a failure here is an invariant violation, not a
             // user condition.
@@ -64,10 +67,10 @@ final class RowExpressionProgram {
         try {
             return program.eval(vars);
         } catch (CelEvaluationException e) {
-            // A row-level evaluation failure (a missing field, a type clash on a dyn value) is a
-            // user-diagnosable condition; the error surface renders it as a coded diagnostic. Until
-            // then it propagates and fails the job rather than being silently swallowed.
-            throw new IllegalStateException("row expression evaluation failed", e);
+            // A row-level evaluation failure (a missing field, a type clash on a dyn value, a function
+            // that type-checks but is unbound at runtime) is a user-diagnosable condition: surface it
+            // as a coded diagnostic naming the expression, not a bare crash that fails the job opaquely.
+            throw TransformErrors.expressionFailed(expr, e);
         }
     }
 }

@@ -26,6 +26,13 @@
     that evaluates</description>
 
   <dependencies>
+    <!-- The error-code system (CyntexErrorCode / CyntexException / Domain): a transform-eval failure
+         is a user-diagnosable error and surfaces as a coded diagnostic, not a bare crash. -->
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>core-common</artifactId>
+      <version>${revision}</version>
+    </dependency>
     <!-- The event envelope every transform port sees (Op / before / after / schema). -->
     <dependency>
       <groupId>io.cyntex</groupId>
