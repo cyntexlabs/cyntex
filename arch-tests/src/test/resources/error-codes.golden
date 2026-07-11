@@ -12,12 +12,14 @@ cli.not-connected
 cli.resource-not-found
 cli.unknown-connector
 connector.ambiguous-connector-class
+connector.ambiguous-registration
 connector.api-level-incompatible
 connector.capture-failed
 connector.class-not-found
 connector.discover-failed
 connector.load-failed
 connector.no-connector-class
+connector.not-registered
 connector.projection-failed
 connector.spec-not-found
 connector.test-failed

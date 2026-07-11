@@ -26,6 +26,20 @@ import java.util.Set;
 public enum ConnectorError implements CyntexErrorCode {
 
     /**
+     * No artifact is registered in the distribution store for this connector id, so it resolves to
+     * nothing and cannot be loaded. {@code connector} is the connector id that resolved to no artifact.
+     */
+    NOT_REGISTERED("connector.not-registered", Set.of("connector")),
+
+    /**
+     * A connector id resolves to more than one registered artifact — different artifact bytes
+     * registered under one id — so which to load is ambiguous; selecting among connector versions is
+     * not supported and a silent wrong-version load is never taken. {@code connector} is the connector
+     * id; {@code artifacts} lists the competing content hashes.
+     */
+    AMBIGUOUS_REGISTRATION("connector.ambiguous-registration", Set.of("connector", "artifacts")),
+
+    /**
      * The connector jar or its classpath could not be opened / linked. {@code connector} is the
      * connector id being loaded.
      */

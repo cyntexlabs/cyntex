@@ -98,6 +98,12 @@ io.store-unauthorized:
 io.document-unreadable:
   message: "A stored document with id '{id}' could not be read back."
   solution: "The stored document is corrupt or was written by a newer version; inspect or restore it."
+connector.not-registered:
+  message: "No connector '{connector}' is registered."
+  solution: "Register the connector's artifact — or place it in the connector seed directory — before using it."
+connector.ambiguous-registration:
+  message: "Connector '{connector}' resolves to more than one registered artifact: {artifacts}."
+  solution: "Keep a single registered artifact per connector id; selecting among connector versions is not supported."
 connector.load-failed:
   message: "Connector '{connector}' could not be loaded."
   solution: "Check the connector jar and its dependencies are present and readable."
