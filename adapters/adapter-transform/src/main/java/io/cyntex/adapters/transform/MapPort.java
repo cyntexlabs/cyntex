@@ -22,26 +22,27 @@ final class MapPort implements TransformPort {
     private final MapSpec spec;
     // Computed rules are compiled once, member-side, keyed by their (unique) output name.
     private final Map<String, RowExpressionProgram> computed;
-    // Output names govern their key: an unlisted source of the same name is not also passed through.
-    private final Set<String> declaredNames;
+    // Drop targets: removed from the projection, so a same-named source field is not passed through.
+    private final Set<String> droppedNames;
     // Source fields a rename takes: consumed, so they are not passed through under their old name.
     private final Set<String> consumedSources;
 
     MapPort(MapSpec spec) {
         this.spec = spec;
         Map<String, RowExpressionProgram> compiled = new HashMap<>();
-        Set<String> declared = new HashSet<>();
+        Set<String> dropped = new HashSet<>();
         Set<String> consumed = new HashSet<>();
         for (MapRule rule : spec.rules()) {
-            declared.add(rule.output());
             if (rule instanceof MapRule.Computed c) {
                 compiled.put(c.output(), RowExpressionProgram.value(c.expr()));
             } else if (rule instanceof MapRule.Rename r) {
                 consumed.add(r.source());
+            } else if (rule instanceof MapRule.Drop d) {
+                dropped.add(d.output());
             }
         }
         this.computed = compiled;
-        this.declaredNames = declared;
+        this.droppedNames = dropped;
         this.consumedSources = consumed;
     }
 
@@ -66,8 +67,11 @@ final class MapPort implements TransformPort {
                 case MapRule.Computed c -> out.put(c.output(), computed.get(c.output()).eval(event));
             }
         }
+        // A source field passes through unless a rule already produced its name (so a rename / literal
+        // / computed output wins over the same-named source), a rename consumed it, or a drop removed
+        // it. A rule that produced nothing (a rename whose source was absent) leaves the field alone.
         after.forEach((field, value) -> {
-            if (!declaredNames.contains(field) && !consumedSources.contains(field) && !out.containsKey(field)) {
+            if (!out.containsKey(field) && !consumedSources.contains(field) && !droppedNames.contains(field)) {
                 out.put(field, value);
             }
         });

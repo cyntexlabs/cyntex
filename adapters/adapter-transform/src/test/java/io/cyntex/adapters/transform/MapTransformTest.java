@@ -125,6 +125,22 @@ class MapTransformTest {
     }
 
     @Test
+    @DisplayName("a rename whose source is missing leaves a same-named existing field untouched")
+    void renameMissPreservesSameNamedField() {
+        // The output name collides with an existing source field, but the rename source is absent:
+        // the rule is a no-op, so the existing field must pass through, not be dropped.
+        TransformPort map = map(fields("id", FieldRule.rename("external_id")));
+        LinkedHashMap<String, Object> src = new LinkedHashMap<>();
+        src.put("id", 5);
+        src.put("name", "x");
+        Envelope row = Envelope.insert(1L, "t", src, null);
+
+        Map<String, Object> after = afterOf(map.transform(row).get(0));
+
+        assertThat(after).containsEntry("id", 5).containsEntry("name", "x");
+    }
+
+    @Test
     @DisplayName("bypasses a ddl event (no row image to project)")
     void bypassesDdl() {
         TransformPort map = map(fields("stage", FieldRule.literal("prod")));
