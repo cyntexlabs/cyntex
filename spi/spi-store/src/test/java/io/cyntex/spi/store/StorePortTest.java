@@ -17,10 +17,10 @@ import java.util.Optional;
 import org.junit.jupiter.api.Test;
 
 /**
- * The store port seen through an in-memory implementation: proves the three-store persistence
- * contract is implementable and usable, and pins the shape it documents — an artifact truth layer
+ * The store port seen through an in-memory implementation: proves the persistence contract is
+ * implementable and usable, and pins the shape it documents — an artifact truth layer
  * (save / get / list of canonical resources), a state store whose only write path is the
- * epoch-fencing compare-and-swap, and a connection catalog store.
+ * epoch-fencing compare-and-swap, a connection catalog store, and a discovered source-schema store.
  */
 class StorePortTest {
 
@@ -34,12 +34,13 @@ class StorePortTest {
     // --- facade ---
 
     @Test
-    void facadeExposesTheThreeStores() {
+    void facadeExposesTheFourStores() {
         StorePort store = new InMemoryStore();
 
         assertThat(store.artifacts()).isNotNull();
         assertThat(store.state()).isNotNull();
         assertThat(store.catalog()).isNotNull();
+        assertThat(store.schemas()).isNotNull();
     }
 
     // --- artifacts (the canonical truth layer) ---
@@ -182,15 +183,48 @@ class StorePortTest {
         assertThat(catalog.list()).extracting(ConnectionConfig::id).containsExactlyInAnyOrder("orders-db", "events");
     }
 
+    // --- schemas (discovered source models) ---
+
+    @Test
+    void schemaSaveThenGetRoundTrips() {
+        SchemaStore schemas = new InMemoryStore().schemas();
+        SourceModel model = new SourceModel(List.of(
+                new SourceTable("orders", List.of(new SourceField("id", "bigint")), List.of("id"), List.of())));
+
+        schemas.save("orders-db", model);
+
+        assertThat(schemas.get("orders-db")).contains(model);
+    }
+
+    @Test
+    void schemaGetAbsentConnectionIsEmpty() {
+        assertThat(new InMemoryStore().schemas().get("never-discovered")).isEmpty();
+    }
+
+    @Test
+    void reDiscoveryReplacesTheStoredModelInPlace() {
+        SchemaStore schemas = new InMemoryStore().schemas();
+        schemas.save("orders-db", new SourceModel(List.of(
+                new SourceTable("orders", List.of(), List.of(), List.of()))));
+        SourceModel rediscovered = new SourceModel(List.of(
+                new SourceTable("orders", List.of(new SourceField("id", "bigint")), List.of("id"), List.of()),
+                new SourceTable("customers", List.of(), List.of(), List.of())));
+
+        schemas.save("orders-db", rediscovered);
+
+        assertThat(schemas.get("orders-db")).contains(rediscovered);
+    }
+
     /**
-     * An in-memory store: three maps behind the three sub-ports. The state store applies the real
-     * fencing CAS, so the port composes with the core checkpoint contract, not a re-implementation.
+     * An in-memory store: one map behind each sub-port. The state store applies the real fencing CAS,
+     * so the port composes with the core checkpoint contract, not a re-implementation.
      */
     private static final class InMemoryStore implements StorePort {
 
         private final Map<String, Resource> artifacts = new HashMap<>();
         private final Map<String, CheckpointDoc> checkpoints = new HashMap<>();
         private final Map<String, ConnectionConfig> connections = new HashMap<>();
+        private final Map<String, SourceModel> schemas = new HashMap<>();
 
         @Override
         public ArtifactStore artifacts() {
@@ -259,6 +293,21 @@ class StorePortTest {
                 @Override
                 public List<ConnectionConfig> list() {
                     return new ArrayList<>(connections.values());
+                }
+            };
+        }
+
+        @Override
+        public SchemaStore schemas() {
+            return new SchemaStore() {
+                @Override
+                public void save(String connectionId, SourceModel model) {
+                    schemas.put(connectionId, model);
+                }
+
+                @Override
+                public Optional<SourceModel> get(String connectionId) {
+                    return Optional.ofNullable(schemas.get(connectionId));
                 }
             };
         }
