@@ -77,6 +77,9 @@ lifecycle.illegal-transition:
 lifecycle.incompatible-revision:
   message: "The pipeline's revision {requested} is not compatible with the latest applied revision {latest}."
   solution: "Re-apply the pipeline so its revision matches the latest applied one, then retry."
+lifecycle.unknown-pipeline:
+  message: "No pipeline named {pipeline} is applied."
+  solution: "Apply the pipeline before running a lifecycle verb on it, and check the id for typos."
 role.unsupported:
   message: "Unsupported --role value '{role}'."
   solution: "L1 runs the whole platform in one process; use --role=all (the default)."

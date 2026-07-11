@@ -23,7 +23,10 @@ public enum LifecycleError implements CyntexErrorCode {
      * A {@code start}/{@code resume} refused because the pipeline's revision is not the latest applied
      * one: {@code requested} is the revision the action would run at, {@code latest} the newest applied.
      */
-    INCOMPATIBLE_REVISION("lifecycle.incompatible-revision", Set.of("requested", "latest"));
+    INCOMPATIBLE_REVISION("lifecycle.incompatible-revision", Set.of("requested", "latest")),
+
+    /** A lifecycle verb named a pipeline that was never applied: {@code pipeline} is the id the caller gave. */
+    UNKNOWN_PIPELINE("lifecycle.unknown-pipeline", Set.of("pipeline"));
 
     private final String code;
     private final Set<String> placeholders;

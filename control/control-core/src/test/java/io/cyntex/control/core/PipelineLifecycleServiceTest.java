@@ -1,0 +1,262 @@
+package io.cyntex.control.core;
+
+import io.cyntex.core.common.CyntexException;
+import io.cyntex.core.dsl.DslParser;
+import io.cyntex.core.lifecycle.DesiredState;
+import io.cyntex.core.lifecycle.PipelineState;
+import io.cyntex.core.model.Resource;
+import io.cyntex.core.model.canonical.CanonicalHash;
+import io.cyntex.core.model.canonical.CanonicalWriter;
+import io.cyntex.spi.store.ArtifactStore;
+import io.cyntex.spi.store.AuditRecord;
+import io.cyntex.spi.store.AuditStore;
+import io.cyntex.spi.store.DesiredStore;
+import org.junit.jupiter.api.Test;
+
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneOffset;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.catchThrowableOfType;
+
+/**
+ * The pipeline lifecycle write verbs: start / stop / pause / resume translate a user's intent into a
+ * desired-state write, guarded by the four-verb state machine and a minimal revision-compatibility
+ * check, and audited like every state-mutating control operation. Until the converge side writes the
+ * actual state, the pipeline's current state is read back from its last desired intent (a NEW pipeline
+ * has none), so the four verbs are reachable end-to-end before a runtime exists.
+ *
+ * <p>Collaborators are in-memory fakes: a store holding applied artifacts (whose canonical form is the
+ * revision), a desired store, and an audit store that records or fails on demand.
+ */
+class PipelineLifecycleServiceTest {
+
+    private static final Instant FIXED = Instant.parse("2026-07-11T10:00:00Z");
+    private static final Clock FIXED_CLOCK = Clock.fixed(FIXED, ZoneOffset.UTC);
+
+    private final FakeArtifactStore artifacts = new FakeArtifactStore();
+    private final FakeDesiredStore desired = new FakeDesiredStore();
+    private final RecordingAuditStore audit = new RecordingAuditStore();
+    private final PipelineLifecycleService service =
+            new PipelineLifecycleService(new ArtifactQueryService(artifacts), desired, new AuditGate(audit, FIXED_CLOCK));
+
+    @Test
+    void startFromNewWritesRunningDesiredAtTheLatestRevision() {
+        artifacts.save(PIPELINE_V1);
+
+        DesiredState written = service.start("alice", "pl1");
+
+        assertThat(written).isEqualTo(new DesiredState("pl1", PipelineState.RUNNING, revisionOf(PIPELINE_V1)));
+        assertThat(desired.read("pl1")).contains(written);
+    }
+
+    @Test
+    void anIllegalTransitionIsRefusedWithACodeAndWritesNothing() {
+        artifacts.save(PIPELINE_V1);
+
+        // A NEW pipeline (no desired doc yet) cannot be paused — pause is legal only from RUNNING.
+        CyntexException thrown = catchThrowableOfType(CyntexException.class, () -> service.pause("alice", "pl1"));
+
+        assertThat(thrown).isNotNull();
+        assertThat(thrown.code().code()).isEqualTo("lifecycle.illegal-transition");
+        assertThat(thrown.args()).containsEntry("from", PipelineState.NEW).containsEntry("verb", "pause");
+        assertThat(desired.read("pl1")).as("a refused verb writes no desired state").isEmpty();
+        assertThat(audit.records).as("a refused verb leaves no audit record").isEmpty();
+    }
+
+    @Test
+    void aVerbOnAnUnknownPipelineIsRefusedWithACode() {
+        // Nothing applied under this id.
+        CyntexException thrown = catchThrowableOfType(CyntexException.class, () -> service.start("alice", "ghost"));
+
+        assertThat(thrown).isNotNull();
+        assertThat(thrown.code().code()).isEqualTo("lifecycle.unknown-pipeline");
+        assertThat(thrown.args()).containsEntry("pipeline", "ghost");
+        assertThat(desired.read("ghost")).isEmpty();
+        assertThat(audit.records).isEmpty();
+    }
+
+    @Test
+    void resumeAtAStaleRevisionIsRefusedWithTheRequestedAndLatest() {
+        artifacts.save(PIPELINE_V1);
+        service.start("alice", "pl1"); // desired RUNNING at v1
+        service.pause("alice", "pl1"); // desired PAUSED at v1
+        // The pipeline artifact is re-applied while paused: the latest revision moves to v2.
+        artifacts.save(PIPELINE_V2);
+
+        CyntexException thrown = catchThrowableOfType(CyntexException.class, () -> service.resume("alice", "pl1"));
+
+        assertThat(thrown).isNotNull();
+        assertThat(thrown.code().code()).isEqualTo("lifecycle.incompatible-revision");
+        assertThat(thrown.args())
+                .containsEntry("requested", revisionOf(PIPELINE_V1))
+                .containsEntry("latest", revisionOf(PIPELINE_V2));
+        assertThat(desired.read("pl1"))
+                .as("the refused resume leaves the paused desired state untouched")
+                .contains(new DesiredState("pl1", PipelineState.PAUSED, revisionOf(PIPELINE_V1)));
+    }
+
+    @Test
+    void aWriteIsAuditedUnderItsVerbsOperation() {
+        artifacts.save(PIPELINE_V1);
+
+        service.start("alice", "pl1");
+
+        assertThat(audit.records).hasSize(1);
+        AuditRecord record = audit.records.get(0);
+        assertThat(record.operationId()).isEqualTo("pipeline.start");
+        assertThat(record.principal()).isEqualTo("alice");
+        assertThat(record.resourceId()).isEqualTo("pl1");
+        assertThat(record.timestamp()).isEqualTo(FIXED);
+    }
+
+    @Test
+    void aFailedAuditRefusesTheWriteSoNoDesiredStateIsPersisted() {
+        artifacts.save(PIPELINE_V1);
+        PipelineLifecycleService gated = new PipelineLifecycleService(
+                new ArtifactQueryService(artifacts), desired, new AuditGate(new FailingAuditStore(), FIXED_CLOCK));
+
+        CyntexException thrown = catchThrowableOfType(CyntexException.class, () -> gated.start("alice", "pl1"));
+
+        assertThat(thrown).isNotNull();
+        assertThat(thrown.code().code())
+                .as("no audit, no execute: a failed audit write refuses the desired-state write")
+                .isEqualTo("control.audit-blocked");
+        assertThat(desired.read("pl1")).as("the desired state is not written when its audit record could not be").isEmpty();
+    }
+
+    @Test
+    void startPauseResumeStopIsReachableThroughTheDesiredProxy() {
+        artifacts.save(PIPELINE_V1);
+        String rev = revisionOf(PIPELINE_V1);
+
+        assertThat(service.start("alice", "pl1")).isEqualTo(new DesiredState("pl1", PipelineState.RUNNING, rev));
+        assertThat(service.pause("alice", "pl1")).isEqualTo(new DesiredState("pl1", PipelineState.PAUSED, rev));
+        assertThat(service.resume("alice", "pl1")).isEqualTo(new DesiredState("pl1", PipelineState.RUNNING, rev));
+        assertThat(service.stop("alice", "pl1")).isEqualTo(new DesiredState("pl1", PipelineState.STOPPED, rev));
+        assertThat(desired.read("pl1")).contains(new DesiredState("pl1", PipelineState.STOPPED, rev));
+        // each verb is audited under its own operation — pins the whole verb->operation map, not just start.
+        assertThat(audit.records).extracting(AuditRecord::operationId)
+                .containsExactly("pipeline.start", "pipeline.pause", "pipeline.resume", "pipeline.stop");
+    }
+
+    @Test
+    void stopFromPausedWritesStoppedAtThePausedRevision() {
+        artifacts.save(PIPELINE_V1);
+        String rev = revisionOf(PIPELINE_V1);
+        service.start("alice", "pl1");
+        service.pause("alice", "pl1");
+
+        DesiredState written = service.stop("alice", "pl1");
+
+        assertThat(written).isEqualTo(new DesiredState("pl1", PipelineState.STOPPED, rev));
+        assertThat(desired.read("pl1")).contains(written);
+        assertThat(audit.records.get(audit.records.size() - 1).operationId()).isEqualTo("pipeline.stop");
+    }
+
+    // ---- fixtures ----
+
+    private static Resource parse(String dsl) {
+        return new DslParser().parse(dsl);
+    }
+
+    /** The revision of an artifact is the content hash of its canonical form — the same value apply stamps. */
+    private static String revisionOf(String dsl) {
+        return CanonicalHash.of(new CanonicalWriter().write(parse(dsl)));
+    }
+
+    private static final String PIPELINE_V1 = """
+            version: cyntex/v1
+            kind: pipeline
+            id: pl1
+            source: src_x
+            settings: { read_mode: snapshot_and_cdc }
+            serve:
+              from: /.*/
+              sync:
+                - id: sink1
+                  source: tgt_x
+                  write_mode: upsert
+                  ddl: apply
+            """;
+
+    /** The same pipeline re-applied with a changed setting, so its canonical form — and revision — differ. */
+    private static final String PIPELINE_V2 = """
+            version: cyntex/v1
+            kind: pipeline
+            id: pl1
+            source: src_x
+            settings: { read_mode: cdc_only }
+            serve:
+              from: /.*/
+              sync:
+                - id: sink1
+                  source: tgt_x
+                  write_mode: upsert
+                  ddl: apply
+            """;
+
+    /** An in-memory artifact store holding resources by id; reads reconstruct through the query service. */
+    private static final class FakeArtifactStore implements ArtifactStore {
+        private final Map<String, Resource> byId = new HashMap<>();
+
+        void save(String dsl) {
+            Resource r = parse(dsl);
+            byId.put(r.id(), r);
+        }
+
+        @Override
+        public void saveAll(List<Resource> artifacts) {
+            artifacts.forEach(r -> byId.put(r.id(), r));
+        }
+
+        @Override
+        public Optional<Resource> get(String id) {
+            return Optional.ofNullable(byId.get(id));
+        }
+
+        @Override
+        public List<Resource> list() {
+            return List.copyOf(byId.values());
+        }
+    }
+
+    /** An in-memory desired store, last write wins per pipeline id. */
+    private static final class FakeDesiredStore implements DesiredStore {
+        private final Map<String, DesiredState> byId = new HashMap<>();
+
+        @Override
+        public void save(DesiredState desired) {
+            byId.put(desired.pipelineId(), desired);
+        }
+
+        @Override
+        public Optional<DesiredState> read(String pipelineId) {
+            return Optional.ofNullable(byId.get(pipelineId));
+        }
+    }
+
+    /** An audit store that captures every record written through it. */
+    private static final class RecordingAuditStore implements AuditStore {
+        final List<AuditRecord> records = new ArrayList<>();
+
+        @Override
+        public void record(AuditRecord record) {
+            records.add(record);
+        }
+    }
+
+    /** An audit store that always fails, standing in for an unavailable audit backend. */
+    private static final class FailingAuditStore implements AuditStore {
+        @Override
+        public void record(AuditRecord record) {
+            throw new IllegalStateException("audit backend down");
+        }
+    }
+}

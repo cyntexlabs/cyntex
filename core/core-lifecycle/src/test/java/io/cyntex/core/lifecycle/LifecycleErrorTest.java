@@ -20,7 +20,9 @@ class LifecycleErrorTest {
         assertThat(LifecycleError.values()).extracting(LifecycleError::code).containsExactlyInAnyOrder(
                 "lifecycle.illegal-transition",
                 // start/resume refused because the pipeline's revision is not the latest applied one
-                "lifecycle.incompatible-revision");
+                "lifecycle.incompatible-revision",
+                // a lifecycle verb named a pipeline that was never applied
+                "lifecycle.unknown-pipeline");
     }
 
     @Test
@@ -30,5 +32,8 @@ class LifecycleErrorTest {
         // requested = the revision the start/resume would run at; latest = the latest applied revision
         assertThat(LifecycleError.INCOMPATIBLE_REVISION.placeholders())
                 .containsExactlyInAnyOrder("requested", "latest");
+        // pipeline = the id the caller named
+        assertThat(LifecycleError.UNKNOWN_PIPELINE.placeholders())
+                .containsExactlyInAnyOrder("pipeline");
     }
 }
