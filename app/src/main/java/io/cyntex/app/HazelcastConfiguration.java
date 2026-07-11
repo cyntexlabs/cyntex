@@ -1,14 +1,22 @@
 package io.cyntex.app;
 
 import com.hazelcast.config.Config;
+import com.hazelcast.config.InMemoryFormat;
 import com.hazelcast.config.JoinConfig;
+import com.hazelcast.config.RingbufferConfig;
+import com.hazelcast.config.SerializerConfig;
 import com.hazelcast.core.Hazelcast;
 import com.hazelcast.core.HazelcastException;
 import com.hazelcast.core.HazelcastInstance;
 import io.cyntex.core.common.CyntexException;
+import io.cyntex.runtime.srs.CaptureRunUnit;
+import io.cyntex.runtime.srs.SrsItem;
+import io.cyntex.runtime.srs.SrsItemSerializer;
+import io.cyntex.spi.store.SrsMetaStore;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.lang.Nullable;
 
 import java.util.Map;
 import java.util.function.Supplier;
@@ -30,10 +38,24 @@ import java.util.function.Supplier;
 @EnableConfigurationProperties(HazelcastProperties.class)
 class HazelcastConfiguration {
 
+    /**
+     * The bounded capacity of each per-table SRS change ring. Headroom backpressure, not size, is the
+     * primary guard against overwriting an unread change, so this is a coarse single-node default rather
+     * than a tuned figure.
+     */
+    private static final int SRS_RING_CAPACITY = 1024;
+
     @Bean(destroyMethod = "shutdown")
-    HazelcastInstance hazelcastMember(HazelcastProperties properties) {
+    HazelcastInstance hazelcastMember(HazelcastProperties properties, @Nullable SrsMetaStore srsMetaStore) {
         Config config = memberConfig(properties);
-        return startMember(() -> Hazelcast.newHazelcastInstance(config));
+        HazelcastInstance member = startMember(() -> Hazelcast.newHazelcastInstance(config));
+        // Bind the SRS meta store onto the member so the read-cursor publisher factory -- carried onto the
+        // Jet source and resolved member-side -- can reach it through the user context and publish durable
+        // read cursors. A run with no store (mongo disabled) binds nothing, and the publisher then no-ops.
+        if (srsMetaStore != null) {
+            member.getUserContext().put(CaptureRunUnit.SRS_META_USER_CONTEXT_KEY, srsMetaStore);
+        }
+        return member;
     }
 
     /**
@@ -75,6 +97,19 @@ class HazelcastConfiguration {
         if (cooperativeThreads != null) {
             config.getJetConfig().setCooperativeThreadCount(cooperativeThreads);
         }
+        // Make the member SRS-capable. The change-ring item is not zero-config serializable (its
+        // heterogeneous row map defeats Compact), so its stream serializer is registered for ring storage
+        // and Jet cross-vertex transport alike. The per-table change rings under srs.* are the SRS's only
+        // hot buffer: bounded, in memory, with no time expiry (headroom backpressure guards unread
+        // overwrites, not TTL) and no backups (single node).
+        config.getSerializationConfig().addSerializerConfig(new SerializerConfig()
+                .setTypeClass(SrsItem.class)
+                .setImplementation(new SrsItemSerializer()));
+        config.addRingBufferConfig(new RingbufferConfig("srs.*")
+                .setCapacity(SRS_RING_CAPACITY)
+                .setInMemoryFormat(InMemoryFormat.OBJECT)
+                .setTimeToLiveSeconds(0)
+                .setBackupCount(0));
         return config;
     }
 }

@@ -11,6 +11,9 @@
 boot.hazelcast-unavailable:
   message: "The embedded Hazelcast member could not start."
   solution: "Another process may already be using the member port on loopback; stop it or set a different port, then restart."
+capture.start-from-unparsable:
+  message: "Cannot start consuming from `{value}`; expected `earliest`, `latest`, or an ISO-8601 timestamp."
+  solution: "Set start_from to earliest, latest, or an ISO-8601 timestamp like 2026-07-11T00:00:00Z."
 cli.artifact-exists:
   message: "An artifact already exists at {path}."
   solution: "Choose a different id or --out, or pass --force to overwrite."

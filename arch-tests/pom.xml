@@ -139,6 +139,12 @@
       <version>${revision}</version>
       <scope>test</scope>
     </dependency>
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>srs</artifactId>
+      <version>${revision}</version>
+      <scope>test</scope>
+    </dependency>
 
     <!-- control ring: registered so the R5 rule scans the control classes -->
     <dependency>
