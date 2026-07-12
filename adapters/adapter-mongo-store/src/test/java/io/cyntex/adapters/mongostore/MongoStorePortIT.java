@@ -29,8 +29,9 @@ import static org.assertj.core.api.Assertions.assertThat;
  * Witnesses the aggregated store port against a real Mongo replica-set: one write through each of the
  * sub-stores lands in its own distinct, named storage area and reads back through that same sub-store,
  * so the artifact truth layer, the pipeline state store, the connection catalog, the discovered
- * source-schema store, the connector distribution registry and the latest connection-test result per
- * connection never share storage. Skipped automatically where Docker is absent, so a Docker-less build
+ * source-schema store, the connector distribution registry, the latest connection-test result per
+ * connection and the SRS meta store never share storage. Skipped automatically where Docker is absent,
+ * so a Docker-less build
  * stays green.
  */
 @Testcontainers(disabledWithoutDocker = true)
@@ -52,7 +53,7 @@ class MongoStorePortIT {
             """;
 
     @Test
-    void aggregatesTheSixSubStoresEachOnItsOwnStorage() {
+    void aggregatesTheSevenSubStoresEachOnItsOwnStorage() {
         // The Testcontainers Mongo speaks plaintext; TLS is opt-in, so a plaintext URL connects with
         // no flag. TLS wiring itself is covered by MongoConnectionTest.
         String uri = REPLICA_SET.getReplicaSetUrl();
@@ -61,7 +62,7 @@ class MongoStorePortIT {
             connection.verify();
             MongoStorePort port = new MongoStorePort(connection);
 
-            // one write through each of the six sub-stores
+            // one write through each of the seven sub-stores
             port.artifacts().save(PARSER.parse(ORDERS));
             port.state().create("orders_sync", "{\"phase\":\"snapshot\"}", Instant.parse("2026-07-06T00:00:00Z"));
             port.catalog().save(new ConnectionConfig("mysql-local", "mysql", Map.of("host", "localhost")));
@@ -75,6 +76,7 @@ class MongoStorePortIT {
                     ConnectionTestResult.Outcome.PASSED,
                     List.of(new ConnectionTestItem("Connection", ConnectionTestItem.Status.PASSED, null, null, null, null)),
                     1783939200000L));
+            port.meta().create("orders@mysql-1", "7d");
 
             // each reads back through its own sub-store
             assertThat(port.artifacts().get("orders")).isPresent();
@@ -83,6 +85,7 @@ class MongoStorePortIT {
             assertThat(port.schemas().get("mysql-local")).isPresent();
             assertThat(port.connectors().list()).hasSize(1);
             assertThat(port.connectionTestResults().find("mysql-local")).isPresent();
+            assertThat(port.meta().read("orders@mysql-1")).isPresent();
 
             // and each landed in its own distinct, named storage — no concern shares storage
             String databaseName = new ConnectionString(uri).getDatabase();
@@ -96,6 +99,7 @@ class MongoStorePortIT {
                         .isEqualTo(1);
                 assertThat(database.getCollection(MongoStorePort.CONNECTION_TEST_RESULTS).countDocuments())
                         .isEqualTo(1);
+                assertThat(database.getCollection(MongoStorePort.SRS_META).countDocuments()).isEqualTo(1);
             }
         }
     }

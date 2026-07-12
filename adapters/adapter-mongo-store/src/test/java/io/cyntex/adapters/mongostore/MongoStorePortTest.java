@@ -22,8 +22,11 @@ class MongoStorePortTest {
                 MongoStorePort.PIPELINE_STATE,
                 MongoStorePort.CONNECTIONS,
                 MongoStorePort.SOURCE_SCHEMAS,
-                MongoStorePort.CONNECTOR_ARTIFACTS))
+                MongoStorePort.CONNECTOR_ARTIFACTS,
+                MongoStorePort.CONNECTION_TEST_RESULTS,
+                MongoStorePort.SRS_META))
                 .doesNotHaveDuplicates()
-                .containsExactly("artifacts", "pipeline_state", "connections", "source_schemas", "connector_artifacts");
+                .containsExactly("artifacts", "pipeline_state", "connections", "source_schemas",
+                        "connector_artifacts", "connection_test_results", "srs_meta");
     }
 }

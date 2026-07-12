@@ -121,6 +121,13 @@
       <artifactId>runtime-probe</artifactId>
       <version>${revision}</version>
     </dependency>
+    <!-- The SRS capture runtime the assembly root makes the embedded member capable of: the change-ring
+         item serializer registered on the member and the meta-store user-context key bound onto it. -->
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>srs</artifactId>
+      <version>${revision}</version>
+    </dependency>
 
     <dependency>
       <groupId>org.junit.jupiter</groupId>

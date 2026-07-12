@@ -7,6 +7,7 @@ import io.cyntex.spi.store.CatalogStore;
 import io.cyntex.spi.store.ConnectionTestResultStore;
 import io.cyntex.spi.store.ConnectorRegistry;
 import io.cyntex.spi.store.SchemaStore;
+import io.cyntex.spi.store.SrsMetaStore;
 import io.cyntex.spi.store.StateStore;
 import io.cyntex.spi.store.StorePort;
 
@@ -15,10 +16,11 @@ import java.util.Objects;
 /**
  * The MongoDB implementation of the persistence port: it aggregates the sub-stores — the artifact
  * truth layer, the epoch-fencing pipeline state store, the connection catalog, the discovered
- * source-schema store, the connector distribution registry, and the latest connection-test result per
- * connection — each bound to its own collection (or GridFS bucket) on the verified connection's
- * database. This is the store bridge the assembly root wires into the platform under {@code --role=all};
- * the app sees only the driver-free {@link StorePort}, so no driver type escapes this module (rule R3).
+ * source-schema store, the connector distribution registry, the latest connection-test result per
+ * connection, and the SRS meta store (one durable coordination record per mining chain) — each bound
+ * to its own collection (or GridFS bucket) on the verified connection's database. This is the store
+ * bridge the assembly root wires into the platform under {@code --role=all}; the app sees only the
+ * driver-free {@link StorePort}, so no driver type escapes this module (rule R3).
  */
 public final class MongoStorePort implements StorePort {
 
@@ -34,6 +36,8 @@ public final class MongoStorePort implements StorePort {
     public static final String CONNECTOR_ARTIFACTS = "connector_artifacts";
     /** The collection holding the latest connection-test result per connection. */
     public static final String CONNECTION_TEST_RESULTS = "connection_test_results";
+    /** The collection holding one SRS coordination record per mining chain. */
+    public static final String SRS_META = "srs_meta";
 
     private final ArtifactStore artifacts;
     private final StateStore state;
@@ -41,6 +45,7 @@ public final class MongoStorePort implements StorePort {
     private final SchemaStore schemas;
     private final ConnectorRegistry connectors;
     private final ConnectionTestResultStore connectionTestResults;
+    private final SrsMetaStore meta;
 
     /**
      * Binds the sub-stores to their own collections on the verified connection's database. The
@@ -57,6 +62,7 @@ public final class MongoStorePort implements StorePort {
         this.connectors = new MongoConnectorRegistry(GridFSBuckets.create(database, CONNECTOR_ARTIFACTS));
         this.connectionTestResults =
                 new MongoConnectionTestResultStore(database.getCollection(CONNECTION_TEST_RESULTS));
+        this.meta = new MongoSrsMetaStore(database.getCollection(SRS_META));
     }
 
     @Override
@@ -87,5 +93,10 @@ public final class MongoStorePort implements StorePort {
     @Override
     public ConnectionTestResultStore connectionTestResults() {
         return connectionTestResults;
+    }
+
+    @Override
+    public SrsMetaStore meta() {
+        return meta;
     }
 }
