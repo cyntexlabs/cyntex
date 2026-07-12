@@ -118,11 +118,14 @@ class ControlPlaneAssemblyIT {
     }
 
     private int start() {
+        // Each test method runs against its own database on the shared class container, so the one-time
+        // first-admin bootstrap of one method never closes the bootstrap channel for the next.
+        String database = "assembly_" + Long.toUnsignedString(System.nanoTime(), 16);
         context = new SpringApplicationBuilder(AssemblyApp.class)
                 .properties(
                         "server.port=0",
                         "cyntex.store.mongo.enabled=true",
-                        "cyntex.store.mongo.uri=" + REPLICA_SET.getReplicaSetUrl(),
+                        "cyntex.store.mongo.uri=" + REPLICA_SET.getReplicaSetUrl(database),
                         // the container speaks plaintext; TLS is opt-in, so no flag is needed here
                         "cyntex.store.mongo.server-selection-timeout=5s")
                 .run();
