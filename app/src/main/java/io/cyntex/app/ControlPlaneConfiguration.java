@@ -12,6 +12,7 @@ import io.cyntex.control.core.LoginService;
 import io.cyntex.control.core.OperationRegistry;
 import io.cyntex.control.core.PasswordHasher;
 import io.cyntex.control.core.PipelineLifecycleService;
+import io.cyntex.control.core.PipelineObservationQueryService;
 import io.cyntex.control.core.TokenSecrets;
 import io.cyntex.control.core.TokenService;
 import io.cyntex.control.core.TokenSigner;
@@ -147,6 +148,11 @@ class ControlPlaneConfiguration {
     PipelineLifecycleService pipelineLifecycleService(
             ArtifactQueryService artifactQueryService, StorePort storePort, AuditGate auditGate) {
         return new PipelineLifecycleService(artifactQueryService, storePort.desired(), auditGate);
+    }
+
+    @Bean
+    PipelineObservationQueryService pipelineObservationQueryService(StorePort storePort) {
+        return new PipelineObservationQueryService(storePort.observations());
     }
 
     /**

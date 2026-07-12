@@ -419,4 +419,183 @@ class HttpControlPlaneClientTest {
         assertThat(new HttpControlPlaneClient().list(URI.create("http://127.0.0.1:" + closedPort), "tok", null))
                 .isInstanceOf(ListOutcome.Unreachable.class);
     }
+
+    // --- observation reads: GET /api/pipelines/{id}/{face} under /api, authenticated ---------------
+
+    @Test
+    void statusGetsTheStatusFaceWithTheBearerAndReturnsTheState() throws Exception {
+        AtomicReference<CapturedRequest> seen = new AtomicReference<>();
+        HttpServer server = apiServer("/api/pipelines/pl1/status", 200,
+                "{\"pipelineId\":\"pl1\",\"state\":\"RUNNING\"}", seen);
+        try {
+            StatusOutcome outcome = new HttpControlPlaneClient().status(baseOf(server), "tok-abc", "pl1");
+            assertThat(outcome).isEqualTo(new StatusOutcome.Found("pl1", "RUNNING"));
+            assertThat(seen.get().method()).isEqualTo("GET");
+            assertThat(seen.get().path()).isEqualTo("/api/pipelines/pl1/status");
+            assertThat(seen.get().authorization()).isEqualTo("Bearer tok-abc");
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void statusReturnsRejectedWithTheServerCodeAndMessageOnACodedError() throws Exception {
+        HttpServer server = apiServer("/api/pipelines/ghost/status", 404,
+                "{\"code\":\"monitor.no-observation\",\"params\":{\"pipeline\":\"ghost\"},"
+                        + "\"message\":\"No observation is available for pipeline ghost.\"}",
+                new AtomicReference<>());
+        try {
+            StatusOutcome outcome = new HttpControlPlaneClient().status(baseOf(server), "tok", "ghost");
+            assertThat(outcome).isEqualTo(new StatusOutcome.Rejected(
+                    "monitor.no-observation", "No observation is available for pipeline ghost."));
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void statusReturnsUnreachableWhenTheServerIsDownWithoutThrowing() throws Exception {
+        int closedPort;
+        try (ServerSocket socket = new ServerSocket(0)) {
+            closedPort = socket.getLocalPort();
+        }
+        assertThat(new HttpControlPlaneClient().status(URI.create("http://127.0.0.1:" + closedPort), "tok", "pl1"))
+                .isInstanceOf(StatusOutcome.Unreachable.class);
+    }
+
+    @Test
+    void metricsGetsTheMetricsFaceAndReturnsTheOpenMap() throws Exception {
+        AtomicReference<CapturedRequest> seen = new AtomicReference<>();
+        HttpServer server = apiServer("/api/pipelines/pl1/metrics", 200,
+                "{\"pipelineId\":\"pl1\",\"metrics\":{\"recordCount\":42,\"errorCount\":0}}", seen);
+        try {
+            MetricsOutcome outcome = new HttpControlPlaneClient().metrics(baseOf(server), "tok-abc", "pl1");
+            assertThat(outcome)
+                    .isEqualTo(new MetricsOutcome.Found("pl1", Map.of("recordCount", 42L, "errorCount", 0L)));
+            assertThat(seen.get().method()).isEqualTo("GET");
+            assertThat(seen.get().path()).isEqualTo("/api/pipelines/pl1/metrics");
+            assertThat(seen.get().authorization()).isEqualTo("Bearer tok-abc");
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void metricsReturnsAnEmptyMapWhenNoMetricSourceIsWiredYet() throws Exception {
+        // Honest-empty: no metric source is wired, so the open map is empty — never faked.
+        HttpServer server = apiServer("/api/pipelines/pl1/metrics", 200,
+                "{\"pipelineId\":\"pl1\",\"metrics\":{}}", new AtomicReference<>());
+        try {
+            MetricsOutcome outcome = new HttpControlPlaneClient().metrics(baseOf(server), "tok", "pl1");
+            assertThat(outcome).isEqualTo(new MetricsOutcome.Found("pl1", Map.of()));
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void metricsReturnsUnreachableWhenTheServerIsDownWithoutThrowing() throws Exception {
+        int closedPort;
+        try (ServerSocket socket = new ServerSocket(0)) {
+            closedPort = socket.getLocalPort();
+        }
+        assertThat(new HttpControlPlaneClient().metrics(URI.create("http://127.0.0.1:" + closedPort), "tok", "pl1"))
+                .isInstanceOf(MetricsOutcome.Unreachable.class);
+    }
+
+    @Test
+    void snapshotGetsThePerTableProgressIncludingAnUnavailableTotal() throws Exception {
+        AtomicReference<CapturedRequest> seen = new AtomicReference<>();
+        HttpServer server = apiServer("/api/pipelines/pl1/snapshot", 200,
+                "{\"pipelineId\":\"pl1\",\"snapshot\":{"
+                        + "\"orders\":{\"rowsDone\":10,\"rowsTotal\":100,\"donePct\":10},"
+                        + "\"events\":{\"rowsDone\":5,\"rowsTotal\":null,\"donePct\":null}}}", seen);
+        try {
+            SnapshotOutcome outcome = new HttpControlPlaneClient().snapshot(baseOf(server), "tok", "pl1");
+            assertThat(outcome).isEqualTo(new SnapshotOutcome.Found("pl1", Map.of(
+                    "orders", new RemoteTableSnapshot(10, 100L, 10),
+                    "events", new RemoteTableSnapshot(5, null, null))));
+            assertThat(seen.get().method()).isEqualTo("GET");
+            assertThat(seen.get().path()).isEqualTo("/api/pipelines/pl1/snapshot");
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void snapshotReturnsRejectedWithTheServerCodeAndMessageOnACodedError() throws Exception {
+        HttpServer server = apiServer("/api/pipelines/pl1/snapshot", 403,
+                "{\"code\":\"control.forbidden\",\"params\":{},\"message\":\"You lack the grade.\"}",
+                new AtomicReference<>());
+        try {
+            SnapshotOutcome outcome = new HttpControlPlaneClient().snapshot(baseOf(server), "tok", "pl1");
+            assertThat(outcome).isEqualTo(new SnapshotOutcome.Rejected("control.forbidden", "You lack the grade."));
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void snapshotReturnsUnreachableWhenTheServerIsDownWithoutThrowing() throws Exception {
+        int closedPort;
+        try (ServerSocket socket = new ServerSocket(0)) {
+            closedPort = socket.getLocalPort();
+        }
+        assertThat(new HttpControlPlaneClient().snapshot(URI.create("http://127.0.0.1:" + closedPort), "tok", "pl1"))
+                .isInstanceOf(SnapshotOutcome.Unreachable.class);
+    }
+
+    @Test
+    void snapshotReturnsAnEmptyMapOutsideASnapshotPhase() throws Exception {
+        // Honest-empty: outside a snapshot phase the per-table map is empty — a legitimate Found, not a miss.
+        HttpServer server = apiServer("/api/pipelines/pl1/snapshot", 200,
+                "{\"pipelineId\":\"pl1\",\"snapshot\":{}}", new AtomicReference<>());
+        try {
+            SnapshotOutcome outcome = new HttpControlPlaneClient().snapshot(baseOf(server), "tok", "pl1");
+            assertThat(outcome).isEqualTo(new SnapshotOutcome.Found("pl1", Map.of()));
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    // --- a well-formed 200 that is not a usable read reply resolves to unreachable (never a fabricated Found) ---
+
+    @Test
+    void statusTreatsAShapeWrong200AsUnreachableNotAFabricatedState() throws Exception {
+        // A 200 whose body is valid JSON but not a usable status reply (a reverse proxy / non-Cyntex answer)
+        // must never fabricate a state — it resolves to unreachable, upholding the never-throw seam.
+        HttpServer server = apiServer("/api/pipelines/pl1/status", 200, "{\"foo\":\"bar\"}", new AtomicReference<>());
+        try {
+            assertThat(new HttpControlPlaneClient().status(baseOf(server), "tok", "pl1"))
+                    .isInstanceOf(StatusOutcome.Unreachable.class);
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void metricsTreatsAShapeWrong200AsUnreachableNotAFabricatedMap() throws Exception {
+        // A 200 with a non-object metrics field is not a usable metrics reply; it must not be read as an
+        // empty (honest-empty is a real object), so it resolves to unreachable rather than a faked empty map.
+        HttpServer server = apiServer("/api/pipelines/pl1/metrics", 200,
+                "{\"pipelineId\":\"pl1\",\"metrics\":\"nope\"}", new AtomicReference<>());
+        try {
+            assertThat(new HttpControlPlaneClient().metrics(baseOf(server), "tok", "pl1"))
+                    .isInstanceOf(MetricsOutcome.Unreachable.class);
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void snapshotTreatsAShapeWrong200AsUnreachableNotAFabricatedMap() throws Exception {
+        HttpServer server = apiServer("/api/pipelines/pl1/snapshot", 200, "{\"pipelineId\":\"pl1\"}",
+                new AtomicReference<>());
+        try {
+            assertThat(new HttpControlPlaneClient().snapshot(baseOf(server), "tok", "pl1"))
+                    .isInstanceOf(SnapshotOutcome.Unreachable.class);
+        } finally {
+            server.stop(0);
+        }
+    }
 }

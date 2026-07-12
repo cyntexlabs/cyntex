@@ -189,6 +189,124 @@ final class HttpControlPlaneClient implements ControlPlaneClient {
         return null;
     }
 
+    @Override
+    public StatusOutcome status(URI baseUrl, String credential, String pipelineId) {
+        try {
+            HttpRequest request =
+                    authed(baseUrl, "/api/pipelines/" + pipelineId + "/status", credential).GET().build();
+            HttpResponse<String> response =
+                    client().send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            if (response.statusCode() == 200) {
+                StatusOutcome.Found found = statusFound(response.body());
+                // a 200 that is not a usable status reply (a proxy / non-Cyntex answer) is unreachable
+                return found == null ? new StatusOutcome.Unreachable() : found;
+            }
+            Rejection r = rejection(response.body(), "The server refused the read.");
+            return new StatusOutcome.Rejected(r.code(), r.message());
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return new StatusOutcome.Unreachable();
+        } catch (IOException | RuntimeException e) {
+            return new StatusOutcome.Unreachable();
+        }
+    }
+
+    @Override
+    public MetricsOutcome metrics(URI baseUrl, String credential, String pipelineId) {
+        try {
+            HttpRequest request =
+                    authed(baseUrl, "/api/pipelines/" + pipelineId + "/metrics", credential).GET().build();
+            HttpResponse<String> response =
+                    client().send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            if (response.statusCode() == 200) {
+                MetricsOutcome.Found found = metricsFound(response.body());
+                return found == null ? new MetricsOutcome.Unreachable() : found;
+            }
+            Rejection r = rejection(response.body(), "The server refused the read.");
+            return new MetricsOutcome.Rejected(r.code(), r.message());
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return new MetricsOutcome.Unreachable();
+        } catch (IOException | RuntimeException e) {
+            return new MetricsOutcome.Unreachable();
+        }
+    }
+
+    @Override
+    public SnapshotOutcome snapshot(URI baseUrl, String credential, String pipelineId) {
+        try {
+            HttpRequest request =
+                    authed(baseUrl, "/api/pipelines/" + pipelineId + "/snapshot", credential).GET().build();
+            HttpResponse<String> response =
+                    client().send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            if (response.statusCode() == 200) {
+                SnapshotOutcome.Found found = snapshotFound(response.body());
+                return found == null ? new SnapshotOutcome.Unreachable() : found;
+            }
+            Rejection r = rejection(response.body(), "The server refused the read.");
+            return new SnapshotOutcome.Rejected(r.code(), r.message());
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return new SnapshotOutcome.Unreachable();
+        } catch (IOException | RuntimeException e) {
+            return new SnapshotOutcome.Unreachable();
+        }
+    }
+
+    /** The status decoded from a 200 body, or {@code null} unless it carries a string id and a string state. */
+    private static StatusOutcome.Found statusFound(String body) {
+        if (JsonReader.parse(body) instanceof Map<?, ?> m
+                && m.get("pipelineId") instanceof String id
+                && m.get("state") instanceof String state) {
+            return new StatusOutcome.Found(id, state);
+        }
+        return null;
+    }
+
+    /**
+     * The metrics decoded from a 200 body's {@code metrics} object, or {@code null} unless the body carries a
+     * string id and a metrics object. Each numeric cell is read as a long; a non-numeric cell is dropped, so a
+     * malformed entry never crashes the read. An empty object is a legitimate empty (no source wired yet).
+     */
+    private static MetricsOutcome.Found metricsFound(String body) {
+        if (JsonReader.parse(body) instanceof Map<?, ?> m
+                && m.get("pipelineId") instanceof String id
+                && m.get("metrics") instanceof Map<?, ?> metrics) {
+            Map<String, Long> stats = new LinkedHashMap<>();
+            for (Map.Entry<?, ?> e : metrics.entrySet()) {
+                if (e.getKey() instanceof String name && e.getValue() instanceof Number value) {
+                    stats.put(name, value.longValue());
+                }
+            }
+            return new MetricsOutcome.Found(id, stats);
+        }
+        return null;
+    }
+
+    /**
+     * The per-table progress decoded from a 200 body's {@code snapshot} object, or {@code null} unless the body
+     * carries a string id and a snapshot object. A table needs a numeric {@code rowsDone}; {@code rowsTotal} and
+     * {@code donePct} are kept null when absent or null (unavailable), never faked. An empty object is a
+     * legitimate empty (outside a snapshot phase).
+     */
+    private static SnapshotOutcome.Found snapshotFound(String body) {
+        if (JsonReader.parse(body) instanceof Map<?, ?> m
+                && m.get("pipelineId") instanceof String id
+                && m.get("snapshot") instanceof Map<?, ?> snapshot) {
+            Map<String, RemoteTableSnapshot> tables = new LinkedHashMap<>();
+            for (Map.Entry<?, ?> e : snapshot.entrySet()) {
+                if (e.getKey() instanceof String table && e.getValue() instanceof Map<?, ?> t
+                        && t.get("rowsDone") instanceof Number rowsDone) {
+                    Long rowsTotal = t.get("rowsTotal") instanceof Number n ? n.longValue() : null;
+                    Integer donePct = t.get("donePct") instanceof Number n ? n.intValue() : null;
+                    tables.put(table, new RemoteTableSnapshot(rowsDone.longValue(), rowsTotal, donePct));
+                }
+            }
+            return new SnapshotOutcome.Found(id, tables);
+        }
+        return null;
+    }
+
     /** A request builder for {@code path} against a base, carrying the timeout and the bearer credential. */
     private static HttpRequest.Builder authed(URI baseUrl, String path, String credential) {
         return HttpRequest.newBuilder(endpoint(baseUrl, path))

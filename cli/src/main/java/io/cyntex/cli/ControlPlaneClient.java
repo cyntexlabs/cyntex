@@ -52,4 +52,27 @@ interface ControlPlaneClient {
      * failure. Never throws.
      */
     LifecycleOutcome lifecycle(URI baseUrl, String credential, String pipelineId, String verb);
+
+    /**
+     * Reads a pipeline's lifecycle state via {@code GET {baseUrl}/api/pipelines/{pipelineId}/status},
+     * authenticated by the bearer {@code credential}: the state on success, a coded rejection when the
+     * server refuses (a pipeline with no published observation is {@code monitor.no-observation}), or
+     * unreachable on any I/O failure. Never throws.
+     */
+    StatusOutcome status(URI baseUrl, String credential, String pipelineId);
+
+    /**
+     * Reads a pipeline's open map of run statistics via {@code GET {baseUrl}/api/pipelines/{pipelineId}/metrics},
+     * authenticated by the bearer {@code credential}: the metrics on success (empty when no source is wired
+     * yet), a coded rejection when the server refuses, or unreachable on any I/O failure. Never throws.
+     */
+    MetricsOutcome metrics(URI baseUrl, String credential, String pipelineId);
+
+    /**
+     * Reads a pipeline's per-table initial-load progress via
+     * {@code GET {baseUrl}/api/pipelines/{pipelineId}/snapshot}, authenticated by the bearer
+     * {@code credential}: the per-table progress on success (empty outside a snapshot phase), a coded
+     * rejection when the server refuses, or unreachable on any I/O failure. Never throws.
+     */
+    SnapshotOutcome snapshot(URI baseUrl, String credential, String pipelineId);
 }

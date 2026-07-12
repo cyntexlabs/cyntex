@@ -17,8 +17,9 @@ import java.util.TreeMap;
  * is chosen from the code: a client input error (a {@code dsl.*} validation failure or a
  * {@code control.malformed-request} refused at the boundary) is a 400; the authentication codes map to
  * 401 / 403 / 409; a lifecycle verb on an unknown pipeline is a 404 and a forbidden transition or stale
- * revision is a 409; any other coded error keeps the structured body but answers 500, since the surface has
- * no client-attributable mapping for it yet. That mapping is the seam later slices extend as more
+ * revision is a 409; a status / metrics / snapshot read of a pipeline that has published no observation is a
+ * 404; any other coded error keeps the structured body but answers 500, since the surface has no
+ * client-attributable mapping for it yet. That mapping is the seam later slices extend as more
  * client-attributable codes land.
  *
  * <p>Only {@link CyntexException} is handled here. A programmer error / invariant violation (a bare NPE or
@@ -48,7 +49,8 @@ class ApiExceptionHandler {
      * non-loopback caller is 403, and a bootstrap channel that has already closed is a 409 state conflict.
      * A client input error — a {@code dsl.*} validation failure or a {@code control.malformed-request} refused
      * at the boundary — is a 400. A lifecycle verb on a pipeline that was never applied is a 404; a transition
-     * the state machine forbids, or a start/resume at a stale revision, is a 409 state conflict. Any other coded
+     * the state machine forbids, or a start/resume at a stale revision, is a 409 state conflict. A status /
+     * metrics / snapshot read of a pipeline that has published no observation is likewise a 404. Any other coded
      * error is a server-side failure (500) that still carries the structured body — never a bare, uncoded crash.
      */
     static HttpStatus statusFor(CyntexErrorCode code) {
@@ -62,6 +64,9 @@ class ApiExceptionHandler {
             // from the current state, or a start/resume at a stale revision, is a 409 state conflict.
             case "lifecycle.unknown-pipeline" -> HttpStatus.NOT_FOUND;
             case "lifecycle.illegal-transition", "lifecycle.incompatible-revision" -> HttpStatus.CONFLICT;
+            // A status / metrics / snapshot read of a pipeline that has published no observation is a 404: the
+            // observation resource does not exist yet, like a get of an unknown artifact.
+            case "monitor.no-observation" -> HttpStatus.NOT_FOUND;
             default -> switch (domainOf(code.code())) {
                 case "dsl" -> HttpStatus.BAD_REQUEST;
                 default -> HttpStatus.INTERNAL_SERVER_ERROR;

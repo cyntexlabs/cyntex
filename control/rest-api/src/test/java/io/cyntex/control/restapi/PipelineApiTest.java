@@ -11,6 +11,7 @@ import io.cyntex.control.core.LoginService;
 import io.cyntex.control.core.OperationRegistry;
 import io.cyntex.control.core.PasswordHasher;
 import io.cyntex.control.core.PipelineLifecycleService;
+import io.cyntex.control.core.PipelineObservationQueryService;
 import io.cyntex.control.core.Scope;
 import io.cyntex.control.core.TokenSecrets;
 import io.cyntex.control.core.TokenService;
@@ -21,12 +22,14 @@ import io.cyntex.core.dsl.DslParser;
 import io.cyntex.core.lifecycle.DesiredState;
 import io.cyntex.core.lifecycle.PipelineState;
 import io.cyntex.core.model.Resource;
+import io.cyntex.core.lifecycle.Observation;
 import io.cyntex.core.model.canonical.CanonicalHash;
 import io.cyntex.core.model.canonical.CanonicalWriter;
 import io.cyntex.spi.store.ArtifactStore;
 import io.cyntex.spi.store.AuditRecord;
 import io.cyntex.spi.store.AuditStore;
 import io.cyntex.spi.store.DesiredStore;
+import io.cyntex.spi.store.ObservationStore;
 import io.cyntex.spi.store.TokenRecord;
 import io.cyntex.spi.store.TokenStore;
 import io.cyntex.spi.store.User;
@@ -244,7 +247,7 @@ class PipelineApiTest {
         });
     }
 
-    // ---- the endpoint table is a derivation of the registry: the four verbs project onto /api ----
+    // ---- the endpoint table is a derivation of the registry: the pipeline verbs project onto /api ----
 
     @Test
     void everyPipelineVerbProjectsARegisteredCliExposedVerb() {
@@ -267,9 +270,11 @@ class PipelineApiTest {
         });
 
         assertThat(projectedPipelineVerbs)
-                .as("all four lifecycle verbs project onto the authenticated /api surface")
+                .as("the full pipeline surface — four lifecycle writes and three observation reads — projects "
+                        + "onto the authenticated /api surface (this test boots the whole face bundle)")
                 .containsExactlyInAnyOrder(
-                        "pipeline.start", "pipeline.stop", "pipeline.pause", "pipeline.resume");
+                        "pipeline.start", "pipeline.stop", "pipeline.pause", "pipeline.resume",
+                        "pipeline.status", "pipeline.metrics", "pipeline.snapshot");
     }
 
     // ---- fixtures ----
@@ -419,6 +424,27 @@ class PipelineApiTest {
         PipelineLifecycleService pipelineLifecycleService(
                 ArtifactQueryService artifacts, DesiredStore desired, AuditGate auditGate) {
             return new PipelineLifecycleService(artifacts, desired, auditGate);
+        }
+
+        @Bean
+        ObservationStore observationStore() {
+            // The lifecycle write tests do not read observations; the empty store is enough to bring the read
+            // controller up so the full-face bundle boots. The read faces are proven in PipelineObservationApiTest.
+            return new ObservationStore() {
+                @Override
+                public void save(Observation observation) {
+                }
+
+                @Override
+                public Optional<Observation> read(String pipelineId) {
+                    return Optional.empty();
+                }
+            };
+        }
+
+        @Bean
+        PipelineObservationQueryService pipelineObservationQueryService(ObservationStore observations) {
+            return new PipelineObservationQueryService(observations);
         }
     }
 

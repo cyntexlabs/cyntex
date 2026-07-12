@@ -14,6 +14,7 @@ import java.nio.file.attribute.PosixFilePermissions;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -78,10 +79,16 @@ class ReplTest {
         GetOutcome getOutcome = new GetOutcome.Unreachable();
         ListOutcome listOutcome = new ListOutcome.Unreachable();
         LifecycleOutcome lifecycleOutcome = new LifecycleOutcome.Unreachable();
+        StatusOutcome statusOutcome = new StatusOutcome.Unreachable();
+        MetricsOutcome metricsOutcome = new MetricsOutcome.Unreachable();
+        SnapshotOutcome snapshotOutcome = new SnapshotOutcome.Unreachable();
         final List<String> applyCalls = new ArrayList<>();
         final List<String> getCalls = new ArrayList<>();
         final List<String> listCalls = new ArrayList<>();
         final List<String> lifecycleCalls = new ArrayList<>();
+        final List<String> statusCalls = new ArrayList<>();
+        final List<String> metricsCalls = new ArrayList<>();
+        final List<String> snapshotCalls = new ArrayList<>();
 
         FakeControlPlane(URI... healthy) {
             this.healthy = new LinkedHashSet<>(List.of(healthy));
@@ -127,6 +134,24 @@ class ReplTest {
         public LifecycleOutcome lifecycle(URI baseUrl, String credential, String pipelineId, String verb) {
             lifecycleCalls.add(credential + "@" + baseUrl + " " + verb + " " + pipelineId);
             return healthy.contains(baseUrl) ? lifecycleOutcome : new LifecycleOutcome.Unreachable();
+        }
+
+        @Override
+        public StatusOutcome status(URI baseUrl, String credential, String pipelineId) {
+            statusCalls.add(credential + "@" + baseUrl + "/" + pipelineId);
+            return healthy.contains(baseUrl) ? statusOutcome : new StatusOutcome.Unreachable();
+        }
+
+        @Override
+        public MetricsOutcome metrics(URI baseUrl, String credential, String pipelineId) {
+            metricsCalls.add(credential + "@" + baseUrl + "/" + pipelineId);
+            return healthy.contains(baseUrl) ? metricsOutcome : new MetricsOutcome.Unreachable();
+        }
+
+        @Override
+        public SnapshotOutcome snapshot(URI baseUrl, String credential, String pipelineId) {
+            snapshotCalls.add(credential + "@" + baseUrl + "/" + pipelineId);
+            return healthy.contains(baseUrl) ? snapshotOutcome : new SnapshotOutcome.Unreachable();
         }
     }
 
@@ -999,6 +1024,130 @@ class ReplTest {
         client.setHealthy(URI.create("http://n2:7900"));   // n1 goes down before the request
         int mark = h.sink().toString().length();
         h.repl().dispatch("start pl1");
+        String out = h.sink().toString().substring(mark);
+        assertThat(out).contains("reconnected to n2:7900");
+        assertThat(out).contains("pl1").contains("running");
+    }
+
+    // --- observation read verbs route online to GET /api/pipelines/{id}/{face} --------------------
+
+    @Test
+    void statusWhileAuthenticatedRoutesToTheServerAndPrintsTheState() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.statusOutcome = new StatusOutcome.Found("pl1", "RUNNING");
+        Harness h = onlineSession(Path.of("cyn-work"), client);
+        int mark = h.sink().toString().length();
+        assertThat(h.repl().dispatch("status pl1")).isTrue();
+        assertThat(h.sink().toString().substring(mark)).contains("pl1").contains("running");
+        assertThat(client.statusCalls).containsExactly("jwt-tok@http://node1:7900/pl1");
+    }
+
+    @Test
+    void metricsWhileAuthenticatedPrintsEachStat() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.metricsOutcome = new MetricsOutcome.Found("pl1", Map.of("recordCount", 42L, "errorCount", 0L));
+        Harness h = onlineSession(Path.of("cyn-work"), client);
+        int mark = h.sink().toString().length();
+        assertThat(h.repl().dispatch("metrics pl1")).isTrue();
+        String out = h.sink().toString().substring(mark);
+        assertThat(out).contains("recordCount").contains("42").contains("errorCount");
+        assertThat(client.metricsCalls).containsExactly("jwt-tok@http://node1:7900/pl1");
+    }
+
+    @Test
+    void metricsWithNoMetricsPrintsABenignNoMetricsLine() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.metricsOutcome = new MetricsOutcome.Found("pl1", Map.of());
+        Harness h = onlineSession(Path.of("cyn-work"), client);
+        int mark = h.sink().toString().length();
+        h.repl().dispatch("metrics pl1");
+        assertThat(h.sink().toString().substring(mark)).contains("no metrics");
+    }
+
+    @Test
+    void snapshotWhileAuthenticatedPrintsPerTableProgressAndAnUnavailableTotal() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.snapshotOutcome = new SnapshotOutcome.Found("pl1", Map.of(
+                "orders", new RemoteTableSnapshot(10, 100L, 10),
+                "events", new RemoteTableSnapshot(5, null, null)));
+        Harness h = onlineSession(Path.of("cyn-work"), client);
+        int mark = h.sink().toString().length();
+        h.repl().dispatch("snapshot pl1");
+        String out = h.sink().toString().substring(mark);
+        // a table with a total shows its percentage; a table with no total is honest partial data, not 0/100
+        assertThat(out).contains("orders").contains("10/100").contains("10%");
+        assertThat(out).contains("events").contains("5/?");
+    }
+
+    @Test
+    void snapshotWithNoTablesPrintsABenignNoSnapshotLine() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.snapshotOutcome = new SnapshotOutcome.Found("pl1", Map.of());
+        Harness h = onlineSession(Path.of("cyn-work"), client);
+        int mark = h.sink().toString().length();
+        h.repl().dispatch("snapshot pl1");
+        assertThat(h.sink().toString().substring(mark)).contains("no snapshot");
+    }
+
+    @Test
+    void aReadVerbRejectionShowsTheCodeAndMessageAndDoesNotFailOver() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.statusOutcome = new StatusOutcome.Rejected(
+                "monitor.no-observation", "No observation is available for pipeline pl1.");
+        Harness h = onlineSession(Path.of("cyn-work"), client);
+        int probesBefore = client.probed.size();
+        int mark = h.sink().toString().length();
+        h.repl().dispatch("status pl1");
+        String out = h.sink().toString().substring(mark);
+        assertThat(out).contains("monitor.no-observation").contains("No observation is available");
+        // a coded refusal is not a transport failure: it must not trigger failover
+        assertThat(out).doesNotContain("reconnected").doesNotContain("connection lost");
+        assertThat(client.probed.size()).isEqualTo(probesBefore);
+    }
+
+    @Test
+    void aReadVerbWithoutAPipelineIdIsABenignUsageLineAndCallsNothing() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        Harness h = onlineSession(Path.of("cyn-work"), client);
+        int mark = h.sink().toString().length();
+        assertThat(h.repl().dispatch("status")).isTrue();
+        assertThat(h.sink().toString().substring(mark)).contains("status").contains("missing operand");
+        assertThat(client.statusCalls).isEmpty();
+    }
+
+    @Test
+    void anUnauthenticatedReadVerbSaysRunLoginAndCallsNothing() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        Harness h = harness(Path.of("cyn-work"), client, new ScriptedPrompter("pw"));
+        h.repl().dispatch("connect node1:7900");   // connected, not authenticated
+        int mark = h.sink().toString().length();
+        assertThat(h.repl().dispatch("status pl1")).isTrue();
+        assertThat(h.sink().toString().substring(mark)).contains("login");
+        assertThat(client.statusCalls).isEmpty();
+    }
+
+    @Test
+    void readVerbsWhileOfflineFallThroughToTheConnectionRequiredNotice() {
+        // status is a connected verb offline; metrics and snapshot are too, so all three are discoverable
+        // rather than reported as unknown.
+        for (String verb : List.of("status pl1", "metrics pl1", "snapshot pl1")) {
+            Harness h = harness();
+            assertThat(h.repl().dispatch(verb)).isTrue();
+            assertThat(h.sink().toString()).contains("requires a connection");
+        }
+    }
+
+    @Test
+    void aReadVerbFailsOverToAHealthyMemberAndRetriesOnceOnTheNewNode() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://n1:7900"), URI.create("http://n2:7900"));
+        client.loginOutcome = new LoginOutcome.Success("jwt-tok");
+        client.statusOutcome = new StatusOutcome.Found("pl1", "RUNNING");
+        Harness h = harness(Path.of("cyn-work"), client, new ScriptedPrompter("pw"));
+        h.repl().dispatch("connect n1:7900,n2:7900");   // land n1, members [n1, n2]
+        h.repl().dispatch("login alice");
+        client.setHealthy(URI.create("http://n2:7900"));   // n1 goes down before the request
+        int mark = h.sink().toString().length();
+        h.repl().dispatch("status pl1");
         String out = h.sink().toString().substring(mark);
         assertThat(out).contains("reconnected to n2:7900");
         assertThat(out).contains("pl1").contains("running");

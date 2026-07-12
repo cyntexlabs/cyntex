@@ -20,6 +20,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.TreeMap;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
@@ -44,14 +45,16 @@ final class Repl {
     /**
      * Registry verbs a connected session routes to the server instead of the offline command table. The
      * artifact verbs ({@code apply} = {@code artifact.apply}, {@code get} = {@code artifact.get},
-     * {@code ls} = {@code artifact.list}) and the four pipeline lifecycle verbs ({@code start} / {@code stop}
-     * / {@code pause} / {@code resume} = {@code pipeline.*}). Offline they fall through to the table, where
-     * {@code apply} / {@code get} and the lifecycle verbs report "requires a connection" and {@code ls}
-     * browses the local workspace. {@code validate} is not here — it runs the full local stack in either
-     * state until a server validate endpoint exists.
+     * {@code ls} = {@code artifact.list}), the four pipeline lifecycle verbs ({@code start} / {@code stop}
+     * / {@code pause} / {@code resume} = {@code pipeline.*}), and the three observation read faces
+     * ({@code status} / {@code metrics} / {@code snapshot} = {@code pipeline.status} / {@code pipeline.metrics}
+     * / {@code pipeline.snapshot}). Offline they fall through to the table, where {@code apply} / {@code get},
+     * the lifecycle verbs and the read faces report "requires a connection" and {@code ls} browses the local
+     * workspace. {@code validate} is not here — it runs the full local stack in either state until a server
+     * validate endpoint exists.
      */
-    private static final List<String> ONLINE_VERBS =
-            List.of("apply", "get", "ls", "start", "stop", "pause", "resume");
+    private static final List<String> ONLINE_VERBS = List.of(
+            "apply", "get", "ls", "start", "stop", "pause", "resume", "status", "metrics", "snapshot");
 
     private final CommandLine commandLine;
 
@@ -190,6 +193,9 @@ final class Repl {
             case "get" -> getOnline(words);
             case "ls" -> lsOnline(words);
             case "start", "stop", "pause", "resume" -> lifecycleOnline(words);
+            case "status" -> statusOnline(words);
+            case "metrics" -> metricsOnline(words);
+            case "snapshot" -> snapshotOnline(words);
             default -> throw new IllegalStateException("not an online verb: " + words.get(0));
         }
     }
@@ -320,6 +326,113 @@ final class Repl {
             case ListOutcome.Rejected rejected -> renderRejection(rejected.code(), rejected.message());
             case ListOutcome.Unreachable ignored -> reportRequestFailed();
         }
+    }
+
+    /**
+     * {@code status <pipeline-id>} — reads the pipeline's lifecycle state from the server and prints
+     * {@code <id>  <state>}. A missing id is a benign usage line; a pipeline that has published no
+     * observation is a coded refusal ({@code monitor.no-observation}) rendering its code and message.
+     */
+    private void statusOnline(List<String> words) {
+        String id = readTargetId(words);
+        if (id == null) {
+            return;
+        }
+        StatusOutcome outcome = withFailover(() ->
+                controlPlane.status(session.landingNode(), session.credential(), id),
+                o -> o instanceof StatusOutcome.Unreachable);
+        PrintWriter out = commandLine.getOut();
+        switch (outcome) {
+            case StatusOutcome.Found found -> {
+                out.println(found.pipelineId() + "  " + found.state().toLowerCase(Locale.ROOT));
+                out.flush();
+            }
+            case StatusOutcome.Rejected rejected -> renderRejection(rejected.code(), rejected.message());
+            case StatusOutcome.Unreachable ignored -> reportRequestFailed();
+        }
+    }
+
+    /**
+     * {@code metrics <pipeline-id>} — reads the pipeline's open map of run statistics and prints one
+     * {@code <name>  <value>} line per metric in name order, or a benign {@code no metrics} line when none
+     * are wired yet (unavailable, never faked). A coded refusal renders its code and message.
+     */
+    private void metricsOnline(List<String> words) {
+        String id = readTargetId(words);
+        if (id == null) {
+            return;
+        }
+        MetricsOutcome outcome = withFailover(() ->
+                controlPlane.metrics(session.landingNode(), session.credential(), id),
+                o -> o instanceof MetricsOutcome.Unreachable);
+        PrintWriter out = commandLine.getOut();
+        switch (outcome) {
+            case MetricsOutcome.Found found -> {
+                if (found.metrics().isEmpty()) {
+                    out.println("no metrics");
+                } else {
+                    new TreeMap<>(found.metrics()).forEach((name, value) -> out.println(name + "  " + value));
+                }
+                out.flush();
+            }
+            case MetricsOutcome.Rejected rejected -> renderRejection(rejected.code(), rejected.message());
+            case MetricsOutcome.Unreachable ignored -> reportRequestFailed();
+        }
+    }
+
+    /**
+     * {@code snapshot <pipeline-id>} — reads the pipeline's per-table initial-load progress and prints one
+     * {@code <table>  <rowsDone>/<rowsTotal> (<pct>%)} line per table in name order (a table with no total
+     * shows {@code <rowsDone>/?} — honest partial data), or a benign {@code no snapshot} line when there is
+     * none. A coded refusal renders its code and message.
+     */
+    private void snapshotOnline(List<String> words) {
+        String id = readTargetId(words);
+        if (id == null) {
+            return;
+        }
+        SnapshotOutcome outcome = withFailover(() ->
+                controlPlane.snapshot(session.landingNode(), session.credential(), id),
+                o -> o instanceof SnapshotOutcome.Unreachable);
+        PrintWriter out = commandLine.getOut();
+        switch (outcome) {
+            case SnapshotOutcome.Found found -> {
+                if (found.tables().isEmpty()) {
+                    out.println("no snapshot");
+                } else {
+                    new TreeMap<>(found.tables()).forEach((table, progress) ->
+                            out.println(table + "  " + renderProgress(progress)));
+                }
+                out.flush();
+            }
+            case SnapshotOutcome.Rejected rejected -> renderRejection(rejected.code(), rejected.message());
+            case SnapshotOutcome.Unreachable ignored -> reportRequestFailed();
+        }
+    }
+
+    /**
+     * The pipeline id operand shared by the observation read verbs ({@code <verb> <pipeline-id>}), or
+     * {@code null} after a benign usage line when it is missing — a read names exactly one pipeline.
+     */
+    private String readTargetId(List<String> words) {
+        if (words.size() < 2 || words.get(1).isBlank()) {
+            PrintWriter err = commandLine.getErr();
+            err.println(words.get(0) + ": missing operand (usage: " + words.get(0) + " <pipeline-id>)");
+            err.flush();
+            return null;
+        }
+        return words.get(1);
+    }
+
+    /**
+     * One table's snapshot progress: {@code rowsDone/rowsTotal (donePct%)} when the total is known, or
+     * {@code rowsDone/?} when it is unavailable — honest partial data, never faked as a percentage.
+     */
+    private static String renderProgress(RemoteTableSnapshot progress) {
+        if (progress.rowsTotal() != null && progress.donePct() != null) {
+            return progress.rowsDone() + "/" + progress.rowsTotal() + " (" + progress.donePct() + "%)";
+        }
+        return progress.rowsDone() + "/?";
     }
 
     /**
