@@ -2,10 +2,12 @@ package io.cyntex.app;
 
 import io.cyntex.adapters.mongostore.MongoAuthStores;
 import io.cyntex.adapters.mongostore.MongoConnection;
+import io.cyntex.adapters.pdk.ConnectorArtifactRegistrar;
 import io.cyntex.adapters.pdk.ConnectorIntrospector;
 import io.cyntex.adapters.pdk.ConnectorProvisioner;
 import io.cyntex.adapters.pdk.PdkConnectionTester;
 import io.cyntex.adapters.pdk.RegistryConnectorProvisioner;
+import io.cyntex.adapters.pdk.SeedConnectorSweep;
 import io.cyntex.control.core.ApplyService;
 import io.cyntex.control.core.ArtifactQueryService;
 import io.cyntex.control.core.AuditGate;
@@ -176,6 +178,25 @@ class ControlPlaneConfiguration {
     ConnectorProvisioner connectorProvisioner(
             ConnectorRegistry registry, ConnectorIntrospector introspector, ConnectorPluginProperties properties) {
         return new RegistryConnectorProvisioner(registry, introspector, properties.getPluginsDir());
+    }
+
+    // The startup seed sweep: the release's connectors/ directory goes through the same
+    // register-if-absent path an explicit register uses, so restarts and concurrent nodes are harmless.
+
+    @Bean
+    ConnectorArtifactRegistrar connectorArtifactRegistrar(
+            ConnectorRegistry registry, ConnectorIntrospector introspector) {
+        return new ConnectorArtifactRegistrar(registry, introspector);
+    }
+
+    @Bean
+    SeedConnectorSweep seedConnectorSweep(ConnectorArtifactRegistrar registrar) {
+        return new SeedConnectorSweep(registrar);
+    }
+
+    @Bean
+    SeedSweepRunner seedSweepRunner(SeedConnectorSweep sweep, ConnectorPluginProperties properties) {
+        return new SeedSweepRunner(sweep, properties.getSeedDir());
     }
 
     @Bean

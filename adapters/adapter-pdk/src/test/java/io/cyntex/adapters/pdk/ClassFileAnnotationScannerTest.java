@@ -2,6 +2,8 @@ package io.cyntex.adapters.pdk;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -48,5 +50,21 @@ class ClassFileAnnotationScannerTest {
                         + "}");
 
         assertThat(ClassFileAnnotationScanner.bearsAnnotation(bytes, TAP_CONNECTOR)).isTrue();
+    }
+
+    @Test
+    void treatsATruncatedUtf8EntryDeclaringTheDescriptorLengthAsNoMatch() {
+        // A class file cut off right after a Utf8 length field that happens to equal the descriptor's
+        // length: the byte comparison must report no match, not run off the end of the buffer.
+        byte[] descriptor = TAP_CONNECTOR.getBytes(StandardCharsets.UTF_8);
+        ByteBuffer truncated = ByteBuffer.allocate(4 + 2 + 2 + 2 + 1 + 2);
+        truncated.putInt(0xCAFEBABE);
+        truncated.putShort((short) 0);  // minor version
+        truncated.putShort((short) 65); // major version
+        truncated.putShort((short) 2);  // pool count: one entry
+        truncated.put((byte) 1);        // Utf8 tag
+        truncated.putShort((short) descriptor.length); // declared length, but no bytes follow
+
+        assertThat(ClassFileAnnotationScanner.bearsAnnotation(truncated.array(), TAP_CONNECTOR)).isFalse();
     }
 }

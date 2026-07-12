@@ -4,6 +4,7 @@ import io.cyntex.core.common.CyntexException;
 import io.tapdata.pdk.apis.annotations.TapConnectorClass;
 
 import java.io.IOException;
+import java.lang.annotation.AnnotationFormatError;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
@@ -99,7 +100,14 @@ public final class ConnectorIntrospector {
                 // its bundled runtime) cannot be read: a load failure, not a missing connector.
                 throw new CyntexException(ConnectorError.LOAD_FAILED, Map.of("connector", artifact), e);
             }
-            TapConnectorClass annotation = type.getDeclaredAnnotation(TapConnectorClass.class);
+            TapConnectorClass annotation;
+            try {
+                annotation = type.getDeclaredAnnotation(TapConnectorClass.class);
+            } catch (AnnotationFormatError e) {
+                // The class loads but its annotation bytes are corrupt: an unreadable artifact, not a
+                // missing connector — and never an error that escapes to take the caller down.
+                throw new CyntexException(ConnectorError.LOAD_FAILED, Map.of("connector", artifact), e);
+            }
             if (annotation != null) { // the class truly bears it; a bare constant-pool match would not
                 confirmed.add(new Confirmed(candidate.jar(), candidate.className(), annotation.value(), type));
             }

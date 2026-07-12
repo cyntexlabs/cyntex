@@ -465,6 +465,85 @@ final class Synthetic {
                 Map.of("PDK-API-Version", "2.0.8"));
     }
 
+    // ---- registrable connectors (drive ConnectorArtifactRegistrar / SeedConnectorSweep) -----------
+
+    /**
+     * A registrable connector artifact: one annotated entry class and a spec shaped the way a real
+     * connector spec is — the connector id declared under {@code properties.id} — which is the
+     * identity registration files the artifact under.
+     */
+    static Path seedableOrdersConnector(Path dir) {
+        String src = SELF_SCAN_IMPORTS
+                + "@TapConnectorClass(\"orders-spec.json\")"
+                + "public class SeedOrders implements TapConnector {" + INERT_CONNECTOR_BODY + "}";
+        return SyntheticJar.compileToJar(dir, "synthetic.SeedOrders", src,
+                Map.of("orders-spec.json", "{\"properties\":{\"id\":\"orders\"}}"),
+                Map.of("PDK-API-Version", "1.3.5"));
+    }
+
+    /** A second registrable connector under a distinct id, whose manifest declares no PDK API version. */
+    static Path seedablePaymentsConnector(Path dir) {
+        String src = SELF_SCAN_IMPORTS
+                + "@TapConnectorClass(\"payments-spec.json\")"
+                + "public class SeedPayments implements TapConnector {" + INERT_CONNECTOR_BODY + "}";
+        return SyntheticJar.compileToJar(dir, "synthetic.SeedPayments", src,
+                Map.of("payments-spec.json", "{\"properties\":{\"id\":\"payments\"}}"),
+                Map.of());
+    }
+
+    /**
+     * A connector whose class scans and links but whose annotation attribute bytes are corrupt: the
+     * {@code RuntimeVisibleAnnotations} count is bumped past the bytes the attribute actually holds,
+     * so a reflective annotation read fails with an {@code AnnotationFormatError}.
+     */
+    static Path corruptAnnotationConnector(Path dir) {
+        String src = SELF_SCAN_IMPORTS
+                + "@TapConnectorClass(\"corrupt-spec.json\")"
+                + "public class CorruptAnnotation implements TapConnector {" + INERT_CONNECTOR_BODY + "}";
+        byte[] doctored = bumpAnnotationCount(SyntheticJar.classBytes(dir, "synthetic.CorruptAnnotation", src));
+        return SyntheticJar.jarWithEntries(dir,
+                Map.of("synthetic/CorruptAnnotation.class", doctored,
+                        "corrupt-spec.json", "{\"properties\":{\"id\":\"corrupt\"}}"
+                                .getBytes(java.nio.charset.StandardCharsets.UTF_8)),
+                Map.of("PDK-API-Version", "1.3.5"));
+    }
+
+    /**
+     * Bumps the count of a one-annotation {@code RuntimeVisibleAnnotations} attribute (attribute
+     * length 11, count 1 — the trailing {@code 00 00 00 0B 00 01} pattern) to two, leaving the
+     * attribute one whole annotation short. The constant pool and class structure stay valid; only
+     * reflective annotation parsing runs off the end. The last match is taken because class-level
+     * annotation attributes trail the class file.
+     */
+    private static byte[] bumpAnnotationCount(byte[] classBytes) {
+        byte[] pattern = {0x00, 0x00, 0x00, 0x0B, 0x00, 0x01};
+        for (int i = classBytes.length - pattern.length; i >= 0; i--) {
+            boolean match = true;
+            for (int j = 0; j < pattern.length; j++) {
+                if (classBytes[i + j] != pattern[j]) {
+                    match = false;
+                    break;
+                }
+            }
+            if (match) {
+                byte[] doctored = classBytes.clone();
+                doctored[i + 5] = 0x02;
+                return doctored;
+            }
+        }
+        throw new IllegalStateException("no one-annotation RuntimeVisibleAnnotations attribute found to corrupt");
+    }
+
+    /** An annotated connector whose spec resource is not JSON at all — no identity can come off it. */
+    static Path unparsableSpecConnector(Path dir) {
+        String src = SELF_SCAN_IMPORTS
+                + "@TapConnectorClass(\"broken-spec.json\")"
+                + "public class BrokenSpec implements TapConnector {" + INERT_CONNECTOR_BODY + "}";
+        return SyntheticJar.compileToJar(dir, "synthetic.BrokenSpec", src,
+                Map.of("broken-spec.json", "{not json"),
+                Map.of("PDK-API-Version", "1.3.5"));
+    }
+
     /** An annotated connector that subclasses an also-annotated base — the variant is the real entry. */
     static Path baseAndVariantConnector(Path dir) {
         String src = SELF_SCAN_IMPORTS

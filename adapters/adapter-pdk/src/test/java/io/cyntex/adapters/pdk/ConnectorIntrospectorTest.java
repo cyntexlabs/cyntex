@@ -62,6 +62,18 @@ class ConnectorIntrospectorTest {
     }
 
     @Test
+    void refusesAConnectorWhoseAnnotationBytesAreCorrupt(@TempDir Path dir) {
+        // The class scans and links, but its annotation attribute bytes are corrupt, so reading the
+        // annotation reflectively fails. That is a defective artifact to refuse with a code — never an
+        // error that escapes and takes the caller down.
+        Path jar = Synthetic.corruptAnnotationConnector(dir);
+
+        assertThatThrownBy(() -> new ConnectorIntrospector().introspect(List.of(jar)))
+                .isInstanceOf(CyntexException.class)
+                .satisfies(e -> assertThat(((CyntexException) e).code()).isEqualTo(ConnectorError.LOAD_FAILED));
+    }
+
+    @Test
     void keepsTheMostDerivedWhenAConnectorSubclassesAnAnnotatedBase(@TempDir Path dir) {
         Path jar = Synthetic.baseAndVariantConnector(dir);
 

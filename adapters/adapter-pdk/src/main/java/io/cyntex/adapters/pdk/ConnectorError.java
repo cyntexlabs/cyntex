@@ -73,6 +73,14 @@ public enum ConnectorError implements CyntexErrorCode {
     SPEC_NOT_FOUND("connector.spec-not-found", Set.of("artifact", "spec")),
 
     /**
+     * A connector's spec resource does not yield the connector's identity — it is not valid JSON, or
+     * it declares no {@code properties.id}. Registration is keyed by that id, so the artifact is
+     * refused. {@code artifact} names the artifact; {@code spec} is the spec resource path;
+     * {@code detail} says what was wrong with it.
+     */
+    SPEC_INVALID("connector.spec-invalid", Set.of("artifact", "spec", "detail")),
+
+    /**
      * The connector requires a newer PDK API level than the bridge provides, so it is refused rather
      * than silently downgraded. {@code connector} is the connector id; {@code required} is the level
      * it asked for; {@code provided} is the level the bridge provides.

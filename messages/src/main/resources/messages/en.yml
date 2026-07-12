@@ -122,6 +122,9 @@ connector.ambiguous-connector-class:
 connector.spec-not-found:
   message: "Connector artifact '{artifact}' names spec '{spec}' but the jar does not contain it."
   solution: "Check the connector build packages the spec resource named by its @TapConnectorClass annotation."
+connector.spec-invalid:
+  message: "Connector artifact '{artifact}' spec '{spec}' does not identify the connector: {detail}."
+  solution: "Ensure the spec resource is valid JSON and declares the connector id under properties.id."
 connector.api-level-incompatible:
   message: "Connector '{connector}' requires PDK API level {required} but this engine provides level {provided}."
   solution: "Use a connector build compatible with API level {provided}, or upgrade the engine."

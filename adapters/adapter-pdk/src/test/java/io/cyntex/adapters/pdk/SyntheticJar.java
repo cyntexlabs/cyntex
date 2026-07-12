@@ -61,6 +61,23 @@ final class SyntheticJar {
         return jar;
     }
 
+    /** Packages the given raw entry bytes into a fresh jar with the given manifest main attributes. */
+    static Path jarWithEntries(Path workDir, Map<String, byte[]> entries, Map<String, String> manifestAttributes) {
+        Path work = freshWorkDir(workDir);
+        Path jar = work.resolve("connector.jar");
+        try (OutputStream os = Files.newOutputStream(jar);
+             JarOutputStream jos = new JarOutputStream(os, manifest(manifestAttributes))) {
+            for (Map.Entry<String, byte[]> entry : entries.entrySet()) {
+                jos.putNextEntry(new JarEntry(entry.getKey()));
+                jos.write(entry.getValue());
+                jos.closeEntry();
+            }
+        } catch (IOException e) {
+            throw new UncheckedIOException("building synthetic jar from raw entries", e);
+        }
+        return jar;
+    }
+
     /** Compiles {@code fqcn} from {@code source} and returns the raw bytes of its {@code .class} file. */
     static byte[] classBytes(Path workDir, String fqcn, String source) {
         Path classesDir = compile(freshWorkDir(workDir), fqcn, source);

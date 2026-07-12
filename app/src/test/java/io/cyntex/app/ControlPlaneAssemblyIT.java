@@ -4,6 +4,7 @@ import io.cyntex.core.dsl.DslParser;
 import io.cyntex.core.model.canonical.CanonicalWriter;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.springframework.boot.SpringBootConfiguration;
 import org.springframework.boot.autoconfigure.EnableAutoConfiguration;
 import org.springframework.boot.builder.SpringApplicationBuilder;
@@ -19,6 +20,10 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -117,17 +122,32 @@ class ControlPlaneAssemblyIT {
         assertThat(((Map<?, ?>) body.get("params")).get("connector")).isEqualTo("never_registered");
     }
 
-    private int start() {
+    @Test
+    void aDefectiveSeedArtifactNeverBricksTheBoot(@TempDir Path seedDir) throws IOException {
+        // A garbage jar in the swept seed directory: the startup sweep contains the failure as a
+        // per-artifact warning and the node still comes up serving.
+        Files.write(seedDir.resolve("broken.jar"), new byte[] {0x13, 0x37});
+
+        int port = start("cyntex.connectors.seed-dir=" + seedDir);
+        RestClient client = RestClient.create("http://localhost:" + port);
+
+        String health = client.get().uri("/healthz").retrieve().body(String.class);
+        assertThat(health).isEqualTo("ok");
+    }
+
+    private int start(String... extraProperties) {
         // Each test method runs against its own database on the shared class container, so the one-time
         // first-admin bootstrap of one method never closes the bootstrap channel for the next.
         String database = "assembly_" + Long.toUnsignedString(System.nanoTime(), 16);
+        List<String> properties = new ArrayList<>(List.of(
+                "server.port=0",
+                "cyntex.store.mongo.enabled=true",
+                "cyntex.store.mongo.uri=" + REPLICA_SET.getReplicaSetUrl(database),
+                // the container speaks plaintext; TLS is opt-in, so no flag is needed here
+                "cyntex.store.mongo.server-selection-timeout=5s"));
+        properties.addAll(List.of(extraProperties));
         context = new SpringApplicationBuilder(AssemblyApp.class)
-                .properties(
-                        "server.port=0",
-                        "cyntex.store.mongo.enabled=true",
-                        "cyntex.store.mongo.uri=" + REPLICA_SET.getReplicaSetUrl(database),
-                        // the container speaks plaintext; TLS is opt-in, so no flag is needed here
-                        "cyntex.store.mongo.server-selection-timeout=5s")
+                .properties(properties.toArray(String[]::new))
                 .run();
         return ((WebServerApplicationContext) context).getWebServer().getPort();
     }

@@ -80,7 +80,8 @@ final class ClassFileAnnotationScanner {
                 }
             }
             return false;
-        } catch (BufferUnderflowException | IllegalArgumentException truncated) {
+        } catch (BufferUnderflowException | IndexOutOfBoundsException | IllegalArgumentException truncated) {
+            // IndexOutOfBounds covers the absolute reads in equalsAt on an entry the file cuts short.
             return false;
         }
     }
