@@ -56,6 +56,18 @@ public interface SrsMetaStore {
     void advanceConsumerReadSeq(String miningChainId, String pipelineId, String table, long lastReadSeq);
 
     /**
+     * Advances one consumer pipeline's durable sink-acked source position on the chain — a scoped set of
+     * that consumer's {@code sinkAckedSrcpos} alone. It touches only the sink-ack, so a sink advancing here
+     * never clobbers the {@code perTableSeq} read cursor the pipeline's reader writes to the same consumer
+     * record: the sink-ack and the read cursor are independent writers of one consumer, of different
+     * lifetime. It creates the consumer entry when the pipeline has none yet, so a sink may ack before the
+     * reader first publishes a cursor. The caller advances a monotonically non-decreasing position (the
+     * sink's contiguous acked prefix); this store persists the value the caller resolved. A mutate on an
+     * unseeded chain is a caller ordering error.
+     */
+    void advanceSinkAckedSrcpos(String miningChainId, String pipelineId, String srcpos);
+
+    /**
      * Sets the chain's cdc start position — the opaque position the cdc tail starts from, recorded at
      * the snapshot-to-cdc seam. A mutate on an unseeded chain is a caller ordering error.
      */
