@@ -9,6 +9,13 @@ package io.cyntex.spi.capture;
  * row and schema mutations (ops {@code i} / {@code u} / {@code d} / {@code ddl}). Where a stream
  * resumes from is not part of these signatures — resume position is the caller's concern, not the
  * port's.
+ *
+ * <p>How the two reads compose is driven by the pipeline read mode, read as a {@link CapturePlan}:
+ * {@code snapshot_and_cdc} runs {@link #snapshot} then {@link #cdc}, {@code cdc_only} runs {@link #cdc}
+ * alone, {@code snapshot_only} runs {@link #snapshot} alone. The two {@link CapturePhase}s classify
+ * each yielded event by its op. At the snapshot → cdc hand-off the caller records the
+ * {@link SourcePosition} the cdc phase resumes from and persists it (the resume position lives with the
+ * caller, as above); the two phases are otherwise read through the same envelope stream.
  */
 public interface CapturePort {
 

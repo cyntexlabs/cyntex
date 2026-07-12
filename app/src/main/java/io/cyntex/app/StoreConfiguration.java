@@ -3,6 +3,7 @@ package io.cyntex.app;
 import io.cyntex.adapters.mongostore.MongoConnection;
 import io.cyntex.adapters.mongostore.MongoConnectionSettings;
 import io.cyntex.adapters.mongostore.MongoStorePort;
+import io.cyntex.spi.store.SrsMetaStore;
 import io.cyntex.spi.store.StorePort;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -43,5 +44,16 @@ class StoreConfiguration {
     @ConditionalOnProperty(prefix = "cyntex.store.mongo", name = "enabled", matchIfMissing = true)
     StorePort storePort(MongoConnection storeConnection) {
         return new MongoStorePort(storeConnection);
+    }
+
+    /**
+     * The SRS meta store the assembly root binds onto the embedded Hazelcast member, so the capture
+     * runtime's read-cursor publisher can resolve it member-side. It is the store's own meta facet, gated
+     * with the store: a run without a store exposes none and the publisher no-ops.
+     */
+    @Bean
+    @ConditionalOnProperty(prefix = "cyntex.store.mongo", name = "enabled", matchIfMissing = true)
+    SrsMetaStore srsMetaStore(StorePort storePort) {
+        return storePort.meta();
     }
 }

@@ -36,7 +36,10 @@ public enum Domain {
     IO,
     // control layer: the resource-type-agnostic verb layer (apply / audit / auth); diagnosable
     // failures such as an operation refused because its mandatory audit record could not be written
-    CONTROL;
+    CONTROL,
+    // runtime data plane: reading a source's snapshot / cdc into the replay store — diagnosable
+    // capture-configuration faults such as an unparsable consumption start point (runtime)
+    CAPTURE;
 
     /** The lower-case identifier used as the {@code <domain>} segment of a canonical code. */
     public String id() {
