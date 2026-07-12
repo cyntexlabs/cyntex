@@ -96,4 +96,53 @@ class EnvelopeTest {
         assertThat(a).isEqualTo(b);
         assertThat(a).hasSameHashCodeAs(b);
     }
+
+    @Test
+    void factoriesLeaveTheSourcePositionNull() {
+        assertThat(Envelope.insert(1L, "s", row("id", 1), null).srcPos()).isNull();
+        assertThat(Envelope.update(1L, "s", row("v", "old"), row("v", "new"), null).srcPos()).isNull();
+        assertThat(Envelope.delete(1L, "s", row("id", 7), null).srcPos()).isNull();
+        assertThat(Envelope.read(1L, "s", row("id", 7), null).srcPos()).isNull();
+        assertThat(Envelope.ddl(1L, "s", row("added_column", "email")).srcPos()).isNull();
+    }
+
+    @Test
+    void carriesTheSourcePositionAsTheSeventhComponent() {
+        Envelope e = new Envelope(Op.INSERT, 1L, "s", null, row("id", 1), null, "gtid:aaa:99");
+        assertThat(e.srcPos()).isEqualTo("gtid:aaa:99");
+    }
+
+    @Test
+    void withSrcPosSetsThePositionAndKeepsEverythingElse() {
+        Envelope e = Envelope.insert(42L, "orders", row("id", 1), null);
+        Envelope stamped = e.withSrcPos("p1");
+        assertThat(stamped.srcPos()).isEqualTo("p1");
+        assertThat(stamped.op()).isEqualTo(Op.INSERT);
+        assertThat(stamped.ts()).isEqualTo(42L);
+        assertThat(stamped.src()).isEqualTo("orders");
+        assertThat(stamped.after()).containsEntry("id", 1);
+        assertThat(e.srcPos()).isNull(); // the original is unchanged
+    }
+
+    @Test
+    void withSrcPosReplacesAnExistingPosition() {
+        Envelope e = new Envelope(Op.INSERT, 1L, "s", null, row("id", 1), null, "p1");
+        assertThat(e.withSrcPos("p2").srcPos()).isEqualTo("p2");
+    }
+
+    @Test
+    void withSrcPosAcceptsNullToLeaveNoPosition() {
+        Envelope e = new Envelope(Op.INSERT, 1L, "s", null, row("id", 1), null, "p1");
+        assertThat(e.withSrcPos(null).srcPos()).isNull();
+    }
+
+    @Test
+    void sourcePositionParticipatesInValueEquality() {
+        Envelope a = new Envelope(Op.INSERT, 5L, "s", null, row("id", 1), null, "p1");
+        Envelope b = new Envelope(Op.INSERT, 5L, "s", null, row("id", 1), null, "p1");
+        Envelope other = new Envelope(Op.INSERT, 5L, "s", null, row("id", 1), null, "p2");
+        assertThat(a).isEqualTo(b);
+        assertThat(a).hasSameHashCodeAs(b);
+        assertThat(a).isNotEqualTo(other);
+    }
 }

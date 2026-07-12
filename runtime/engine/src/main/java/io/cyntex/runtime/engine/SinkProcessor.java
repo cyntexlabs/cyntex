@@ -10,7 +10,11 @@ import io.cyntex.core.event.Envelope;
 import io.cyntex.spi.sink.SinkWriter;
 import io.cyntex.spi.sink.WriteResult;
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
@@ -46,12 +50,23 @@ public final class SinkProcessor extends AbstractProcessor {
     private static final int DEFAULT_MAX_BATCH_SIZE = 1024;
 
     private final SinkWriter writer;
+    private final SinkAck sinkAck;
+    private final Comparator<String> positionOrder;
     private final int maxInFlight;
     private final int maxBatchSize;
-    private final List<CompletableFuture<WriteResult>> inFlight = new ArrayList<>();
+    private final List<InFlightBatch> inFlight = new ArrayList<>();
+    // Per chain (its src stream): the highest position that has settled but is not yet proven closed. The
+    // watermark lags this by one position, so a fan-out's every output is in before the position is acked.
+    private final Map<String, String> openPosByChain = new HashMap<>();
     private boolean closed;
 
+    /** No sink-ack watermark: the order-independent or append-only path (any in-flight bound is allowed). */
     public SinkProcessor(SinkWriter writer, int maxInFlight, int maxBatchSize) {
+        this(writer, null, null, maxInFlight, maxBatchSize);
+    }
+
+    public SinkProcessor(SinkWriter writer, SinkAck sinkAck, Comparator<String> positionOrder,
+            int maxInFlight, int maxBatchSize) {
         this.writer = Objects.requireNonNull(writer, "writer");
         if (maxInFlight < 1) {
             throw new IllegalArgumentException("maxInFlight must be at least 1: " + maxInFlight);
@@ -59,6 +74,16 @@ public final class SinkProcessor extends AbstractProcessor {
         if (maxBatchSize < 1) {
             throw new IllegalArgumentException("maxBatchSize must be at least 1: " + maxBatchSize);
         }
+        if (sinkAck != null) {
+            Objects.requireNonNull(positionOrder, "positionOrder");
+            if (maxInFlight != 1) {
+                throw new IllegalArgumentException(
+                        "a sink-ack watermark requires maxInFlight == 1 so batches settle in order; got "
+                                + maxInFlight);
+            }
+        }
+        this.sinkAck = sinkAck;
+        this.positionOrder = positionOrder;
         this.maxInFlight = maxInFlight;
         this.maxBatchSize = maxBatchSize;
     }
@@ -83,7 +108,8 @@ public final class SinkProcessor extends AbstractProcessor {
             while (batch.size() < maxBatchSize && !inbox.isEmpty()) {
                 batch.add((Envelope) inbox.poll());
             }
-            inFlight.add(writer.write(batch).toCompletableFuture());
+            inFlight.add(new InFlightBatch(
+                    writer.write(batch).toCompletableFuture(), lastPositionByChain(batch)));
         }
         // A saturated in-flight set leaves the rest of the inbox unread; Jet backpressures upstream
         // until reapSettled frees a slot on a later call.
@@ -106,12 +132,54 @@ public final class SinkProcessor extends AbstractProcessor {
 
     /** Removes every settled write, surfacing the cause of a failed one so it fails the job. */
     private void reapSettled() {
-        inFlight.removeIf(future -> {
-            if (!future.isDone()) {
+        inFlight.removeIf(batch -> {
+            if (!batch.future().isDone()) {
                 return false;
             }
-            settle(future);
+            settle(batch.future()); // throws on a failed write, before any watermark advances
+            advanceWatermarks(batch);
             return true;
+        });
+    }
+
+    /**
+     * The last source position each chain contributes to this batch, empty when no watermark is tracked.
+     * Under the single-in-flight, order-preserving contract a chain's last event in the batch is its
+     * highest position there; an event with no position (a snapshot or synthetic event) does not take part.
+     */
+    private Map<String, String> lastPositionByChain(List<Envelope> batch) {
+        if (sinkAck == null) {
+            return Map.of();
+        }
+        Map<String, String> last = new LinkedHashMap<>();
+        for (Envelope event : batch) {
+            if (event.srcPos() != null) {
+                last.put(event.src(), event.srcPos());
+            }
+        }
+        return last;
+    }
+
+    /**
+     * Advances each chain's watermark to its contiguous acked prefix. A settled batch proves every event
+     * at or below its positions is durably written, but a position stays open until a strictly higher one
+     * settles — a fan-out could still place more of it in a later batch. When a higher position closes the
+     * open one, the old open position is a complete acked prefix and is acked exactly once, monotonically.
+     */
+    private void advanceWatermarks(InFlightBatch batch) {
+        if (sinkAck == null) {
+            return;
+        }
+        batch.lastPositionByChain().forEach((chain, batchLast) -> {
+            String open = openPosByChain.get(chain);
+            if (open == null) {
+                openPosByChain.put(chain, batchLast);
+            } else if (positionOrder.compare(batchLast, open) > 0) {
+                sinkAck.advance(chain, open);
+                openPosByChain.put(chain, batchLast);
+            }
+            // batchLast <= open: the same open position (a fan-out continuation), or an out-of-order
+            // arrival if a precondition were violated - either way do not advance and do not regress.
         });
     }
 
@@ -133,5 +201,10 @@ public final class SinkProcessor extends AbstractProcessor {
             }
             throw wrapper;
         }
+    }
+
+    /** One outstanding write and the last source position each chain contributed to its batch. */
+    private record InFlightBatch(
+            CompletableFuture<WriteResult> future, Map<String, String> lastPositionByChain) {
     }
 }

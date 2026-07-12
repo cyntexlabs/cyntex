@@ -136,6 +136,31 @@ class PipelineDagBuilderTest {
     }
 
     @Test
+    void pins_stateless_and_union_vertices_to_a_single_instance_for_ordered_delivery() throws Exception {
+        // A sink acks an ordered position stream, so every vertex on the path must be single-instance
+        // across the whole cluster: a parallelism-greater-than-one, or one-instance-per-member, transform
+        // or union would re-lane events and break that order.
+        PipelineResource pipeline = new PipelineResource(
+                "p", null,
+                List.of("a_src", "b_src"),
+                List.of(
+                        union("u", FromRef.literal("a_src"), FromRef.literal("b_src")),
+                        map("m", FromRef.literal("u"))),
+                null,
+                serve(FromRef.literal("m"), sync("sync_1", "orders_dest")),
+                null, null);
+
+        DAG dag = PipelineDagBuilder.build(pipeline, bindings(Map.of(
+                FromRef.literal("a_src"), List.of("a_src"),
+                FromRef.literal("b_src"), List.of("b_src"),
+                FromRef.literal("u"), List.of("u"),
+                FromRef.literal("m"), List.of("m"))));
+
+        assertThat(TotalParallelismOne.pins(dag.getVertex("u").getMetaSupplier(), 3)).isTrue();
+        assertThat(TotalParallelismOne.pins(dag.getVertex("m").getMetaSupplier(), 3)).isTrue();
+    }
+
+    @Test
     void multi_ref_stateless_step_merges_all_upstreams_by_fan_in() {
         PipelineResource pipeline = new PipelineResource(
                 "p", null,

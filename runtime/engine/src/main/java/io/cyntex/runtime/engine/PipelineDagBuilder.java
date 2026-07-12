@@ -3,6 +3,8 @@ package io.cyntex.runtime.engine;
 import com.hazelcast.function.FunctionEx;
 import com.hazelcast.jet.core.DAG;
 import com.hazelcast.jet.core.Edge;
+import com.hazelcast.jet.core.ProcessorMetaSupplier;
+import com.hazelcast.jet.core.ProcessorSupplier;
 import com.hazelcast.jet.core.Vertex;
 import com.hazelcast.jet.core.processor.Processors;
 import io.cyntex.core.model.FromClause;
@@ -89,7 +91,10 @@ public final class PipelineDagBuilder {
                             + "; the linear DAG builder does not carry it");
         }
         if (body instanceof TransformBody.Union) {
-            return dag.newVertex(step.id(), Processors.mapP(FunctionEx.identity()));
+            // Pinned to total parallelism one, like the transform adapter and the sink: an ordered
+            // position stream a sink acks must not be re-laned by a parallel passthrough merge.
+            return dag.newVertex(step.id(), ProcessorMetaSupplier.forceTotalParallelismOne(
+                    ProcessorSupplier.of(Processors.mapP(FunctionEx.identity()))));
         }
         return dag.newVertex(step.id(),
                 TransformProcessor.metaSupplier(bindings.transformPorts().apply(step)));
