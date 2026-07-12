@@ -44,6 +44,13 @@ public final class ControlOperations {
     public static final Operation PIPELINE_PAUSE = new Operation("pipeline.pause", Scope.WRITE, true, null, CLI_POC);
     public static final Operation PIPELINE_RESUME = new Operation("pipeline.resume", Scope.WRITE, true, null, CLI_POC);
 
+    // pipeline observation reads: the three store-backed read faces over the per-pipeline observation doc
+    // (status = lifecycle state, metrics = open stat map, snapshot = per-table load progress). Each reads
+    // the latest published projection and mutates nothing, so all three are read-scoped and unaudited.
+    public static final Operation PIPELINE_STATUS = new Operation("pipeline.status", Scope.READ, false, null, CLI_POC);
+    public static final Operation PIPELINE_METRICS = new Operation("pipeline.metrics", Scope.READ, false, null, CLI_POC);
+    public static final Operation PIPELINE_SNAPSHOT = new Operation("pipeline.snapshot", Scope.READ, false, null, CLI_POC);
+
     // security domain: all admin-scoped. The mutating ones are audited; the list queries are not.
     public static final Operation USER_CREATE = new Operation("user.create", Scope.ADMIN, true, null, CLI_POC);
     public static final Operation USER_PASSWD = new Operation("user.passwd", Scope.ADMIN, true, null, CLI_POC);
@@ -62,6 +69,9 @@ public final class ControlOperations {
             PIPELINE_STOP,
             PIPELINE_PAUSE,
             PIPELINE_RESUME,
+            PIPELINE_STATUS,
+            PIPELINE_METRICS,
+            PIPELINE_SNAPSHOT,
             USER_CREATE,
             USER_PASSWD,
             USER_LIST,

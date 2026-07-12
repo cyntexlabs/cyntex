@@ -38,4 +38,12 @@ class StateJsonTest {
         assertThat(wire).doesNotContainNull().doesNotHaveDuplicates();
         assertThat(wire).allSatisfy(s -> assertThat(s).isNotBlank());
     }
+
+    @Test
+    @DisplayName("parse recovers each state from its wire string (the inverse of of)")
+    void parseRecoversEachStateFromItsWireString() {
+        for (PipelineState state : PipelineState.values()) {
+            assertThat(StateJson.parse(StateJson.of(state))).isEqualTo(state);
+        }
+    }
 }

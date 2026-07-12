@@ -3,17 +3,20 @@ package io.cyntex.app;
 import io.cyntex.spi.store.ArtifactStore;
 import io.cyntex.spi.store.CatalogStore;
 import io.cyntex.spi.store.DesiredStore;
+import io.cyntex.spi.store.ObservationStore;
 import io.cyntex.spi.store.StateStore;
 import io.cyntex.spi.store.StorePort;
 
 /**
- * In-memory {@link StorePort} for the convergence wiring test: it supplies real desired and state
- * sub-stores (what the converger consumes); the artifact and catalog sub-stores are not exercised here.
+ * In-memory {@link StorePort} for the convergence wiring test: it supplies real desired, state and
+ * observation sub-stores (what the converger consumes and the publisher writes); the artifact and
+ * catalog sub-stores are not exercised here.
  */
 final class InMemoryStorePort implements StorePort {
 
     private final InMemoryDesiredStore desired = new InMemoryDesiredStore();
     private final InMemoryStateStore state = new InMemoryStateStore();
+    private final InMemoryObservationStore observations = new InMemoryObservationStore();
 
     @Override
     public ArtifactStore artifacts() {
@@ -28,6 +31,11 @@ final class InMemoryStorePort implements StorePort {
     @Override
     public DesiredStore desired() {
         return desired;
+    }
+
+    @Override
+    public ObservationStore observations() {
+        return observations;
     }
 
     @Override

@@ -2,6 +2,7 @@ package io.cyntex.app;
 
 import io.cyntex.core.lifecycle.DesiredState;
 import io.cyntex.core.lifecycle.StateJson;
+import io.cyntex.runtime.scheduler.ObservationPublisher;
 import io.cyntex.runtime.scheduler.PipelineConverger;
 import org.junit.jupiter.api.Test;
 
@@ -23,9 +24,11 @@ class ConvergenceDriverTest {
 
     private final InMemoryDesiredStore desired = new InMemoryDesiredStore();
     private final InMemoryStateStore state = new InMemoryStateStore();
+    private final InMemoryObservationStore observations = new InMemoryObservationStore();
     private final PipelineConverger converger =
             new PipelineConverger(desired, state, Clock.fixed(T0, ZoneOffset.UTC));
-    private final ConvergenceDriver driver = new ConvergenceDriver(converger, desired);
+    private final ConvergenceDriver driver =
+            new ConvergenceDriver(converger, desired, new ObservationPublisher(state, observations));
 
     @Test
     void reconcileConvergesEveryDesiredPipeline() {
@@ -36,6 +39,9 @@ class ConvergenceDriverTest {
 
         assertThat(state.read("orders").orElseThrow().stateJson()).isEqualTo(StateJson.of(RUNNING));
         assertThat(state.read("users").orElseThrow().stateJson()).isEqualTo(StateJson.of(RUNNING));
+        // Each converged pipeline also has its observation published for the read faces to serve.
+        assertThat(observations.read("orders").orElseThrow().state()).isEqualTo(RUNNING);
+        assertThat(observations.read("users").orElseThrow().state()).isEqualTo(RUNNING);
     }
 
     @Test

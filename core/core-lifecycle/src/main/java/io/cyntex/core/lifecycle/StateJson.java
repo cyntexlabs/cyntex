@@ -17,4 +17,14 @@ public final class StateJson {
     public static String of(PipelineState state) {
         return state.name();
     }
+
+    /**
+     * Recovers the pipeline state from its wire form — the inverse of {@link #of}, used by the monitoring
+     * read side to read the actual state back. The form is written only by {@link #of}, so an unrecognized
+     * wire string is an invariant violation (a corrupt or newer-grammar checkpoint), left to crash rather
+     * than laundered into a fabricated state.
+     */
+    public static PipelineState parse(String stateJson) {
+        return PipelineState.valueOf(stateJson);
+    }
 }

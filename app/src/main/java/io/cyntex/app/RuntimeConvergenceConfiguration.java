@@ -1,5 +1,6 @@
 package io.cyntex.app;
 
+import io.cyntex.runtime.scheduler.ObservationPublisher;
 import io.cyntex.runtime.scheduler.PipelineConverger;
 import io.cyntex.spi.store.StorePort;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -30,7 +31,13 @@ class RuntimeConvergenceConfiguration {
     }
 
     @Bean
-    ConvergenceDriver convergenceDriver(PipelineConverger pipelineConverger, StorePort storePort) {
-        return new ConvergenceDriver(pipelineConverger, storePort.desired());
+    ObservationPublisher observationPublisher(StorePort storePort) {
+        return new ObservationPublisher(storePort.state(), storePort.observations());
+    }
+
+    @Bean
+    ConvergenceDriver convergenceDriver(
+            PipelineConverger pipelineConverger, StorePort storePort, ObservationPublisher observationPublisher) {
+        return new ConvergenceDriver(pipelineConverger, storePort.desired(), observationPublisher);
     }
 }

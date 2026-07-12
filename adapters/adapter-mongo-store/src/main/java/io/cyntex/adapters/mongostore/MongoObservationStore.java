@@ -1,0 +1,161 @@
+package io.cyntex.adapters.mongostore;
+
+import com.mongodb.client.MongoCollection;
+import com.mongodb.client.model.ReplaceOptions;
+import io.cyntex.core.common.CyntexException;
+import io.cyntex.core.lifecycle.Observation;
+import io.cyntex.core.lifecycle.PipelineState;
+import io.cyntex.core.lifecycle.TableSnapshot;
+import io.cyntex.spi.store.ObservationStore;
+import org.bson.Document;
+
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
+
+/**
+ * The MongoDB per-pipeline observation store: one observation document per pipeline, keyed by the
+ * pipeline id (as {@code _id}), carrying the lifecycle state and the metrics / per-table snapshot
+ * progress sub-documents. An observation is the latest projection, not fenced: it is a straight upsert
+ * by pipeline id (last write wins), not the epoch-fencing compare-and-swap the actual state store uses.
+ *
+ * <p>Driver IO failures are translated into coded io diagnostics, so no driver type escapes the module
+ * (rule R3). A stored document whose state is missing or unrecognized, or whose metric / snapshot cells
+ * carry the wrong BSON type, is store corruption — surfaced as a coded io diagnostic, not a bare crash
+ * while reconstructing.
+ */
+public final class MongoObservationStore implements ObservationStore {
+
+    private final MongoCollection<Document> collection;
+
+    public MongoObservationStore(MongoCollection<Document> collection) {
+        this.collection = Objects.requireNonNull(collection, "collection");
+    }
+
+    @Override
+    public void save(Observation observation) {
+        Objects.requireNonNull(observation, "observation");
+        // Upsert by the pipeline id (the document _id): a re-publish overwrites the latest projection in
+        // place (last write wins) rather than accumulating documents. An observation is not fenced.
+        StoreIo.run(() -> collection.replaceOne(
+                new Document("_id", observation.pipelineId()), toDocument(observation), new ReplaceOptions().upsert(true)));
+    }
+
+    @Override
+    public Optional<Observation> read(String pipelineId) {
+        Objects.requireNonNull(pipelineId, "pipelineId");
+        Document document = StoreIo.call(() -> collection.find(new Document("_id", pipelineId)).first());
+        return document == null ? Optional.empty() : Optional.of(toObservation(document));
+    }
+
+    /** Maps an observation to its stored document: pipeline id as {@code _id}, state / metrics / snapshot as fields. */
+    static Document toDocument(Observation observation) {
+        Document metrics = new Document();
+        observation.metrics().forEach(metrics::append);
+        Document snapshot = new Document();
+        observation.snapshot().forEach((table, progress) -> {
+            Document cell = new Document("rowsDone", progress.rowsDone());
+            if (progress.rowsTotal() != null) {
+                cell.append("rowsTotal", progress.rowsTotal());
+            }
+            if (progress.donePct() != null) {
+                cell.append("donePct", progress.donePct());
+            }
+            snapshot.append(table, cell);
+        });
+        return new Document("_id", observation.pipelineId())
+                .append("state", observation.state().name())
+                .append("metrics", metrics)
+                .append("snapshot", snapshot);
+    }
+
+    /** Reconstructs an observation from its stored document. */
+    static Observation toObservation(Document document) {
+        String id = document.getString("_id");
+        String state = document.getString("state");
+        if (state == null) {
+            // A stored observation missing the state field this version requires is store corruption.
+            throw corrupt(id);
+        }
+        return new Observation(id, parseState(state, id), readMetrics(document, id), readSnapshot(document, id));
+    }
+
+    /** A stored state this version does not recognize is corruption, not a bare enum-valueOf crash. */
+    private static PipelineState parseState(String state, String id) {
+        try {
+            return PipelineState.valueOf(state);
+        } catch (IllegalArgumentException e) {
+            throw new CyntexException(IoError.DOCUMENT_UNREADABLE, Map.of("id", String.valueOf(id)), e);
+        }
+    }
+
+    /** Reads the metrics sub-document as name -> long; a non-number cell is corruption, not a class-cast crash. */
+    private static Map<String, Long> readMetrics(Document document, String id) {
+        Object raw = document.get("metrics");
+        if (raw == null) {
+            return Map.of();
+        }
+        if (!(raw instanceof Document metrics)) {
+            throw corrupt(id);
+        }
+        Map<String, Long> out = new LinkedHashMap<>();
+        for (Map.Entry<String, Object> entry : metrics.entrySet()) {
+            out.put(entry.getKey(), requireLong(entry.getValue(), id));
+        }
+        return out;
+    }
+
+    /** Reads the snapshot sub-document as table -> progress; a missing rows-done or wrong type is corruption. */
+    private static Map<String, TableSnapshot> readSnapshot(Document document, String id) {
+        Object raw = document.get("snapshot");
+        if (raw == null) {
+            return Map.of();
+        }
+        if (!(raw instanceof Document snapshot)) {
+            throw corrupt(id);
+        }
+        Map<String, TableSnapshot> out = new LinkedHashMap<>();
+        for (Map.Entry<String, Object> entry : snapshot.entrySet()) {
+            if (!(entry.getValue() instanceof Document cell)) {
+                throw corrupt(id);
+            }
+            long rowsDone = requireLong(cell.get("rowsDone"), id);
+            Long rowsTotal = optionalLong(cell.get("rowsTotal"), id);
+            Integer donePct = optionalInt(cell.get("donePct"), id);
+            out.put(entry.getKey(), new TableSnapshot(rowsDone, rowsTotal, donePct));
+        }
+        return out;
+    }
+
+    private static long requireLong(Object value, String id) {
+        if (!(value instanceof Number number)) {
+            throw corrupt(id);
+        }
+        return number.longValue();
+    }
+
+    private static Long optionalLong(Object value, String id) {
+        if (value == null) {
+            return null;
+        }
+        if (!(value instanceof Number number)) {
+            throw corrupt(id);
+        }
+        return number.longValue();
+    }
+
+    private static Integer optionalInt(Object value, String id) {
+        if (value == null) {
+            return null;
+        }
+        if (!(value instanceof Number number)) {
+            throw corrupt(id);
+        }
+        return number.intValue();
+    }
+
+    private static CyntexException corrupt(String id) {
+        return new CyntexException(IoError.DOCUMENT_UNREADABLE, Map.of("id", String.valueOf(id)), null);
+    }
+}
