@@ -27,9 +27,11 @@ public final class ControlOperations {
     public static final Operation ARTIFACT_LIST = new Operation("artifact.list", Scope.READ, false, null, CLI_POC);
 
     // connection domain: runs an external probe and persists its result for later query and display, so
-    // it mutates persisted state (a write) and is audited. The probe and the result-store shape land in a
-    // later slice; this only reserves the contract.
+    // it mutates persisted state (a write) and is audited. The read-back verb returns the latest persisted
+    // result (or a 404 when the connection was never tested); it mutates nothing, so it is read and unaudited.
     public static final Operation CONNECTION_TEST = new Operation("connection.test", Scope.WRITE, true, null, CLI_POC);
+    public static final Operation CONNECTION_TEST_RESULT =
+            new Operation("connection.test-result", Scope.READ, false, null, CLI_POC);
 
     // cluster domain: topology is sensitive, so listing members is a registry operation (authenticated
     // like every other verb) rather than an anonymous endpoint — only the process-liveness probe stays
@@ -49,6 +51,7 @@ public final class ControlOperations {
             ARTIFACT_GET,
             ARTIFACT_LIST,
             CONNECTION_TEST,
+            CONNECTION_TEST_RESULT,
             CLUSTER_MEMBERS,
             USER_CREATE,
             USER_PASSWD,

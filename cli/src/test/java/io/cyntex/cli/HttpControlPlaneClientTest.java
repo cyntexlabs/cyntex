@@ -439,4 +439,74 @@ class HttpControlPlaneClientTest {
                 .test(URI.create("http://127.0.0.1:" + closedPort), "tok", "c", "oracle", Map.of()))
                 .isInstanceOf(ConnectionTestOutcome.Unreachable.class);
     }
+
+    // --- connection test result: GET /api/connections/{id}/test-result, decodes the stored report ---------
+
+    @Test
+    void testResultReturnsFoundWithTheStoredReportAndSendsTheCredential() throws Exception {
+        AtomicReference<CapturedRequest> seen = new AtomicReference<>();
+        HttpServer server = apiServer("/api/connections/", 200,
+                "{\"connectionId\":\"conn_ora\",\"connectorId\":\"oracle\",\"outcome\":\"FAILED\",\"checks\":["
+                        + "{\"name\":\"Login\",\"status\":\"FAILED\",\"message\":\"auth failed\",\"reason\":null,"
+                        + "\"solution\":null,\"connectorErrorCode\":\"11000\"}],\"testedAt\":1752000000000}",
+                seen);
+        try {
+            ConnectionTestResultOutcome outcome =
+                    new HttpControlPlaneClient().testResult(baseOf(server), "tok-xyz", "conn_ora");
+
+            assertThat(outcome).isInstanceOf(ConnectionTestResultOutcome.Found.class);
+            ConnectionReport report = ((ConnectionTestResultOutcome.Found) outcome).report();
+            assertThat(report.connectionId()).isEqualTo("conn_ora");
+            assertThat(report.connectorId()).isEqualTo("oracle");
+            assertThat(report.outcome()).isEqualTo("FAILED");
+            assertThat(report.testedAt()).isEqualTo(1752000000000L);
+            assertThat(report.checks()).containsExactly(
+                    new ConnectionReport.Check("Login", "FAILED", "auth failed", null, null, "11000"));
+
+            // the read is a GET to the connection's result path, under a bearer credential
+            assertThat(seen.get().method()).isEqualTo("GET");
+            assertThat(seen.get().path()).isEqualTo("/api/connections/conn_ora/test-result");
+            assertThat(seen.get().authorization()).isEqualTo("Bearer tok-xyz");
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void testResultReturnsAbsentOnA404() throws Exception {
+        // a 404 is "never tested", distinct from a coded refusal
+        HttpServer server = apiServer("/api/connections/", 404, null, new AtomicReference<>());
+        try {
+            assertThat(new HttpControlPlaneClient().testResult(baseOf(server), "tok", "never_tested"))
+                    .isInstanceOf(ConnectionTestResultOutcome.Absent.class);
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void testResultReturnsRejectedWithTheServerCodeAndMessageOnACodedErrorStatus() throws Exception {
+        HttpServer server = apiServer("/api/connections/", 403,
+                "{\"code\":\"control.forbidden\",\"params\":{},\"message\":\"You lack the grade.\"}",
+                new AtomicReference<>());
+        try {
+            ConnectionTestResultOutcome outcome =
+                    new HttpControlPlaneClient().testResult(baseOf(server), "tok", "conn_ora");
+            assertThat(outcome).isEqualTo(
+                    new ConnectionTestResultOutcome.Rejected("control.forbidden", "You lack the grade."));
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void testResultReturnsUnreachableWhenTheServerIsDownWithoutThrowing() throws Exception {
+        int closedPort;
+        try (ServerSocket socket = new ServerSocket(0)) {
+            closedPort = socket.getLocalPort();
+        }
+        assertThat(new HttpControlPlaneClient()
+                .testResult(URI.create("http://127.0.0.1:" + closedPort), "tok", "c"))
+                .isInstanceOf(ConnectionTestResultOutcome.Unreachable.class);
+    }
 }

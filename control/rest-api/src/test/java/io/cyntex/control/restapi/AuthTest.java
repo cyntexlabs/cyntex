@@ -4,6 +4,7 @@ import io.cyntex.control.core.ApplyService;
 import io.cyntex.control.core.ArtifactQueryService;
 import io.cyntex.control.core.AuditGate;
 import io.cyntex.control.core.BootstrapService;
+import io.cyntex.control.core.ConnectionTestResultQueryService;
 import io.cyntex.control.core.ConnectionTestService;
 import io.cyntex.control.core.ControlOperations;
 import io.cyntex.control.core.CredentialAuthenticator;
@@ -473,6 +474,22 @@ class AuthTest {
                 }
             };
             return new ConnectionTestService(probe, resultStore, auditGate);
+        }
+
+        // The read-back controller is bundled too, so its query service must be present for the context to
+        // stand up; this suite exercises the auth matrix, not the read, so the store is inert (empty).
+        @Bean
+        ConnectionTestResultQueryService connectionTestResultQueryService() {
+            return new ConnectionTestResultQueryService(new ConnectionTestResultStore() {
+                @Override
+                public void save(ConnectionTestResult result) {
+                }
+
+                @Override
+                public Optional<ConnectionTestResult> find(String connectionId) {
+                    return Optional.empty();
+                }
+            });
         }
     }
 

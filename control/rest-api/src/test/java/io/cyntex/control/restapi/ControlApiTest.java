@@ -5,6 +5,7 @@ import io.cyntex.control.core.ApplyService;
 import io.cyntex.control.core.ArtifactOutcome;
 import io.cyntex.control.core.ArtifactQueryService;
 import io.cyntex.control.core.AuditGate;
+import io.cyntex.control.core.ConnectionTestResultQueryService;
 import io.cyntex.control.core.ConnectionTestService;
 import io.cyntex.control.core.ControlOperations;
 import io.cyntex.control.core.Frontend;
@@ -290,8 +291,10 @@ class ControlApiTest {
                 .as("every projected verb must be a registered, CLI-exposed operation")
                 .isEmpty();
         assertThat(projected)
-                .as("the artifact verbs, the R5 connection-test verb and the topology verb are projected onto HTTP")
-                .contains("artifact.apply", "artifact.get", "artifact.list", "connection.test", "cluster.members");
+                .as("the artifact verbs, the R5 connection-test verb and its read-back, and the topology verb "
+                        + "are projected onto HTTP")
+                .contains("artifact.apply", "artifact.get", "artifact.list", "connection.test",
+                        "connection.test-result", "cluster.members");
     }
 
     private static String describe(HandlerMethod handler) {
@@ -350,6 +353,22 @@ class ControlApiTest {
             AuditGate auditGate = new AuditGate(record -> {
             }, Clock.systemUTC());
             return new ConnectionTestService(probe, resultStore, auditGate);
+        }
+
+        // The read-back controller is imported too, so its query service must be present for the context to
+        // stand up; its behaviour is proven in ConnectionApiTest, so here it only needs to construct (empty store).
+        @Bean
+        ConnectionTestResultQueryService connectionTestResultQueryService() {
+            return new ConnectionTestResultQueryService(new ConnectionTestResultStore() {
+                @Override
+                public void save(ConnectionTestResult result) {
+                }
+
+                @Override
+                public Optional<ConnectionTestResult> find(String connectionId) {
+                    return Optional.empty();
+                }
+            });
         }
     }
 

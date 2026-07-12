@@ -183,6 +183,34 @@ final class HttpControlPlaneClient implements ControlPlaneClient {
         }
     }
 
+    @Override
+    public ConnectionTestResultOutcome testResult(URI baseUrl, String credential, String id) {
+        try {
+            HttpRequest request =
+                    authed(baseUrl, "/api/connections/" + id + "/test-result", credential).GET().build();
+            HttpResponse<String> response =
+                    client().send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            int status = response.statusCode();
+            if (status == 200) {
+                ConnectionReport report = connectionReport(response.body());
+                // a 200 that is not a usable report (a proxy / non-Cyntex reply) is treated as unreachable
+                return report == null
+                        ? new ConnectionTestResultOutcome.Unreachable()
+                        : new ConnectionTestResultOutcome.Found(report);
+            }
+            if (status == 404) {
+                return new ConnectionTestResultOutcome.Absent();
+            }
+            Rejection r = rejection(response.body(), "The server refused the read.");
+            return new ConnectionTestResultOutcome.Rejected(r.code(), r.message());
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return new ConnectionTestResultOutcome.Unreachable();
+        } catch (IOException | RuntimeException e) {
+            return new ConnectionTestResultOutcome.Unreachable();
+        }
+    }
+
     /** The connection-test request body: {@code {"id":..,"connectorId":..,"settings":{..}}}. */
     private static String testBody(String id, String connectorId, Map<String, Object> settings) {
         Map<String, Object> body = new LinkedHashMap<>();

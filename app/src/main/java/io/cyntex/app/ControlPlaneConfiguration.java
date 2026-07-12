@@ -10,6 +10,7 @@ import io.cyntex.control.core.ApplyService;
 import io.cyntex.control.core.ArtifactQueryService;
 import io.cyntex.control.core.AuditGate;
 import io.cyntex.control.core.BootstrapService;
+import io.cyntex.control.core.ConnectionTestResultQueryService;
 import io.cyntex.control.core.ConnectionTestService;
 import io.cyntex.control.core.ControlOperations;
 import io.cyntex.control.core.CredentialAuthenticator;
@@ -191,6 +192,11 @@ class ControlPlaneConfiguration {
     ConnectionTestService connectionTestService(
             ConnectionProbe probe, ConnectionTestResultStore resultStore, AuditGate auditGate) {
         return new ConnectionTestService(probe, resultStore, auditGate);
+    }
+
+    @Bean
+    ConnectionTestResultQueryService connectionTestResultQueryService(ConnectionTestResultStore resultStore) {
+        return new ConnectionTestResultQueryService(resultStore);
     }
 
     /**

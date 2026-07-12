@@ -2,6 +2,7 @@ package io.cyntex.control.restapi;
 
 import io.cyntex.control.core.AuditGate;
 import io.cyntex.control.core.ConnectionTestReport;
+import io.cyntex.control.core.ConnectionTestResultQueryService;
 import io.cyntex.control.core.ConnectionTestService;
 import io.cyntex.control.core.ControlOperations;
 import io.cyntex.control.core.CredentialAuthenticator;
@@ -167,6 +168,41 @@ class ConnectionApiTest {
         });
     }
 
+    // ---- the persisted result is queryable through a read verb ----
+
+    @Test
+    void returnsThePersistedResultForATestedConnection() {
+        // Run a test to persist a result, then read it back through the read verb: a plain READ credential
+        // suffices (the read-back is read-scoped, unlike the write that produced it).
+        client().post().uri("/api/connections:test")
+                .header("Authorization", "Bearer " + token(Scope.WRITE))
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(testBody("conn_ora", "oracle", Map.of()))
+                .retrieve().toBodilessEntity();
+
+        ConnectionTestReport report = client().get().uri("/api/connections/conn_ora/test-result")
+                .header("Authorization", "Bearer " + token(Scope.READ))
+                .retrieve().toEntity(ConnectionTestReport.class).getBody();
+
+        assertThat(report.connectionId()).isEqualTo("conn_ora");
+        assertThat(report.connectorId()).isEqualTo("oracle");
+        assertThat(report.outcome()).isEqualTo(ConnectionTestReport.Outcome.PASSED);
+        assertThat(report.checks()).singleElement().satisfies(check -> {
+            assertThat(check.name()).isEqualTo("Connection");
+            assertThat(check.status()).isEqualTo(ConnectionTestReport.Check.Status.PASSED);
+        });
+    }
+
+    @Test
+    void isNotFoundForAConnectionThatWasNeverTested() {
+        // A connection with no stored result is a 404 (never tested), the same absent semantics as artifact.get.
+        HttpStatusCode status = client().get().uri("/api/connections/never_tested/test-result")
+                .header("Authorization", "Bearer " + token(Scope.READ))
+                .exchange((request, response) -> response.getStatusCode());
+
+        assertThat(status).isEqualTo(HttpStatus.NOT_FOUND);
+    }
+
     // ---- the verb is a write, guarded like every other ----
 
     @Test
@@ -289,6 +325,11 @@ class ConnectionApiTest {
         ConnectionTestService connectionTestService(
                 ConnectionProbe probe, ConnectionTestResultStore resultStore, AuditGate auditGate) {
             return new ConnectionTestService(probe, resultStore, auditGate);
+        }
+
+        @Bean
+        ConnectionTestResultQueryService connectionTestResultQueryService(ConnectionTestResultStore resultStore) {
+            return new ConnectionTestResultQueryService(resultStore);
         }
     }
 

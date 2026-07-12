@@ -54,4 +54,12 @@ interface ControlPlaneClient {
      */
     ConnectionTestOutcome test(
             URI baseUrl, String credential, String id, String connectorId, Map<String, Object> settings);
+
+    /**
+     * Reads a connection's latest test result via {@code GET {baseUrl}/api/connections/{id}/test-result},
+     * authenticated by the bearer {@code credential}: the stored report on success, absent on a 404 (the
+     * connection has never been tested), a coded rejection when the server refuses, or unreachable on any I/O
+     * failure. Never throws.
+     */
+    ConnectionTestResultOutcome testResult(URI baseUrl, String credential, String id);
 }

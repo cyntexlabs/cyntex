@@ -79,10 +79,12 @@ class ReplTest {
         GetOutcome getOutcome = new GetOutcome.Unreachable();
         ListOutcome listOutcome = new ListOutcome.Unreachable();
         ConnectionTestOutcome testOutcome = new ConnectionTestOutcome.Unreachable();
+        ConnectionTestResultOutcome testResultOutcome = new ConnectionTestResultOutcome.Unreachable();
         final List<String> applyCalls = new ArrayList<>();
         final List<String> getCalls = new ArrayList<>();
         final List<String> listCalls = new ArrayList<>();
         final List<String> testCalls = new ArrayList<>();
+        final List<String> testResultCalls = new ArrayList<>();
 
         FakeControlPlane(URI... healthy) {
             this.healthy = new LinkedHashSet<>(List.of(healthy));
@@ -129,6 +131,12 @@ class ReplTest {
                 URI baseUrl, String credential, String id, String connectorId, Map<String, Object> settings) {
             testCalls.add(credential + "@" + baseUrl + "/" + id + "[" + connectorId + " " + settings + "]");
             return healthy.contains(baseUrl) ? testOutcome : new ConnectionTestOutcome.Unreachable();
+        }
+
+        @Override
+        public ConnectionTestResultOutcome testResult(URI baseUrl, String credential, String id) {
+            testResultCalls.add(credential + "@" + baseUrl + "/" + id);
+            return healthy.contains(baseUrl) ? testResultOutcome : new ConnectionTestResultOutcome.Unreachable();
         }
     }
 
@@ -918,6 +926,109 @@ class ReplTest {
         assertThat(h.repl().dispatch("test my-mongo")).isTrue();
 
         assertThat(h.sink().toString()).contains("requires a connection").contains("test");
+    }
+
+    // --- connection test result: `test-result <id>` reads back the connection's latest stored result ---
+
+    /** A stored FAILED result carrying full per-check diagnostics — the read peer returns whatever last ran. */
+    private static ConnectionTestResultOutcome.Found storedResult() {
+        return new ConnectionTestResultOutcome.Found(new ConnectionReport("my-mongo", "mongodb", "FAILED",
+                List.of(new ConnectionReport.Check("Login", "FAILED", "auth failed", "SCRAM rejected",
+                        "check the password", "11000")),
+                1752000000000L));
+    }
+
+    @Test
+    void testResultReadsBackTheStoredReportWithoutRunningAProbe() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.testResultOutcome = storedResult();
+        Harness h = onlineSession(Path.of("cyn-work"), client);
+        int mark = h.sink().toString().length();
+
+        assertThat(h.repl().dispatch("test-result my-mongo")).isTrue();
+
+        String out = h.sink().toString().substring(mark);
+        // the report renders the last outcome, the connection + connector, and each check with its diagnostics
+        assertThat(out).contains("FAILED").contains("my-mongo").contains("mongodb")
+                .contains("Login").contains("auth failed");
+        // it read the result under the session credential from the current landing node — no probe, no fetch
+        assertThat(client.testResultCalls).containsExactly("jwt-tok@http://node1:7900/my-mongo");
+        assertThat(client.testCalls).isEmpty();
+        assertThat(client.getCalls).isEmpty();
+    }
+
+    @Test
+    void testResultRendersTheStoredReportAsJsonWithTheOutputFlag() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.testResultOutcome = storedResult();
+        Harness h = onlineSession(Path.of("cyn-work"), client);
+        int mark = h.sink().toString().length();
+
+        assertThat(h.repl().dispatch("test-result my-mongo -o json")).isTrue();
+
+        String out = h.sink().toString().substring(mark);
+        assertThat(out).contains("\"connectionId\"").contains("\"my-mongo\"")
+                .contains("\"outcome\"").contains("\"FAILED\"").contains("\"Login\"")
+                .contains("\"connectorErrorCode\"").contains("\"11000\"");
+    }
+
+    @Test
+    void testResultForANeverTestedConnectionReportsNotTestedYet() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.testResultOutcome = new ConnectionTestResultOutcome.Absent();
+        Harness h = onlineSession(Path.of("cyn-work"), client);
+        int mark = h.sink().toString().length();
+
+        assertThat(h.repl().dispatch("test-result my-mongo")).isTrue();
+
+        // never-tested is a benign line, not a coded error nor a rendered report
+        assertThat(h.sink().toString().substring(mark)).contains("my-mongo").containsIgnoringCase("not been tested");
+    }
+
+    @Test
+    void testResultWithNoIdReportsMissingOperandAndDoesNotCallTheServer() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        Harness h = onlineSession(Path.of("cyn-work"), client);
+        int mark = h.sink().toString().length();
+
+        assertThat(h.repl().dispatch("test-result")).isTrue();
+
+        assertThat(h.sink().toString().substring(mark)).contains("test-result:").contains("missing operand");
+        assertThat(client.testResultCalls).isEmpty();
+    }
+
+    @Test
+    void testResultWhileConnectedButNotAuthenticatedReportsAndDoesNotCallTheServer() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        Harness h = harness(Path.of("cyn-work"), client, new ScriptedPrompter());
+        h.repl().dispatch("connect node1:7900");   // connected, never logged in
+
+        assertThat(h.repl().dispatch("test-result x")).isTrue();
+
+        // the not-authenticated state is a coded cli.* diagnostic naming the verb, not a bare string
+        assertThat(h.sink().toString()).contains("cli.not-authenticated").contains("test-result");
+        assertThat(client.testResultCalls).isEmpty();
+    }
+
+    @Test
+    void testResultRenderingAServerRejectionShowsTheCodeAndMessage() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.testResultOutcome =
+                new ConnectionTestResultOutcome.Rejected("control.forbidden", "You lack the grade.");
+        Harness h = onlineSession(Path.of("cyn-work"), client);
+
+        h.repl().dispatch("test-result my-mongo");
+
+        assertThat(h.sink().toString()).contains("control.forbidden").contains("You lack the grade.");
+    }
+
+    @Test
+    void testResultOfflineReportsThatAConnectionIsRequired() {
+        Harness h = harness(Path.of("cyn-work"));
+
+        assertThat(h.repl().dispatch("test-result my-mongo")).isTrue();
+
+        assertThat(h.sink().toString()).contains("requires a connection").contains("test-result");
     }
 
     // --- server-as-truth: a connected read verb sources the server store, never the local workspace ---

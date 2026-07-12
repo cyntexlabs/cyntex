@@ -48,12 +48,13 @@ final class Repl {
     /**
      * Registry verbs a connected session routes to the server instead of the offline command table. Each
      * is the CLI projection of a control operation ({@code apply} = {@code artifact.apply}, {@code get} =
-     * {@code artifact.get}, {@code ls} = {@code artifact.list}, {@code test} = {@code connection.test}).
-     * Offline they fall through to the table, where {@code apply} / {@code get} / {@code test} report
-     * "requires a connection" and {@code ls} browses the local workspace. {@code validate} is not here — it
-     * runs the full local stack in either state until a server validate endpoint exists.
+     * {@code artifact.get}, {@code ls} = {@code artifact.list}, {@code test} = {@code connection.test},
+     * {@code test-result} = {@code connection.test-result}). Offline they fall through to the table, where
+     * {@code apply} / {@code get} / {@code test} / {@code test-result} report "requires a connection" and
+     * {@code ls} browses the local workspace. {@code validate} is not here — it runs the full local stack in
+     * either state until a server validate endpoint exists.
      */
-    private static final List<String> ONLINE_VERBS = List.of("apply", "get", "ls", "test");
+    private static final List<String> ONLINE_VERBS = List.of("apply", "get", "ls", "test", "test-result");
 
     private final CommandLine commandLine;
 
@@ -178,10 +179,15 @@ final class Repl {
             Diagnostics.printText(err, CliError.NOT_AUTHENTICATED, Map.of("verb", words.get(0)));
             return;
         }
-        // `test` returns a structured report that is worth machine-reading, so it accepts an `-o` output
-        // flag and parses its own options — routed before the positional-only guard the other verbs share.
+        // `test` and its read-back `test-result` return a structured report that is worth machine-reading, so
+        // they accept an `-o` output flag and parse their own options — routed before the positional-only
+        // guard the other verbs share.
         if (words.get(0).equals("test")) {
             testOnline(words);
+            return;
+        }
+        if (words.get(0).equals("test-result")) {
+            testResultOnline(words);
             return;
         }
         // The other connected verbs take positional operands only; a dash-option (e.g. `-o json`) is not yet
@@ -307,44 +313,14 @@ final class Repl {
      * message. A failed connection is still a rendered report (the test ran), not an error.
      */
     private void testOnline(List<String> words) {
-        PrintWriter err = commandLine.getErr();
-        String id = null;
-        OutputFormat format = OutputFormat.TEXT;
-        for (int i = 1; i < words.size(); i++) {
-            String word = words.get(i);
-            if (word.equals("-o") || word.equals("--output")) {
-                if (i + 1 >= words.size()) {
-                    err.println("test: " + word + " needs a format (text|json|yaml)");
-                    err.flush();
-                    return;
-                }
-                OutputFormat parsed = outputFormat(words.get(++i));
-                if (parsed == null) {
-                    err.println("test: unknown output format '" + words.get(i) + "' (expected text|json|yaml)");
-                    err.flush();
-                    return;
-                }
-                format = parsed;
-            } else if (word.startsWith("-")) {
-                err.println("test: unknown option " + word);
-                err.flush();
-                return;
-            } else if (id == null) {
-                id = word;
-            } else {
-                err.println("test: too many operands (usage: test <id> [-o text|json|yaml])");
-                err.flush();
-                return;
-            }
-        }
-        if (id == null || id.isBlank()) {
-            err.println("test: missing operand (usage: test <id> [-o text|json|yaml])");
-            err.flush();
+        IdAndFormat parsed = parseIdAndFormat("test", words);
+        if (parsed == null) {
             return;
         }
+        PrintWriter err = commandLine.getErr();
 
         // server-as-truth: read the stored connection, so the probe runs against exactly what is stored
-        final String connectionId = id;
+        final String connectionId = parsed.id();
         GetOutcome got = withFailover(() ->
                 controlPlane.get(session.landingNode(), session.credential(), connectionId),
                 o -> o instanceof GetOutcome.Unreachable);
@@ -385,7 +361,7 @@ final class Repl {
             return;
         }
 
-        OutputFormat chosen = format;
+        OutputFormat chosen = parsed.format();
         ConnectionTestOutcome outcome = withFailover(() -> controlPlane.test(
                 session.landingNode(), session.credential(), connectionId, source.connector(), source.config()),
                 o -> o instanceof ConnectionTestOutcome.Unreachable);
@@ -394,6 +370,82 @@ final class Repl {
             case ConnectionTestOutcome.Rejected rejected -> renderRejection(rejected.code(), rejected.message());
             case ConnectionTestOutcome.Unreachable ignored -> reportRequestFailed();
         }
+    }
+
+    /**
+     * {@code test-result <id> [-o text|json|yaml]} — reads a connection's latest stored test result and
+     * renders it (the read peer of {@code test}, no probe run). A missing operand or an unknown option is a
+     * benign usage line; a connection that has never been tested is a benign "not tested yet" line; a coded
+     * refusal renders its code and message. The rendered report is the last test's — its outcome may itself
+     * be a failure, which is a valid result to read back, not an error.
+     */
+    private void testResultOnline(List<String> words) {
+        IdAndFormat parsed = parseIdAndFormat("test-result", words);
+        if (parsed == null) {
+            return;
+        }
+        final String connectionId = parsed.id();
+        ConnectionTestResultOutcome outcome = withFailover(() ->
+                controlPlane.testResult(session.landingNode(), session.credential(), connectionId),
+                o -> o instanceof ConnectionTestResultOutcome.Unreachable);
+        switch (outcome) {
+            case ConnectionTestResultOutcome.Found found -> renderReport(found.report(), parsed.format());
+            case ConnectionTestResultOutcome.Absent ignored -> {
+                PrintWriter err = commandLine.getErr();
+                err.println("test-result: '" + connectionId + "' has not been tested yet");
+                err.flush();
+            }
+            case ConnectionTestResultOutcome.Rejected rejected -> renderRejection(rejected.code(), rejected.message());
+            case ConnectionTestResultOutcome.Unreachable ignored -> reportRequestFailed();
+        }
+    }
+
+    /**
+     * Parses {@code <id> [-o text|json|yaml]} for the report verbs that self-parse the output flag, printing
+     * the matching usage line to err and returning {@code null} on any error. The verb name is threaded
+     * through so each verb's messages name it (routed before the positional-only guard the other verbs share).
+     */
+    private IdAndFormat parseIdAndFormat(String verb, List<String> words) {
+        PrintWriter err = commandLine.getErr();
+        String id = null;
+        OutputFormat format = OutputFormat.TEXT;
+        for (int i = 1; i < words.size(); i++) {
+            String word = words.get(i);
+            if (word.equals("-o") || word.equals("--output")) {
+                if (i + 1 >= words.size()) {
+                    err.println(verb + ": " + word + " needs a format (text|json|yaml)");
+                    err.flush();
+                    return null;
+                }
+                OutputFormat chosen = outputFormat(words.get(++i));
+                if (chosen == null) {
+                    err.println(verb + ": unknown output format '" + words.get(i) + "' (expected text|json|yaml)");
+                    err.flush();
+                    return null;
+                }
+                format = chosen;
+            } else if (word.startsWith("-")) {
+                err.println(verb + ": unknown option " + word);
+                err.flush();
+                return null;
+            } else if (id == null) {
+                id = word;
+            } else {
+                err.println(verb + ": too many operands (usage: " + verb + " <id> [-o text|json|yaml])");
+                err.flush();
+                return null;
+            }
+        }
+        if (id == null || id.isBlank()) {
+            err.println(verb + ": missing operand (usage: " + verb + " <id> [-o text|json|yaml])");
+            err.flush();
+            return null;
+        }
+        return new IdAndFormat(id, format);
+    }
+
+    /** The parsed operands of a report verb: the connection id and the chosen output format. */
+    private record IdAndFormat(String id, OutputFormat format) {
     }
 
     /** The {@code -o} format spelled text / json / yaml (case-insensitive), or {@code null} if unrecognised. */

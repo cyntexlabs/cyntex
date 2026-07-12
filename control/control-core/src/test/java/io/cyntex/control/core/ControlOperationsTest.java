@@ -17,6 +17,7 @@ class ControlOperationsTest {
                         "artifact.get",
                         "artifact.list",
                         "connection.test",
+                        "connection.test-result",
                         "cluster.members",
                         "user.create",
                         "user.passwd",
@@ -33,6 +34,8 @@ class ControlOperationsTest {
         assertThat(registry.resolve("artifact.list").scope()).isEqualTo(Scope.READ);
         // connection.test persists its result for later query, so it is a state-mutating write.
         assertThat(registry.resolve("connection.test").scope()).isEqualTo(Scope.WRITE);
+        // connection.test-result reads back the latest persisted result; it mutates nothing, so it is read.
+        assertThat(registry.resolve("connection.test-result").scope()).isEqualTo(Scope.READ);
         // cluster.members reads live topology; it is authenticated like every registry operation, but
         // needs no write or admin privilege.
         assertThat(registry.resolve("cluster.members").scope()).isEqualTo(Scope.READ);
@@ -47,7 +50,8 @@ class ControlOperationsTest {
                 List.of("artifact.apply", "connection.test", "user.create", "user.passwd", "token.create", "token.revoke")) {
             assertThat(registry.resolve(id).audited()).as(id).isTrue();
         }
-        for (String id : List.of("artifact.get", "artifact.list", "cluster.members", "user.list", "token.list")) {
+        for (String id : List.of("artifact.get", "artifact.list", "connection.test-result", "cluster.members",
+                "user.list", "token.list")) {
             assertThat(registry.resolve(id).audited()).as(id).isFalse();
         }
     }
@@ -55,7 +59,7 @@ class ControlOperationsTest {
     @Test
     void everyL1OperationIsOnTheCliPocSurface() {
         assertThat(registry.exposedOn(Frontend.CLI, Maturity.POC))
-                .hasSize(11)
+                .hasSize(12)
                 .allSatisfy(op -> assertThat(op.exposure()).containsEntry(Frontend.CLI, Maturity.POC));
     }
 
