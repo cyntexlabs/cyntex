@@ -38,7 +38,7 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 /**
- * The T0 data-plane composition: the SRS projected source (this module) and the engine's DAG builder plus
+ * The data-plane composition test: the SRS projected source (this module) and the engine's DAG builder plus
  * generic sink adapter (the engine module) wired into one Jet DAG the builder assembled, run on an embedded
  * member over a real per-table change ring. {@link SrsSourceProcessorTest} proves the source vertex alone and
  * the engine's {@code PipelineDagRunTest} proves the builder over synthetic doubles; this proves the two
