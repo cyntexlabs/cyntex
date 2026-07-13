@@ -28,6 +28,9 @@ public enum Domain {
     STORE,
     // pdk bridge: loading, level-gating, driving and projecting a connector (adapters)
     CONNECTOR,
+    // stateless row transforms: evaluating an author's CEL expression or js script against an event
+    // (adapters)
+    TRANSFORM,
     // storage data-plane: operating on the backing store at runtime and reading its stored documents
     // back — distinct from STORE, which polices reaching the store at startup (adapters)
     IO,
@@ -39,7 +42,11 @@ public enum Domain {
     ENGINE,
     // observation read faces: reading a pipeline's store-backed status / metrics / snapshot;
     // diagnosable failures such as reading a pipeline that has published no observation (control)
-    MONITOR;
+    MONITOR,
+    // runtime data plane: reading a source's snapshot / cdc into the replay store — diagnosable
+    // capture-configuration faults such as an unparsable consumption start point (runtime)
+    CAPTURE;
+
 
     /** The lower-case identifier used as the {@code <domain>} segment of a canonical code. */
     public String id() {

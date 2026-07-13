@@ -5,6 +5,7 @@ import io.cyntex.core.event.Envelope;
 import io.cyntex.core.event.Op;
 import io.cyntex.spi.sink.DdlPolicy;
 import io.cyntex.spi.sink.SinkWriter;
+import io.cyntex.spi.sink.TargetTable;
 import io.cyntex.spi.sink.WriteMode;
 import io.cyntex.spi.sink.WriteResult;
 import io.tapdata.entity.event.dml.TapRecordEvent;
@@ -28,6 +29,10 @@ import java.util.concurrent.CompletionStage;
  * the ddl policy — {@code fail} rejects the batch with a code, {@code ignore} drops it; applying a
  * schema change to the target is a later slice, so {@code apply} drops it for now.
  *
+ * <p>The connector is driven against the resolved target table model — its columns and the primary key
+ * an upsert matches on. When no model was resolved the connector is handed a bare table id and left to
+ * infer structure and keying itself.
+ *
  * <p>Writes run off the caller's thread so the call does not block; how many writes are in flight and
  * the backpressure that bounds them belong to the runtime, not this writer.
  */
@@ -37,13 +42,15 @@ final class PdkSinkWriter implements SinkWriter {
     private final WriteRecordFunction write;
     private final WriteMode mode;
     private final DdlPolicy ddl;
+    private final TargetTable target;
     private boolean closed;
 
-    PdkSinkWriter(PdkConnector connector, WriteRecordFunction write, WriteMode mode, DdlPolicy ddl) {
+    PdkSinkWriter(PdkConnector connector, WriteRecordFunction write, WriteMode mode, DdlPolicy ddl, TargetTable target) {
         this.connector = connector;
         this.write = write;
         this.mode = mode;
         this.ddl = ddl;
+        this.target = target;
     }
 
     @Override
@@ -67,11 +74,12 @@ final class PdkSinkWriter implements SinkWriter {
         if (rows.isEmpty()) {
             return new WriteResult(0);
         }
+        TapTable table = target != null ? TargetTapTable.build(target) : new TapTable(rows.get(0).getTableId());
         try {
             return connector.underLoader(() -> {
                 long[] accepted = {0};
                 // A connector may report the batch in several flushes, one callback each; accumulate.
-                write.writeRecord(connector.context(), rows, new TapTable(rows.get(0).getTableId()),
+                write.writeRecord(connector.context(), rows, table,
                         result -> accepted[0] += accepted(result));
                 return new WriteResult(accepted[0]);
             });

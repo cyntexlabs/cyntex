@@ -4,6 +4,7 @@ import io.cyntex.spi.store.ArtifactStore;
 import io.cyntex.spi.store.CatalogStore;
 import io.cyntex.spi.store.DesiredStore;
 import io.cyntex.spi.store.ObservationStore;
+import io.cyntex.spi.store.SrsMetaStore;
 import io.cyntex.spi.store.StateStore;
 import io.cyntex.spi.store.StorePort;
 
@@ -41,5 +42,10 @@ final class InMemoryStorePort implements StorePort {
     @Override
     public CatalogStore catalog() {
         throw new UnsupportedOperationException("catalog is not exercised by the convergence wiring test");
+    }
+
+    @Override
+    public SrsMetaStore meta() {
+        throw new UnsupportedOperationException("the SRS meta store is not exercised by the convergence wiring test");
     }
 }

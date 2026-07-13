@@ -4,6 +4,7 @@
 # removing one = a breaking change to an external contract (review + major version).
 # @Deprecated codes stay listed as tombstones until intentionally retired.
 boot.hazelcast-unavailable
+capture.start-from-unparsable
 cli.artifact-exists
 cli.connect-failed
 cli.kind-dir-mismatch
@@ -50,3 +51,8 @@ store.invalid-uri
 store.not-replica-set
 store.tls-ca-unreadable
 store.unreachable
+transform.expression-failed
+transform.script-compile-failed
+transform.script-failed
+transform.script-no-process
+transform.script-output-invalid
