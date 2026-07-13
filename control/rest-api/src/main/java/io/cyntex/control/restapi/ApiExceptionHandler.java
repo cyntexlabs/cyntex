@@ -1,13 +1,16 @@
 package io.cyntex.control.restapi;
 
+import io.cyntex.control.core.ControlError;
 import io.cyntex.core.common.CyntexErrorCode;
 import io.cyntex.core.common.CyntexException;
 import io.cyntex.messages.MessageCatalog;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
+import java.util.Map;
 import java.util.TreeMap;
 
 /**
@@ -43,6 +46,14 @@ class ApiExceptionHandler {
         return ResponseEntity.status(statusFor(e.code())).body(body);
     }
 
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    ResponseEntity<ApiError> handleMalformed(HttpMessageNotReadableException ignored) {
+        return handle(new CyntexException(
+                ControlError.MALFORMED_REQUEST,
+                Map.of("reason", "the JSON body does not match the request shape"),
+                null));
+    }
+
     /**
      * A coded error a verb boundary has attributed to the client's request answers 400 while rendering the
      * same coded body. This is how a domain code that is a client error in one verb's context but a
@@ -71,6 +82,11 @@ class ApiExceptionHandler {
             case "control.auth-failed", "control.unauthenticated" -> HttpStatus.UNAUTHORIZED;
             case "control.forbidden", "control.bootstrap-forbidden" -> HttpStatus.FORBIDDEN;
             case "control.bootstrap-closed" -> HttpStatus.CONFLICT;
+            case "source.id-mismatch" -> HttpStatus.BAD_REQUEST;
+            case "source.not-found" -> HttpStatus.NOT_FOUND;
+            case "source.already-exists", "source.in-use" -> HttpStatus.CONFLICT;
+            case "source.version-conflict" -> HttpStatus.PRECONDITION_FAILED;
+            case "source.precondition-required" -> HttpStatus.PRECONDITION_REQUIRED;
             // A request refused at the HTTP boundary as structurally malformed is a client input error, like dsl.*.
             case "control.malformed-request" -> HttpStatus.BAD_REQUEST;
             // A lifecycle verb on a pipeline that was never applied is a 404; a verb the state machine forbids

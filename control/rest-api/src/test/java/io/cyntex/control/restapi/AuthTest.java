@@ -3,6 +3,7 @@ package io.cyntex.control.restapi;
 import io.cyntex.control.core.ApplyService;
 import io.cyntex.control.core.ArtifactQueryService;
 import io.cyntex.control.core.AuditGate;
+import io.cyntex.control.core.AuditedSourceService;
 import io.cyntex.control.core.BootstrapService;
 import io.cyntex.control.core.ConnectionTestResultQueryService;
 import io.cyntex.control.core.ConnectionTestService;
@@ -20,11 +21,14 @@ import io.cyntex.control.core.PipelineObservationQueryService;
 import io.cyntex.control.core.SchemaDiscoveryService;
 import io.cyntex.control.core.SchemaQueryService;
 import io.cyntex.control.core.Scope;
+import io.cyntex.control.core.SourceRepresentation;
+import io.cyntex.control.core.SourceService;
 import io.cyntex.control.core.TokenSecrets;
 import io.cyntex.control.core.TokenService;
 import io.cyntex.control.core.TokenSigner;
 import io.cyntex.control.core.VerifiedToken;
 import io.cyntex.core.catalog.CyntexCatalog;
+import io.cyntex.core.common.CyntexException;
 import io.cyntex.core.dsl.DslParser;
 import io.cyntex.core.lifecycle.DesiredState;
 import io.cyntex.core.lifecycle.Observation;
@@ -46,6 +50,8 @@ import io.cyntex.spi.store.TokenRecord;
 import io.cyntex.spi.store.TokenStore;
 import io.cyntex.spi.store.User;
 import io.cyntex.spi.store.UserStore;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -65,6 +71,7 @@ import org.springframework.web.client.RestClient;
 import org.springframework.web.method.HandlerMethod;
 import org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping;
 
+import java.lang.reflect.Proxy;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -76,6 +83,7 @@ import java.util.Optional;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * The authentication and authorization matrix over the {@code /api} verb surface, exercised end to end
@@ -185,6 +193,31 @@ class AuthTest {
                 .exchange((request, response) -> response.getStatusCode());
 
         assertThat(status).isEqualTo(HttpStatus.OK);
+    }
+
+    @Test
+    void interceptorAttachesOnlyTheAuthorizedVerifiedSubject() throws Exception {
+        AuthInterceptor interceptor = context.getBean(AuthInterceptor.class);
+        HttpServletResponse response = servletProxy(HttpServletResponse.class, new LinkedHashMap<>(), null);
+
+        HttpServletRequest unauthenticated = requestProxy(null);
+        assertThatThrownBy(() -> interceptor.preHandle(
+                unauthenticated, response, new HandlerMethod(new SubjectHandlers(), "read")))
+                .isInstanceOf(CyntexException.class);
+        assertThatThrownBy(() -> AuthInterceptor.authenticatedPrincipal(unauthenticated))
+                .isInstanceOf(IllegalStateException.class);
+
+        HttpServletRequest forbidden = requestProxy("reader|READ");
+        assertThatThrownBy(() -> interceptor.preHandle(
+                forbidden, response, new HandlerMethod(new SubjectHandlers(), "write")))
+                .isInstanceOf(CyntexException.class);
+        assertThatThrownBy(() -> AuthInterceptor.authenticatedPrincipal(forbidden))
+                .isInstanceOf(IllegalStateException.class);
+
+        HttpServletRequest authorized = requestProxy("alice|READ");
+        assertThat(interceptor.preHandle(
+                authorized, response, new HandlerMethod(new SubjectHandlers(), "read"))).isTrue();
+        assertThat(AuthInterceptor.authenticatedPrincipal(authorized)).isEqualTo("alice");
     }
 
     @Test
@@ -376,6 +409,42 @@ class AuthTest {
             connector: oracle
             config: { host: 10.20.0.15 }
             """;
+
+    private static HttpServletRequest requestProxy(String token) {
+        return servletProxy(HttpServletRequest.class, new LinkedHashMap<>(), token);
+    }
+
+    private static <T> T servletProxy(Class<T> type, Map<String, Object> attributes, String token) {
+        return type.cast(Proxy.newProxyInstance(
+                type.getClassLoader(),
+                new Class<?>[] {type},
+                (proxy, method, args) -> switch (method.getName()) {
+                    case "getHeader" -> "Authorization".equals(args[0]) && token != null
+                            ? "Bearer " + token : null;
+                    case "getAttribute" -> attributes.get(args[0]);
+                    case "setAttribute" -> {
+                        attributes.put((String) args[0], args[1]);
+                        yield null;
+                    }
+                    case "removeAttribute" -> {
+                        attributes.remove(args[0]);
+                        yield null;
+                    }
+                    case "toString" -> type.getSimpleName() + "Proxy";
+                    default -> method.getReturnType() == boolean.class ? false
+                            : method.getReturnType() == int.class ? 0 : null;
+                }));
+    }
+
+    private static final class SubjectHandlers {
+        @Verb("artifact.list")
+        public void read() {
+        }
+
+        @Verb("artifact.apply")
+        public void write() {
+        }
+    }
 
     /**
      * A minimal boot config: auto-configures Web MVC + the embedded servlet container, imports the whole
@@ -618,6 +687,17 @@ class AuthTest {
         @Bean
         PipelineLogQueryService pipelineLogQueryService(LogSink sink) {
             return new PipelineLogQueryService(sink);
+        }
+
+        @Bean
+        SourceService sourceService(InMemoryArtifactStore store) {
+            CyntexCatalog catalog = CyntexCatalog.load();
+            return new SourceService(catalog, store, new SourceRepresentation(catalog));
+        }
+
+        @Bean
+        AuditedSourceService auditedSourceService(SourceService sourceService, AuditGate auditGate) {
+            return new AuditedSourceService(sourceService, auditGate);
         }
     }
 
