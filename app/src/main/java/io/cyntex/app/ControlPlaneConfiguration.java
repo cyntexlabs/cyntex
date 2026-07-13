@@ -6,6 +6,7 @@ import io.cyntex.adapters.pdk.ConnectorArtifactRegistrar;
 import io.cyntex.adapters.pdk.ConnectorIntrospector;
 import io.cyntex.adapters.pdk.ConnectorProvisioner;
 import io.cyntex.adapters.pdk.PdkConnectionTester;
+import io.cyntex.adapters.pdk.PdkSchemaDiscoverer;
 import io.cyntex.adapters.pdk.RegistryConnectorProvisioner;
 import io.cyntex.adapters.pdk.SeedConnectorSweep;
 import io.cyntex.control.core.ApplyService;
@@ -19,6 +20,8 @@ import io.cyntex.control.core.CredentialAuthenticator;
 import io.cyntex.control.core.LoginService;
 import io.cyntex.control.core.OperationRegistry;
 import io.cyntex.control.core.PasswordHasher;
+import io.cyntex.control.core.SchemaDiscoveryService;
+import io.cyntex.control.core.SchemaQueryService;
 import io.cyntex.control.core.TokenSecrets;
 import io.cyntex.control.core.TokenService;
 import io.cyntex.control.core.TokenSigner;
@@ -26,10 +29,14 @@ import io.cyntex.control.restapi.ControlHttpFace;
 import io.cyntex.core.catalog.CyntexCatalog;
 import io.cyntex.runtime.probe.ConnectionProbe;
 import io.cyntex.runtime.probe.DelegatingConnectionProbe;
+import io.cyntex.runtime.probe.DelegatingSchemaDiscoveryProbe;
+import io.cyntex.runtime.probe.SchemaDiscoveryProbe;
 import io.cyntex.spi.store.AuditStore;
 import io.cyntex.spi.store.ConnectionTestResultStore;
 import io.cyntex.spi.store.ConnectionTester;
 import io.cyntex.spi.store.ConnectorRegistry;
+import io.cyntex.spi.store.SchemaDiscoverer;
+import io.cyntex.spi.store.SchemaStore;
 import io.cyntex.spi.store.StorePort;
 import io.cyntex.spi.store.TokenStore;
 import io.cyntex.spi.store.UserStore;
@@ -218,6 +225,35 @@ class ControlPlaneConfiguration {
     @Bean
     ConnectionTestResultQueryService connectionTestResultQueryService(ConnectionTestResultStore resultStore) {
         return new ConnectionTestResultQueryService(resultStore);
+    }
+
+    // The schema-discovery half of the connection plane: the same provisioner feeds the PDK discoverer,
+    // injected into the runtime seam; discovered models persist through the schema store.
+
+    @Bean
+    SchemaStore schemaStore(StorePort storePort) {
+        return storePort.schemas();
+    }
+
+    @Bean
+    SchemaDiscoverer schemaDiscoverer(ConnectorProvisioner provisioner) {
+        return new PdkSchemaDiscoverer(provisioner);
+    }
+
+    @Bean
+    SchemaDiscoveryProbe schemaDiscoveryProbe(SchemaDiscoverer discoverer) {
+        return new DelegatingSchemaDiscoveryProbe(discoverer);
+    }
+
+    @Bean
+    SchemaDiscoveryService schemaDiscoveryService(
+            SchemaDiscoveryProbe probe, SchemaStore schemaStore, AuditGate auditGate, Clock clock) {
+        return new SchemaDiscoveryService(probe, schemaStore, auditGate, clock);
+    }
+
+    @Bean
+    SchemaQueryService schemaQueryService(SchemaStore schemaStore) {
+        return new SchemaQueryService(schemaStore);
     }
 
     /**

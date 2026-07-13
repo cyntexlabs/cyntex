@@ -9,7 +9,7 @@ import java.util.Objects;
 
 /**
  * The control plane's connection-test verb: it drives the target connection through the runtime probe —
- * the one synchronous control-to-runtime seam — records the normalized result as the connection's latest
+ * the first member of the synchronous control-to-runtime whitelist — records the normalized result as the connection's latest
  * test result, and returns it. The whole operation runs under the audit gate: a connection test is an
  * audited write, so an audit record is written before the probe runs and the operation is refused if that
  * write fails (no audit, no execute).

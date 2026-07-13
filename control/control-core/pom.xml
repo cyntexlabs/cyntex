@@ -28,10 +28,11 @@
       <artifactId>spi-store</artifactId>
       <version>${revision}</version>
     </dependency>
-    <!-- The one synchronous control-to-runtime seam: the connection-probe whitelist (a closed set of
-         one). Every other control<->runtime interaction decouples through the store; this narrow
-         channel is the sole compile reference control-core holds into the runtime ring — the R5
-         exception to R9. It carries no third-party, so control-core stays framework-free. -->
+    <!-- The synchronous control-to-runtime seam: the probe whitelist (a closed set of two — the
+         connection probe and the schema-discovery probe). Every other control<->runtime interaction
+         decouples through the store; this narrow channel is the sole compile reference control-core
+         holds into the runtime ring — the R5 exception to R9. It carries no third-party, so
+         control-core stays framework-free. -->
     <dependency>
       <groupId>io.cyntex</groupId>
       <artifactId>runtime-probe</artifactId>

@@ -195,12 +195,16 @@ class StorePortTest {
     @Test
     void schemaSaveThenGetRoundTrips() {
         SchemaStore schemas = new InMemoryStore().schemas();
-        SourceModel model = new SourceModel(List.of(
-                new SourceTable("orders", List.of(new SourceField("id", "bigint")), List.of("id"), List.of())));
+        DiscoveredSourceModel discovered = new DiscoveredSourceModel(
+                "orders-db",
+                "mysql",
+                1L,
+                new SourceModel(List.of(
+                        new SourceTable("orders", List.of(new SourceField("id", "bigint")), List.of("id"), List.of()))));
 
-        schemas.save("orders-db", model);
+        schemas.save(discovered);
 
-        assertThat(schemas.get("orders-db")).contains(model);
+        assertThat(schemas.get("orders-db")).contains(discovered);
     }
 
     @Test
@@ -211,13 +215,17 @@ class StorePortTest {
     @Test
     void reDiscoveryReplacesTheStoredModelInPlace() {
         SchemaStore schemas = new InMemoryStore().schemas();
-        schemas.save("orders-db", new SourceModel(List.of(
-                new SourceTable("orders", List.of(), List.of(), List.of()))));
-        SourceModel rediscovered = new SourceModel(List.of(
-                new SourceTable("orders", List.of(new SourceField("id", "bigint")), List.of("id"), List.of()),
-                new SourceTable("customers", List.of(), List.of(), List.of())));
+        schemas.save(new DiscoveredSourceModel("orders-db", "mysql", 1L, new SourceModel(List.of(
+                new SourceTable("orders", List.of(), List.of(), List.of())))));
+        DiscoveredSourceModel rediscovered = new DiscoveredSourceModel(
+                "orders-db",
+                "mysql",
+                2L,
+                new SourceModel(List.of(
+                        new SourceTable("orders", List.of(new SourceField("id", "bigint")), List.of("id"), List.of()),
+                        new SourceTable("customers", List.of(), List.of(), List.of()))));
 
-        schemas.save("orders-db", rediscovered);
+        schemas.save(rediscovered);
 
         assertThat(schemas.get("orders-db")).contains(rediscovered);
     }
@@ -407,7 +415,7 @@ class StorePortTest {
         private final Map<String, Resource> artifacts = new HashMap<>();
         private final Map<String, CheckpointDoc> checkpoints = new HashMap<>();
         private final Map<String, ConnectionConfig> connections = new HashMap<>();
-        private final Map<String, SourceModel> schemas = new HashMap<>();
+        private final Map<String, DiscoveredSourceModel> schemas = new HashMap<>();
         private final Map<String, ConnectorRegistration> registrations = new HashMap<>();
         private final Map<String, byte[]> connectorArtifacts = new HashMap<>();
         private final Map<String, ConnectionTestResult> testResults = new HashMap<>();
@@ -488,12 +496,12 @@ class StorePortTest {
         public SchemaStore schemas() {
             return new SchemaStore() {
                 @Override
-                public void save(String connectionId, SourceModel model) {
-                    schemas.put(connectionId, model);
+                public void save(DiscoveredSourceModel discovered) {
+                    schemas.put(discovered.connectionId(), discovered);
                 }
 
                 @Override
-                public Optional<SourceModel> get(String connectionId) {
+                public Optional<DiscoveredSourceModel> get(String connectionId) {
                     return Optional.ofNullable(schemas.get(connectionId));
                 }
             };

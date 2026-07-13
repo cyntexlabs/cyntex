@@ -7,15 +7,17 @@ import java.util.Optional;
  * truth-layer store counterpart of {@link SchemaDiscoverer}. A pure interface (rule R2); it carries no
  * connector-framework or store-driver types.
  *
- * <p>The identity is the connection id. {@link #save} upserts the model for a connection latest-only,
- * so a re-discovery overwrites the previous model in place rather than accumulating versions;
- * {@link #get} returns the stored model for a connection, or empty when none has been discovered.
+ * <p>The stored unit is the {@link DiscoveredSourceModel} envelope — the model plus the connector id
+ * and discovery time the read face reports. The identity is the connection id. {@link #save} upserts
+ * the envelope for its connection latest-only, so a re-discovery overwrites the previous one in place
+ * rather than accumulating versions; {@link #get} returns the stored envelope for a connection, or
+ * empty when none has been discovered.
  */
 public interface SchemaStore {
 
-    /** Upserts the discovered source model for the connection id; latest-only, a re-discovery overwrites. */
-    void save(String connectionId, SourceModel model);
+    /** Upserts the discovery envelope for its connection id; latest-only, a re-discovery overwrites. */
+    void save(DiscoveredSourceModel discovered);
 
-    /** Returns the stored source model for the connection id, or empty if none has been discovered. */
-    Optional<SourceModel> get(String connectionId);
+    /** Returns the stored discovery envelope for the connection id, or empty if none has been discovered. */
+    Optional<DiscoveredSourceModel> get(String connectionId);
 }

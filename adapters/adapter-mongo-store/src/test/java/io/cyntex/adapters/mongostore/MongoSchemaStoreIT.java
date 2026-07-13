@@ -3,6 +3,7 @@ package io.cyntex.adapters.mongostore;
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoClients;
 import com.mongodb.client.MongoCollection;
+import io.cyntex.spi.store.DiscoveredSourceModel;
 import io.cyntex.spi.store.SourceField;
 import io.cyntex.spi.store.SourceIndex;
 import io.cyntex.spi.store.SourceModel;
@@ -20,12 +21,12 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * Witnesses the source-schema store against a real Mongo replica-set: a saved source model reads back
- * equal through the real bson encode / decode (tables, fields including one with no resolved type,
- * primary key, and both a unique and a non-unique index), an absent connection reads back empty, and a
- * re-discovery of the same connection replaces the stored model in place (last write wins) rather than
- * accumulating documents. Skipped automatically where Docker is absent, so a Docker-less build stays
- * green.
+ * Witnesses the discovered-schema store against a real Mongo replica-set: a saved discovery envelope
+ * (connector id, discovery time, and the source model's tables, fields including one with no resolved
+ * type, primary key, and both a unique and a non-unique index) reads back equal through the real bson
+ * encode / decode, an absent connection reads back empty, and a re-discovery of the same connection
+ * replaces the stored envelope in place (last write wins) rather than accumulating documents. Skipped
+ * automatically where Docker is absent, so a Docker-less build stays green.
  */
 @Testcontainers(disabledWithoutDocker = true)
 class MongoSchemaStoreIT {
@@ -48,13 +49,14 @@ class MongoSchemaStoreIT {
     }
 
     @Test
-    void savedModelReadsBackEqualThroughRealBson() {
+    void savedEnvelopeReadsBackEqualThroughRealBson() {
         withStore((store, collection) -> {
-            SourceModel model = ordersModel();
-            store.save("orders-db", model);
+            DiscoveredSourceModel envelope =
+                    new DiscoveredSourceModel("orders-db", "mysql", 1783998000000L, ordersModel());
+            store.save(envelope);
 
-            Optional<SourceModel> read = store.get("orders-db");
-            assertThat(read).contains(model);
+            Optional<DiscoveredSourceModel> read = store.get("orders-db");
+            assertThat(read).contains(envelope);
         });
     }
 
@@ -64,12 +66,16 @@ class MongoSchemaStoreIT {
     }
 
     @Test
-    void reDiscoveryReplacesTheStoredModelInPlace() {
+    void reDiscoveryReplacesTheStoredEnvelopeInPlace() {
         withStore((store, collection) -> {
-            store.save("orders-db", ordersModel());
-            SourceModel rediscovered = new SourceModel(List.of(
-                    new SourceTable("orders", List.of(new SourceField("id", "bigint")), List.of("id"), List.of())));
-            store.save("orders-db", rediscovered);
+            store.save(new DiscoveredSourceModel("orders-db", "mysql", 1L, ordersModel()));
+            DiscoveredSourceModel rediscovered = new DiscoveredSourceModel(
+                    "orders-db",
+                    "mysql",
+                    2L,
+                    new SourceModel(List.of(
+                            new SourceTable("orders", List.of(new SourceField("id", "bigint")), List.of("id"), List.of()))));
+            store.save(rediscovered);
 
             assertThat(collection.countDocuments()).isEqualTo(1);
             assertThat(store.get("orders-db")).contains(rediscovered);

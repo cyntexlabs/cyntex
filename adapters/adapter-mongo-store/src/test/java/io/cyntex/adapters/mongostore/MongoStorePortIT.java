@@ -8,6 +8,7 @@ import io.cyntex.core.dsl.DslParser;
 import io.cyntex.spi.store.ConnectionConfig;
 import io.cyntex.spi.store.ConnectionTestItem;
 import io.cyntex.spi.store.ConnectionTestResult;
+import io.cyntex.spi.store.DiscoveredSourceModel;
 import io.cyntex.spi.store.RegistrationSource;
 import io.cyntex.spi.store.SourceModel;
 import io.cyntex.spi.store.SourceTable;
@@ -66,8 +67,8 @@ class MongoStorePortIT {
             port.artifacts().save(PARSER.parse(ORDERS));
             port.state().create("orders_sync", "{\"phase\":\"snapshot\"}", Instant.parse("2026-07-06T00:00:00Z"));
             port.catalog().save(new ConnectionConfig("mysql-local", "mysql", Map.of("host", "localhost")));
-            port.schemas().save("mysql-local", new SourceModel(List.of(
-                    new SourceTable("orders", List.of(), List.of(), List.of()))));
+            port.schemas().save(new DiscoveredSourceModel("mysql-local", "mysql", 1783998000000L, new SourceModel(List.of(
+                    new SourceTable("orders", List.of(), List.of(), List.of())))));
             port.connectors().register(
                     "mysql", "1.3.5", RegistrationSource.SEED, "mysql-connector-bytes".getBytes(StandardCharsets.UTF_8));
             port.connectionTestResults().save(new ConnectionTestResult(

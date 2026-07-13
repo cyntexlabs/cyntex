@@ -4,15 +4,16 @@ import io.cyntex.spi.store.ConnectionConfig;
 import io.cyntex.spi.store.ConnectionTestResult;
 
 /**
- * The one synchronous call the control plane is permitted to make into the runtime: a connection test.
- * Every other control operation writes desired state the runtime converges toward, so the two rings
- * decouple through the store and hold no reference to each other; testing a connection is the single
- * exception, because it is a one-shot request/response that cannot be expressed as desired state. This
- * interface is that narrow seam.
+ * The first synchronous call the control plane is permitted to make into the runtime: a connection
+ * test. Every other control operation writes desired state the runtime converges toward, so the two
+ * rings decouple through the store and hold no reference to each other; the exceptions are the one-shot
+ * request/response calls that cannot be expressed as desired state. This interface is one of those
+ * narrow seams.
  *
- * <p>The whitelist is a closed set of exactly one member (this probe). A preview, a schema discovery,
- * any further synchronous control-to-runtime call is a deliberate widening of the seam guarded by the
- * ring-dependency gate, not something a later slice adds in passing.
+ * <p>The whitelist of such calls is a closed set — this probe and the {@link SchemaDiscoveryProbe} —
+ * pinned by the ring-dependency gate. A preview or any further synchronous control-to-runtime call is
+ * a deliberate widening of the seam that must change the gate and the sync-whitelist decision, not
+ * something a later slice adds in passing.
  *
  * <p>The probe drives the target connector's own connection test and reports the normalized
  * {@link ConnectionTestResult}: the overall outcome plus the per-item checks the connector reported.

@@ -14,8 +14,8 @@ import java.util.Map;
  * the new verbs in lockstep rather than each face maintaining its own hand-written list.
  *
  * <p>The audit flag marks the operations that mutate persisted control-plane state (an artifact, a
- * user, a token) and therefore leave a record; read and list operations and the read-only connection
- * probe carry no audit flag.
+ * connection's persisted probe or discovery result, a user, a token) and therefore leave a record;
+ * read and list operations carry no audit flag.
  */
 public final class ControlOperations {
 
@@ -26,12 +26,18 @@ public final class ControlOperations {
     public static final Operation ARTIFACT_GET = new Operation("artifact.get", Scope.READ, false, null, CLI_POC);
     public static final Operation ARTIFACT_LIST = new Operation("artifact.list", Scope.READ, false, null, CLI_POC);
 
-    // connection domain: runs an external probe and persists its result for later query and display, so
-    // it mutates persisted state (a write) and is audited. The read-back verb returns the latest persisted
-    // result (or a 404 when the connection was never tested); it mutates nothing, so it is read and unaudited.
+    // connection domain: each probing verb runs an external probe and persists its result for later query
+    // and display, so it mutates persisted state (a write) and is audited; its read-back peer returns the
+    // latest persisted result (or a 404 when the connection was never probed), mutates nothing, and is
+    // read and unaudited. connection.test / connection.test-result answer "does it connect"; their pair
+    // connection.discover-schema / connection.schema answer "what is inside" (the discovered source model).
     public static final Operation CONNECTION_TEST = new Operation("connection.test", Scope.WRITE, true, null, CLI_POC);
     public static final Operation CONNECTION_TEST_RESULT =
             new Operation("connection.test-result", Scope.READ, false, null, CLI_POC);
+    public static final Operation CONNECTION_DISCOVER_SCHEMA =
+            new Operation("connection.discover-schema", Scope.WRITE, true, null, CLI_POC);
+    public static final Operation CONNECTION_SCHEMA =
+            new Operation("connection.schema", Scope.READ, false, null, CLI_POC);
 
     // cluster domain: topology is sensitive, so listing members is a registry operation (authenticated
     // like every other verb) rather than an anonymous endpoint — only the process-liveness probe stays
@@ -52,6 +58,8 @@ public final class ControlOperations {
             ARTIFACT_LIST,
             CONNECTION_TEST,
             CONNECTION_TEST_RESULT,
+            CONNECTION_DISCOVER_SCHEMA,
+            CONNECTION_SCHEMA,
             CLUSTER_MEMBERS,
             USER_CREATE,
             USER_PASSWD,

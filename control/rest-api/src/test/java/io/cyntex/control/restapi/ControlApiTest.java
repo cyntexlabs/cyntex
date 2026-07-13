@@ -11,15 +11,20 @@ import io.cyntex.control.core.ControlOperations;
 import io.cyntex.control.core.Frontend;
 import io.cyntex.control.core.Maturity;
 import io.cyntex.control.core.Operation;
+import io.cyntex.control.core.SchemaDiscoveryService;
+import io.cyntex.control.core.SchemaQueryService;
 import io.cyntex.control.core.StoredArtifact;
 import io.cyntex.core.catalog.CyntexCatalog;
+import io.cyntex.core.dsl.DslParser;
 import io.cyntex.core.model.Resource;
 import io.cyntex.core.model.canonical.CanonicalWriter;
-import io.cyntex.core.dsl.DslParser;
 import io.cyntex.runtime.probe.ConnectionProbe;
+import io.cyntex.runtime.probe.SchemaDiscoveryProbe;
 import io.cyntex.spi.store.ArtifactStore;
 import io.cyntex.spi.store.ConnectionTestResult;
 import io.cyntex.spi.store.ConnectionTestResultStore;
+import io.cyntex.spi.store.DiscoveredSourceModel;
+import io.cyntex.spi.store.SchemaStore;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -291,10 +296,11 @@ class ControlApiTest {
                 .as("every projected verb must be a registered, CLI-exposed operation")
                 .isEmpty();
         assertThat(projected)
-                .as("the artifact verbs, the R5 connection-test verb and its read-back, and the topology verb "
-                        + "are projected onto HTTP")
+                .as("the artifact verbs, the two whitelisted connection verbs with their read-backs, and the "
+                        + "topology verb are projected onto HTTP")
                 .contains("artifact.apply", "artifact.get", "artifact.list", "connection.test",
-                        "connection.test-result", "cluster.members");
+                        "connection.test-result", "connection.discover-schema", "connection.schema",
+                        "cluster.members");
     }
 
     private static String describe(HandlerMethod handler) {
@@ -366,6 +372,41 @@ class ControlApiTest {
 
                 @Override
                 public Optional<ConnectionTestResult> find(String connectionId) {
+                    return Optional.empty();
+                }
+            });
+        }
+
+        // The discover-schema controller methods are bundled with the same controller, so their services
+        // must be present for the context to stand up; their behaviour is proven in ConnectionApiTest, so
+        // here they only need to construct (inert probe, empty store).
+        @Bean
+        SchemaDiscoveryService schemaDiscoveryService() {
+            SchemaDiscoveryProbe probe = config -> {
+                throw new UnsupportedOperationException("connection.discover-schema is not exercised in this test");
+            };
+            return new SchemaDiscoveryService(probe, new SchemaStore() {
+                @Override
+                public void save(DiscoveredSourceModel discovered) {
+                }
+
+                @Override
+                public Optional<DiscoveredSourceModel> get(String connectionId) {
+                    return Optional.empty();
+                }
+            }, new AuditGate(record -> {
+            }, Clock.systemUTC()), Clock.systemUTC());
+        }
+
+        @Bean
+        SchemaQueryService schemaQueryService() {
+            return new SchemaQueryService(new SchemaStore() {
+                @Override
+                public void save(DiscoveredSourceModel discovered) {
+                }
+
+                @Override
+                public Optional<DiscoveredSourceModel> get(String connectionId) {
                     return Optional.empty();
                 }
             });

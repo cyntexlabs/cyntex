@@ -1,6 +1,7 @@
 package io.cyntex.adapters.mongostore;
 
 import io.cyntex.core.common.CyntexException;
+import io.cyntex.spi.store.DiscoveredSourceModel;
 import io.cyntex.spi.store.SourceField;
 import io.cyntex.spi.store.SourceIndex;
 import io.cyntex.spi.store.SourceModel;
@@ -14,14 +15,15 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.catchThrowable;
 
 /**
- * The source-model document codec is the mapping core of the schema store: a discovered source model is
- * stored as a structured document keyed by the connection id — its tables, and each table's fields,
- * primary key and indexes, as nested sub-documents — and reconstructed from it on read. These witness
- * the mapping deterministically, without a Mongo server: the document shape, a full round-trip
- * (including a field with no resolved type and both a unique and a non-unique index), an empty model,
- * and that a structurally corrupt stored document surfaces as a coded {@code io.document-unreadable}
- * diagnostic rather than a bare crash. A real Mongo round-trip is exercised by
- * {@code MongoSchemaStoreIT} (skipped where Docker is absent).
+ * The discovered-schema document codec is the mapping core of the schema store: a discovery envelope —
+ * the connection id as the key, the connector id and discovery time it reports, and the source model's
+ * tables (with their fields, primary key and indexes) as nested sub-documents — is stored as one
+ * structured document and reconstructed from it on read. These witness the mapping deterministically,
+ * without a Mongo server: the document shape, a full round-trip (including a field with no resolved
+ * type and both a unique and a non-unique index), an empty model, and that a structurally corrupt
+ * stored document surfaces as a coded {@code io.document-unreadable} diagnostic rather than a bare
+ * crash. A real Mongo round-trip is exercised by {@code MongoSchemaStoreIT} (skipped where Docker is
+ * absent).
  */
 class MongoSchemaStoreTest {
 
@@ -41,11 +43,17 @@ class MongoSchemaStoreTest {
         return new SourceModel(List.of(orders, customers));
     }
 
+    private static DiscoveredSourceModel discovered(String connectionId, SourceModel model) {
+        return new DiscoveredSourceModel(connectionId, "mysql", 1783998000000L, model);
+    }
+
     @Test
-    void documentCarriesIdAndTables() {
-        Document document = MongoSchemaStore.toDocument("orders-db", ordersModel());
+    void documentCarriesIdConnectorIdDiscoveredAtAndTables() {
+        Document document = MongoSchemaStore.toDocument(discovered("orders-db", ordersModel()));
 
         assertThat(document.getString("_id")).isEqualTo("orders-db");
+        assertThat(document.getString("connectorId")).isEqualTo("mysql");
+        assertThat(document.getLong("discoveredAt")).isEqualTo(1783998000000L);
         List<Document> tables = document.getList("tables", Document.class);
         assertThat(tables).extracting(t -> t.getString("name")).containsExactly("orders", "customers");
 
@@ -62,43 +70,43 @@ class MongoSchemaStoreTest {
     }
 
     @Test
-    void roundTripReconstructsTheSameModel() {
-        SourceModel model = ordersModel();
+    void roundTripReconstructsTheSameEnvelope() {
+        DiscoveredSourceModel envelope = discovered("orders-db", ordersModel());
 
-        assertThat(MongoSchemaStore.toModel(MongoSchemaStore.toDocument("orders-db", model))).isEqualTo(model);
+        assertThat(MongoSchemaStore.toDiscovered(MongoSchemaStore.toDocument(envelope))).isEqualTo(envelope);
     }
 
     @Test
     void emptyModelRoundTrips() {
-        SourceModel model = new SourceModel(List.of());
+        DiscoveredSourceModel envelope = discovered("bare", new SourceModel(List.of()));
 
-        assertThat(MongoSchemaStore.toModel(MongoSchemaStore.toDocument("bare", model))).isEqualTo(model);
+        assertThat(MongoSchemaStore.toDiscovered(MongoSchemaStore.toDocument(envelope))).isEqualTo(envelope);
     }
 
     @Test
     void aFieldWithNoResolvedTypeRoundTripsAsNull() {
-        SourceModel model = new SourceModel(List.of(
-                new SourceTable("t", List.of(new SourceField("c", null)), List.of(), List.of())));
+        DiscoveredSourceModel envelope = discovered("x", new SourceModel(List.of(
+                new SourceTable("t", List.of(new SourceField("c", null)), List.of(), List.of()))));
 
-        SourceModel read = MongoSchemaStore.toModel(MongoSchemaStore.toDocument("x", model));
+        DiscoveredSourceModel read = MongoSchemaStore.toDiscovered(MongoSchemaStore.toDocument(envelope));
 
-        assertThat(read.tables().get(0).fields().get(0).type()).isNull();
-        assertThat(read).isEqualTo(model);
+        assertThat(read.model().tables().get(0).fields().get(0).type()).isNull();
+        assertThat(read).isEqualTo(envelope);
     }
 
     @Test
-    void toModelWithAnAbsentTablesFieldReadsBackEmpty() {
-        SourceModel read = MongoSchemaStore.toModel(new Document("_id", "bare"));
+    void toDiscoveredWithAnAbsentTablesFieldReadsBackEmpty() {
+        DiscoveredSourceModel read = MongoSchemaStore.toDiscovered(
+                new Document("_id", "bare").append("connectorId", "mysql").append("discoveredAt", 1L));
 
-        assertThat(read.tables()).isEmpty();
+        assertThat(read.model().tables()).isEmpty();
     }
 
     @Test
-    void toModelOnATableMissingItsNameIsDocumentUnreadable() {
-        Document corrupt = new Document("_id", "orders-db")
-                .append("tables", List.of(new Document("fields", List.of())));
+    void toDiscoveredOnADocumentMissingItsConnectorIdIsDocumentUnreadable() {
+        Document corrupt = new Document("_id", "orders-db").append("discoveredAt", 1L);
 
-        Throwable thrown = catchThrowable(() -> MongoSchemaStore.toModel(corrupt));
+        Throwable thrown = catchThrowable(() -> MongoSchemaStore.toDiscovered(corrupt));
 
         assertThat(thrown).isInstanceOf(CyntexException.class);
         CyntexException coded = (CyntexException) thrown;
@@ -107,21 +115,52 @@ class MongoSchemaStoreTest {
     }
 
     @Test
-    void toModelOnATablesFieldThatIsNotAListIsDocumentUnreadable() {
-        Document corrupt = new Document("_id", "orders-db").append("tables", "oops");
+    void toDiscoveredOnADocumentWithoutANumericDiscoveredAtIsDocumentUnreadable() {
+        Document corrupt = new Document("_id", "orders-db").append("connectorId", "mysql").append("discoveredAt", "oops");
 
-        Throwable thrown = catchThrowable(() -> MongoSchemaStore.toModel(corrupt));
+        Throwable thrown = catchThrowable(() -> MongoSchemaStore.toDiscovered(corrupt));
 
         assertThat(thrown).isInstanceOf(CyntexException.class);
         assertThat(((CyntexException) thrown).code()).isEqualTo(IoError.DOCUMENT_UNREADABLE);
     }
 
     @Test
-    void toModelOnAnIndexMissingItsNameIsDocumentUnreadable() {
-        Document corrupt = new Document("_id", "orders-db").append("tables", List.of(
-                new Document("name", "orders").append("indexes", List.of(new Document("unique", true)))));
+    void toDiscoveredOnATableMissingItsNameIsDocumentUnreadable() {
+        Document corrupt = new Document("_id", "orders-db")
+                .append("connectorId", "mysql")
+                .append("discoveredAt", 1L)
+                .append("tables", List.of(new Document("fields", List.of())));
 
-        Throwable thrown = catchThrowable(() -> MongoSchemaStore.toModel(corrupt));
+        Throwable thrown = catchThrowable(() -> MongoSchemaStore.toDiscovered(corrupt));
+
+        assertThat(thrown).isInstanceOf(CyntexException.class);
+        CyntexException coded = (CyntexException) thrown;
+        assertThat(coded.code()).isEqualTo(IoError.DOCUMENT_UNREADABLE);
+        assertThat(coded.args()).containsEntry("id", "orders-db");
+    }
+
+    @Test
+    void toDiscoveredOnATablesFieldThatIsNotAListIsDocumentUnreadable() {
+        Document corrupt = new Document("_id", "orders-db")
+                .append("connectorId", "mysql")
+                .append("discoveredAt", 1L)
+                .append("tables", "oops");
+
+        Throwable thrown = catchThrowable(() -> MongoSchemaStore.toDiscovered(corrupt));
+
+        assertThat(thrown).isInstanceOf(CyntexException.class);
+        assertThat(((CyntexException) thrown).code()).isEqualTo(IoError.DOCUMENT_UNREADABLE);
+    }
+
+    @Test
+    void toDiscoveredOnAnIndexMissingItsNameIsDocumentUnreadable() {
+        Document corrupt = new Document("_id", "orders-db")
+                .append("connectorId", "mysql")
+                .append("discoveredAt", 1L)
+                .append("tables", List.of(
+                        new Document("name", "orders").append("indexes", List.of(new Document("unique", true)))));
+
+        Throwable thrown = catchThrowable(() -> MongoSchemaStore.toDiscovered(corrupt));
 
         assertThat(thrown).isInstanceOf(CyntexException.class);
         assertThat(((CyntexException) thrown).code()).isEqualTo(IoError.DOCUMENT_UNREADABLE);

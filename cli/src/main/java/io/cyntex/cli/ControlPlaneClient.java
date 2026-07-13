@@ -62,4 +62,22 @@ interface ControlPlaneClient {
      * failure. Never throws.
      */
     ConnectionTestResultOutcome testResult(URI baseUrl, String credential, String id);
+
+    /**
+     * Runs a schema discovery via {@code POST {baseUrl}/api/connections:discover-schema}, authenticated by
+     * the bearer {@code credential}: the request carries the connection {@code id} (the key its model is
+     * stored under), the {@code connectorId} it configures, and the {@code settings} to run that connector
+     * with. Returns the discovered model on success, a coded rejection when the server refuses, or
+     * unreachable on any I/O failure. Never throws.
+     */
+    ConnectionDiscoverSchemaOutcome discoverSchema(
+            URI baseUrl, String credential, String id, String connectorId, Map<String, Object> settings);
+
+    /**
+     * Reads a connection's latest discovered source model via {@code GET {baseUrl}/api/connections/{id}/schema},
+     * authenticated by the bearer {@code credential}: the stored model on success, absent on a 404 (the
+     * connection has never been discovered), a coded rejection when the server refuses, or unreachable on any
+     * I/O failure. Never throws.
+     */
+    ConnectionSchemaOutcome schema(URI baseUrl, String credential, String id);
 }

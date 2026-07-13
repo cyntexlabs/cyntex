@@ -123,6 +123,39 @@ class ControlPlaneAssemblyIT {
     }
 
     @Test
+    void schemaDiscoveryIsWiredThroughToTheConnectorRegistryOverARealStore() {
+        int port = start();
+        RestClient client = RestClient.create("http://localhost:" + port);
+
+        client.post().uri("/auth/bootstrap").contentType(MediaType.APPLICATION_JSON)
+                .body(Map.of("username", "admin", "password", "s3cret")).retrieve().toBodilessEntity();
+        Map<?, ?> login = client.post().uri("/auth/login").contentType(MediaType.APPLICATION_JSON)
+                .body(Map.of("username", "admin", "password", "s3cret")).retrieve().body(Map.class);
+        String token = (String) login.get("token");
+
+        // The discovery half is assembled over the same chain: control verb -> runtime discovery probe ->
+        // adapter-pdk discoverer -> provisioner -> connector registry. Discovering against a connector that
+        // was never registered comes back as the coded connector-domain refusal, proving the chain reaches
+        // the registry rather than a stub.
+        Map<?, ?> body = client.post().uri("/api/connections:discover-schema")
+                .header("Authorization", "Bearer " + token)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(Map.of("id", "conn_x", "connectorId", "never_registered", "settings", Map.of()))
+                .exchange((request, response) -> {
+                    assertThat(response.getStatusCode()).isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR);
+                    return response.bodyTo(Map.class);
+                });
+        assertThat(body.get("code")).isEqualTo("connector.not-registered");
+        assertThat(((Map<?, ?>) body.get("params")).get("connector")).isEqualTo("never_registered");
+
+        // The read face renders the never-discovered state as a 404, through the same assembled store.
+        HttpStatus schemaStatus = (HttpStatus) client.get().uri("/api/connections/conn_x/schema")
+                .header("Authorization", "Bearer " + token)
+                .exchange((request, response) -> response.getStatusCode());
+        assertThat(schemaStatus).isEqualTo(HttpStatus.NOT_FOUND);
+    }
+
+    @Test
     void aDefectiveSeedArtifactNeverBricksTheBoot(@TempDir Path seedDir) throws IOException {
         // A garbage jar in the swept seed directory: the startup sweep contains the failure as a
         // per-artifact warning and the node still comes up serving.

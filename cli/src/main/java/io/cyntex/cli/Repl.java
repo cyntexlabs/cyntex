@@ -54,7 +54,8 @@ final class Repl {
      * {@code ls} browses the local workspace. {@code validate} is not here — it runs the full local stack in
      * either state until a server validate endpoint exists.
      */
-    private static final List<String> ONLINE_VERBS = List.of("apply", "get", "ls", "test", "test-result");
+    private static final List<String> ONLINE_VERBS =
+            List.of("apply", "get", "ls", "test", "test-result", "discover-schema", "schema");
 
     private final CommandLine commandLine;
 
@@ -190,6 +191,14 @@ final class Repl {
             testResultOnline(words);
             return;
         }
+        if (words.get(0).equals("discover-schema")) {
+            discoverSchemaOnline(words);
+            return;
+        }
+        if (words.get(0).equals("schema")) {
+            schemaOnline(words);
+            return;
+        }
         // The other connected verbs take positional operands only; a dash-option (e.g. `-o json`) is not yet
         // supported and must not be silently misread as an id / kind / path.
         for (int i = 1; i < words.size(); i++) {
@@ -317,10 +326,33 @@ final class Repl {
         if (parsed == null) {
             return;
         }
-        PrintWriter err = commandLine.getErr();
+        SourceResource source = fetchSourceConnection("test", parsed.id(), "testable");
+        if (source == null) {
+            return;
+        }
 
-        // server-as-truth: read the stored connection, so the probe runs against exactly what is stored
         final String connectionId = parsed.id();
+        OutputFormat chosen = parsed.format();
+        ConnectionTestOutcome outcome = withFailover(() -> controlPlane.test(
+                session.landingNode(), session.credential(), connectionId, source.connector(), source.config()),
+                o -> o instanceof ConnectionTestOutcome.Unreachable);
+        switch (outcome) {
+            case ConnectionTestOutcome.Tested tested -> renderReport(tested.report(), chosen);
+            case ConnectionTestOutcome.Rejected rejected -> renderRejection(rejected.code(), rejected.message());
+            case ConnectionTestOutcome.Unreachable ignored -> reportRequestFailed();
+        }
+    }
+
+    /**
+     * Reads the stored connection a probing verb targets (server-as-truth, so the probe runs against
+     * exactly what is stored) and parses it to a source connection, or reports why it cannot be probed
+     * and returns {@code null}: a benign "not found" for a missing id, a benign "not a {adjective}
+     * connection" for a non-source kind (using the reliable stored kind, without parsing a body that is
+     * not a connection at all), and a benign "cannot read" for a stored body that no longer parses to a
+     * source — a diagnosable state, not a crash.
+     */
+    private SourceResource fetchSourceConnection(String verb, String connectionId, String adjective) {
+        PrintWriter err = commandLine.getErr();
         GetOutcome got = withFailover(() ->
                 controlPlane.get(session.landingNode(), session.credential(), connectionId),
                 o -> o instanceof GetOutcome.Unreachable);
@@ -334,42 +366,118 @@ final class Repl {
                 case GetOutcome.Unreachable ignored -> reportRequestFailed();
                 case GetOutcome.Found ignored -> { }   // handled by the outer guard; unreachable here
             }
-            return;
+            return null;
         }
-
-        // a testable connection is a kind: source; reject any other kind up front using the reliable stored
-        // kind, without parsing a body (e.g. a pipeline) that is not a connection at all
         if (!found.artifact().kind().equals("source")) {
-            err.println("test: '" + connectionId + "' is a " + found.artifact().kind()
-                    + ", not a testable connection");
+            err.println(verb + ": '" + connectionId + "' is a " + found.artifact().kind()
+                    + ", not a " + adjective + " connection");
             err.flush();
-            return;
+            return null;
         }
         Resource resource;
         try {
             resource = new DslParser().parse(found.artifact().canonicalForm());
         } catch (RuntimeException malformed) {
-            // a stored connection whose body no longer parses is a diagnosable state, not a crash
-            err.println("test: cannot read connection '" + connectionId + "'");
+            err.println(verb + ": cannot read connection '" + connectionId + "'");
             err.flush();
-            return;
+            return null;
         }
         if (!(resource instanceof SourceResource source)) {
             // the stored kind claimed source but the body did not parse to one — treat as unreadable
-            err.println("test: cannot read connection '" + connectionId + "'");
+            err.println(verb + ": cannot read connection '" + connectionId + "'");
             err.flush();
+            return null;
+        }
+        return source;
+    }
+
+    /**
+     * {@code discover-schema <id> [-o text|json|yaml]} — discovers a stored connection's source model. It
+     * reads the connection from the server first (server-as-truth), parses the connector and connection
+     * config it holds, then posts the discovery and renders the discovered tables. A missing operand or an
+     * unknown option is a benign usage line; an id that resolves to nothing is a benign "not found"; an id
+     * that is not a source connection is a benign "not a discoverable connection"; a coded refusal renders
+     * its code and message.
+     */
+    private void discoverSchemaOnline(List<String> words) {
+        IdAndFormat parsed = parseIdAndFormat("discover-schema", words);
+        if (parsed == null) {
+            return;
+        }
+        SourceResource source = fetchSourceConnection("discover-schema", parsed.id(), "discoverable");
+        if (source == null) {
             return;
         }
 
-        OutputFormat chosen = parsed.format();
-        ConnectionTestOutcome outcome = withFailover(() -> controlPlane.test(
+        final String connectionId = parsed.id();
+        ConnectionDiscoverSchemaOutcome outcome = withFailover(() -> controlPlane.discoverSchema(
                 session.landingNode(), session.credential(), connectionId, source.connector(), source.config()),
-                o -> o instanceof ConnectionTestOutcome.Unreachable);
+                o -> o instanceof ConnectionDiscoverSchemaOutcome.Unreachable);
         switch (outcome) {
-            case ConnectionTestOutcome.Tested tested -> renderReport(tested.report(), chosen);
-            case ConnectionTestOutcome.Rejected rejected -> renderRejection(rejected.code(), rejected.message());
-            case ConnectionTestOutcome.Unreachable ignored -> reportRequestFailed();
+            case ConnectionDiscoverSchemaOutcome.Discovered discovered ->
+                    renderSchema(discovered.schema(), parsed.format());
+            case ConnectionDiscoverSchemaOutcome.Rejected rejected ->
+                    renderRejection(rejected.code(), rejected.message());
+            case ConnectionDiscoverSchemaOutcome.Unreachable ignored -> reportRequestFailed();
         }
+    }
+
+    /**
+     * {@code schema <id> [table] [-o text|json|yaml]} — reads a connection's latest discovered source model
+     * and renders it (the read peer of {@code discover-schema}, no discovery run). With a table operand the
+     * view narrows to that table — a presentation-side projection of the full stored model, not a separate
+     * server call; a table not in the model is a benign line naming the miss. A connection that has never
+     * been discovered is a benign "not discovered yet" line; a coded refusal renders its code and message.
+     */
+    private void schemaOnline(List<String> words) {
+        IdTableAndFormat parsed = parseIdTableAndFormat(words);
+        if (parsed == null) {
+            return;
+        }
+        final String connectionId = parsed.id();
+        ConnectionSchemaOutcome outcome = withFailover(() ->
+                controlPlane.schema(session.landingNode(), session.credential(), connectionId),
+                o -> o instanceof ConnectionSchemaOutcome.Unreachable);
+        switch (outcome) {
+            case ConnectionSchemaOutcome.Found found -> {
+                ConnectionSchema schema = found.schema();
+                if (parsed.table() != null) {
+                    ConnectionSchema narrowed = filterToTable(schema, parsed.table());
+                    if (narrowed == null) {
+                        PrintWriter err = commandLine.getErr();
+                        err.println("schema: '" + parsed.table() + "' is not in the discovered model of '"
+                                + connectionId + "' (tables: " + tableNames(schema) + ")");
+                        err.flush();
+                        return;
+                    }
+                    schema = narrowed;
+                }
+                renderSchema(schema, parsed.format());
+            }
+            case ConnectionSchemaOutcome.Absent ignored -> {
+                PrintWriter err = commandLine.getErr();
+                err.println("schema: '" + connectionId + "' has not been discovered yet");
+                err.flush();
+            }
+            case ConnectionSchemaOutcome.Rejected rejected -> renderRejection(rejected.code(), rejected.message());
+            case ConnectionSchemaOutcome.Unreachable ignored -> reportRequestFailed();
+        }
+    }
+
+    /** The model narrowed to one table by exact name, or {@code null} when the model has no such table. */
+    private static ConnectionSchema filterToTable(ConnectionSchema schema, String table) {
+        List<ConnectionSchema.Table> match = schema.tables().stream()
+                .filter(t -> t.name().equals(table))
+                .toList();
+        return match.isEmpty()
+                ? null
+                : new ConnectionSchema(schema.connectionId(), schema.connectorId(), match, schema.discoveredAt());
+    }
+
+    /** The model's table names joined for a diagnostic line. */
+    private static String tableNames(ConnectionSchema schema) {
+        return schema.tables().stream().map(ConnectionSchema.Table::name)
+                .reduce((a, b) -> a + ", " + b).orElse("none");
     }
 
     /**
@@ -448,6 +556,57 @@ final class Repl {
     private record IdAndFormat(String id, OutputFormat format) {
     }
 
+    /**
+     * Parses {@code <id> [table] [-o text|json|yaml]} for the schema read verb, printing its usage line to
+     * err and returning {@code null} on any error. The second positional operand is the optional table to
+     * narrow the view to.
+     */
+    private IdTableAndFormat parseIdTableAndFormat(List<String> words) {
+        PrintWriter err = commandLine.getErr();
+        String id = null;
+        String table = null;
+        OutputFormat format = OutputFormat.TEXT;
+        for (int i = 1; i < words.size(); i++) {
+            String word = words.get(i);
+            if (word.equals("-o") || word.equals("--output")) {
+                if (i + 1 >= words.size()) {
+                    err.println("schema: " + word + " needs a format (text|json|yaml)");
+                    err.flush();
+                    return null;
+                }
+                OutputFormat chosen = outputFormat(words.get(++i));
+                if (chosen == null) {
+                    err.println("schema: unknown output format '" + words.get(i) + "' (expected text|json|yaml)");
+                    err.flush();
+                    return null;
+                }
+                format = chosen;
+            } else if (word.startsWith("-")) {
+                err.println("schema: unknown option " + word);
+                err.flush();
+                return null;
+            } else if (id == null) {
+                id = word;
+            } else if (table == null) {
+                table = word;
+            } else {
+                err.println("schema: too many operands (usage: schema <id> [table] [-o text|json|yaml])");
+                err.flush();
+                return null;
+            }
+        }
+        if (id == null || id.isBlank()) {
+            err.println("schema: missing operand (usage: schema <id> [table] [-o text|json|yaml])");
+            err.flush();
+            return null;
+        }
+        return new IdTableAndFormat(id, table, format);
+    }
+
+    /** The parsed operands of the schema verb: the connection id, the optional table, and the format. */
+    private record IdTableAndFormat(String id, String table, OutputFormat format) {
+    }
+
     /** The {@code -o} format spelled text / json / yaml (case-insensitive), or {@code null} if unrecognised. */
     private static OutputFormat outputFormat(String raw) {
         return switch (raw.toLowerCase(Locale.ROOT)) {
@@ -508,6 +667,95 @@ final class Repl {
         if (value != null && !value.isBlank()) {
             map.put(key, value);
         }
+    }
+
+    /** Renders a discovered model on the chosen surface: a human summary, or the structured machine form. */
+    private void renderSchema(ConnectionSchema schema, OutputFormat format) {
+        PrintWriter out = commandLine.getOut();
+        switch (format) {
+            case TEXT -> renderSchemaText(out, schema);
+            case JSON -> out.println(JsonOut.write(schemaMap(schema)));
+            case YAML -> out.println(YamlOut.write(schemaMap(schema)));
+        }
+        out.flush();
+    }
+
+    /**
+     * The human summary: a header naming the connection + connector and the table count, then each table.
+     * A single-table view (the narrowed {@code schema <id> <table>} form) expands the fields, primary-key
+     * markers and indexes; the multi-table view keeps to one summary line per table.
+     */
+    private static void renderSchemaText(PrintWriter out, ConnectionSchema schema) {
+        List<ConnectionSchema.Table> tables = schema.tables();
+        out.println(schema.connectionId() + " (" + schema.connectorId() + ")  "
+                + tables.size() + (tables.size() == 1 ? " table" : " tables"));
+        if (tables.size() == 1) {
+            renderTableDetail(out, tables.get(0));
+            return;
+        }
+        for (ConnectionSchema.Table table : tables) {
+            StringBuilder line = new StringBuilder(String.format("  %-20s %d %s", table.name(),
+                    table.fields().size(), table.fields().size() == 1 ? "field" : "fields"));
+            if (!table.primaryKey().isEmpty()) {
+                line.append("  pk(").append(String.join(", ", table.primaryKey())).append(')');
+            }
+            out.println(line);
+        }
+    }
+
+    /** One table expanded under its name: each field with its type and pk marker, then each index. */
+    private static void renderTableDetail(PrintWriter out, ConnectionSchema.Table table) {
+        out.println("  " + table.name());
+        for (ConnectionSchema.Field field : table.fields()) {
+            StringBuilder line = new StringBuilder(String.format("    %-20s %s",
+                    field.name(), field.type() == null ? "?" : field.type()));
+            if (table.primaryKey().contains(field.name())) {
+                line.append("  pk");
+            }
+            out.println(line);
+        }
+        for (ConnectionSchema.Index index : table.indexes()) {
+            StringBuilder line = new StringBuilder(
+                    "    index " + index.name() + " (" + String.join(", ", index.fields()) + ")");
+            if (index.unique()) {
+                line.append("  unique");
+            }
+            out.println(line);
+        }
+    }
+
+    /** The model as an ordered tree for the machine surfaces, omitting a field type left unresolved. */
+    private static Map<String, Object> schemaMap(ConnectionSchema schema) {
+        Map<String, Object> map = new LinkedHashMap<>();
+        map.put("connectionId", schema.connectionId());
+        map.put("connectorId", schema.connectorId());
+        List<Object> tables = new ArrayList<>();
+        for (ConnectionSchema.Table table : schema.tables()) {
+            Map<String, Object> entry = new LinkedHashMap<>();
+            entry.put("name", table.name());
+            List<Object> fields = new ArrayList<>();
+            for (ConnectionSchema.Field field : table.fields()) {
+                Map<String, Object> f = new LinkedHashMap<>();
+                f.put("name", field.name());
+                putIfPresent(f, "type", field.type());
+                fields.add(f);
+            }
+            entry.put("fields", fields);
+            entry.put("primaryKey", table.primaryKey());
+            List<Object> indexes = new ArrayList<>();
+            for (ConnectionSchema.Index index : table.indexes()) {
+                Map<String, Object> i = new LinkedHashMap<>();
+                i.put("name", index.name());
+                i.put("fields", index.fields());
+                i.put("unique", index.unique());
+                indexes.add(i);
+            }
+            entry.put("indexes", indexes);
+            tables.add(entry);
+        }
+        map.put("tables", tables);
+        map.put("discoveredAt", schema.discoveredAt());
+        return map;
     }
 
     /**

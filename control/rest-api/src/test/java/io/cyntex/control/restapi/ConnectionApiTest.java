@@ -8,18 +8,27 @@ import io.cyntex.control.core.ControlOperations;
 import io.cyntex.control.core.CredentialAuthenticator;
 import io.cyntex.control.core.GeneratedSecret;
 import io.cyntex.control.core.OperationRegistry;
+import io.cyntex.control.core.SchemaDiscoveryService;
+import io.cyntex.control.core.SchemaQueryService;
+import io.cyntex.control.core.SchemaReport;
 import io.cyntex.control.core.Scope;
 import io.cyntex.control.core.TokenSecrets;
 import io.cyntex.control.core.TokenService;
 import io.cyntex.control.core.TokenSigner;
 import io.cyntex.control.core.VerifiedToken;
 import io.cyntex.runtime.probe.ConnectionProbe;
+import io.cyntex.runtime.probe.SchemaDiscoveryProbe;
 import io.cyntex.spi.store.AuditRecord;
 import io.cyntex.spi.store.AuditStore;
 import io.cyntex.spi.store.ConnectionConfig;
 import io.cyntex.spi.store.ConnectionTestItem;
 import io.cyntex.spi.store.ConnectionTestResult;
 import io.cyntex.spi.store.ConnectionTestResultStore;
+import io.cyntex.spi.store.DiscoveredSourceModel;
+import io.cyntex.spi.store.SchemaStore;
+import io.cyntex.spi.store.SourceField;
+import io.cyntex.spi.store.SourceModel;
+import io.cyntex.spi.store.SourceTable;
 import io.cyntex.spi.store.TokenRecord;
 import io.cyntex.spi.store.TokenStore;
 import org.junit.jupiter.api.AfterAll;
@@ -50,10 +59,11 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * The connection-test verb projected onto HTTP, exercised end to end through a real embedded server: an
- * authenticated caller posts a connection to test, the controller drives it through the (fake) runtime
- * probe under the audit gate, persists the result as that connection's latest, and returns it. This is the
- * one synchronous control-to-runtime verb the first landing opens.
+ * The connection-plane verbs projected onto HTTP, exercised end to end through a real embedded server: an
+ * authenticated caller posts a connection to test or to discover, the controller drives it through the
+ * (fake) runtime probe under the audit gate, persists the result / the discovered model as that
+ * connection's latest, and returns it. These are the two synchronous control-to-runtime verbs the
+ * whitelist opens.
  *
  * <p>The probe and the stores are in-memory fakes so the test needs no connector or PDK; the authentication
  * stack, the audit gate and the controller wiring are real, so the principal the operation is audited to is
@@ -83,7 +93,9 @@ class ConnectionApiTest {
     @BeforeEach
     void resetStores() {
         context.getBean(RecordingConnectionProbe.class).clear();
+        context.getBean(RecordingSchemaDiscoveryProbe.class).clear();
         context.getBean(InMemoryConnectionTestResultStore.class).clear();
+        context.getBean(InMemorySchemaStore.class).clear();
         context.getBean(RecordingAuditStore.class).clear();
         context.getBean(FakeTokenStore.class).clear();
     }
@@ -249,6 +261,139 @@ class ConnectionApiTest {
         assertThat(body.params()).containsKey("reason");
     }
 
+    // ---- the discover-schema verb drives the discovery probe and persists the model ----
+
+    @Test
+    void drivesTheDiscoveryProbeWithThePostedConnectionAndReturnsItsReport() {
+        Map<String, Object> settings = Map.of("host", "10.20.0.15");
+
+        SchemaReport report = client().post().uri("/api/connections:discover-schema")
+                .header("Authorization", "Bearer " + token(Scope.WRITE))
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(testBody("conn_ora", "oracle", settings))
+                .retrieve().toEntity(SchemaReport.class).getBody();
+
+        // The response is the control-ring report: the discovered tables plus the discovery time.
+        assertThat(report.connectionId()).isEqualTo("conn_ora");
+        assertThat(report.connectorId()).isEqualTo("oracle");
+        assertThat(report.discoveredAt()).isEqualTo(NOW.toEpochMilli());
+        assertThat(report.tables()).singleElement().satisfies(table -> {
+            assertThat(table.name()).isEqualTo("orders");
+            assertThat(table.fields()).extracting(SchemaReport.Field::name).containsExactly("id");
+            assertThat(table.primaryKey()).containsExactly("id");
+        });
+
+        // The controller drove the discovery probe with exactly the posted connection.
+        ConnectionConfig probed = context.getBean(RecordingSchemaDiscoveryProbe.class).captured();
+        assertThat(probed.id()).isEqualTo("conn_ora");
+        assertThat(probed.connectorId()).isEqualTo("oracle");
+        assertThat(probed.settings()).isEqualTo(settings);
+    }
+
+    @Test
+    void persistsTheDiscoveredModelAsTheConnectionsLatest() {
+        client().post().uri("/api/connections:discover-schema")
+                .header("Authorization", "Bearer " + token(Scope.WRITE))
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(testBody("conn_ora", "oracle", Map.of()))
+                .retrieve().toBodilessEntity();
+
+        Optional<DiscoveredSourceModel> stored = context.getBean(InMemorySchemaStore.class).get("conn_ora");
+        assertThat(stored).isPresent();
+        assertThat(stored.get().connectorId()).isEqualTo("oracle");
+        assertThat(stored.get().model().tables()).extracting(SourceTable::name).containsExactly("orders");
+    }
+
+    @Test
+    void auditsTheDiscoveryToTheAuthenticatedPrincipal() {
+        String bearer = token(Scope.WRITE);
+        String expectedPrincipal =
+                context.getBean(CredentialAuthenticator.class).authenticate(bearer).orElseThrow().subject();
+
+        client().post().uri("/api/connections:discover-schema")
+                .header("Authorization", "Bearer " + bearer)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(testBody("conn_ora", "oracle", Map.of()))
+                .retrieve().toBodilessEntity();
+
+        assertThat(context.getBean(RecordingAuditStore.class).records()).singleElement().satisfies(record -> {
+            assertThat(record.operationId()).isEqualTo("connection.discover-schema");
+            assertThat(record.principal()).isEqualTo(expectedPrincipal);
+            assertThat(record.resourceId()).isEqualTo("conn_ora");
+        });
+    }
+
+    @Test
+    void discoveryRequiresAWriteCredential() {
+        ApiError body = client().post().uri("/api/connections:discover-schema")
+                .header("Authorization", "Bearer " + token(Scope.READ))
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(testBody("conn_ora", "oracle", Map.of()))
+                .exchange((request, response) -> {
+                    assertThat(response.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+                    return response.bodyTo(ApiError.class);
+                });
+
+        assertThat(body.code()).isEqualTo("control.forbidden");
+        assertThat(body.params()).containsEntry("op", "connection.discover-schema").containsEntry("required", "write");
+    }
+
+    @Test
+    void anUnauthenticatedCallerCannotReachTheDiscoverSchemaVerb() {
+        HttpStatusCode status = client().post().uri("/api/connections:discover-schema")
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(testBody("conn_ora", "oracle", Map.of()))
+                .exchange((request, response) -> response.getStatusCode());
+
+        assertThat(status).isEqualTo(HttpStatus.UNAUTHORIZED);
+    }
+
+    @Test
+    void aDiscoveryBodyWithABlankConnectorIdIsABadRequestWithACodedBody() {
+        ApiError body = client().post().uri("/api/connections:discover-schema")
+                .header("Authorization", "Bearer " + token(Scope.WRITE))
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(testBody("conn_ora", "", Map.of()))
+                .exchange((request, response) -> {
+                    assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+                    return response.bodyTo(ApiError.class);
+                });
+
+        assertThat(body.code()).isEqualTo("control.malformed-request");
+        assertThat(body.params()).containsKey("reason");
+    }
+
+    // ---- the persisted model is queryable through a read verb ----
+
+    @Test
+    void returnsThePersistedModelForADiscoveredConnection() {
+        client().post().uri("/api/connections:discover-schema")
+                .header("Authorization", "Bearer " + token(Scope.WRITE))
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(testBody("conn_ora", "oracle", Map.of()))
+                .retrieve().toBodilessEntity();
+
+        SchemaReport report = client().get().uri("/api/connections/conn_ora/schema")
+                .header("Authorization", "Bearer " + token(Scope.READ))
+                .retrieve().toEntity(SchemaReport.class).getBody();
+
+        assertThat(report.connectionId()).isEqualTo("conn_ora");
+        assertThat(report.connectorId()).isEqualTo("oracle");
+        assertThat(report.tables()).singleElement().satisfies(table ->
+                assertThat(table.name()).isEqualTo("orders"));
+    }
+
+    @Test
+    void isNotFoundForAConnectionThatWasNeverDiscovered() {
+        // A connection with no stored model is a 404 (never discovered), the same absent semantics as
+        // the test-result read-back.
+        HttpStatusCode status = client().get().uri("/api/connections/never_discovered/schema")
+                .header("Authorization", "Bearer " + token(Scope.READ))
+                .exchange((request, response) -> response.getStatusCode());
+
+        assertThat(status).isEqualTo(HttpStatus.NOT_FOUND);
+    }
+
     /**
      * A minimal boot config: auto-configures Web MVC + the embedded servlet container, imports the path
      * prefix + interceptor registration ({@link RestApiConfiguration}), the connection controller and the
@@ -331,6 +476,27 @@ class ConnectionApiTest {
         ConnectionTestResultQueryService connectionTestResultQueryService(ConnectionTestResultStore resultStore) {
             return new ConnectionTestResultQueryService(resultStore);
         }
+
+        @Bean
+        RecordingSchemaDiscoveryProbe schemaDiscoveryProbe() {
+            return new RecordingSchemaDiscoveryProbe();
+        }
+
+        @Bean
+        InMemorySchemaStore schemaStore() {
+            return new InMemorySchemaStore();
+        }
+
+        @Bean
+        SchemaDiscoveryService schemaDiscoveryService(
+                SchemaDiscoveryProbe probe, SchemaStore schemaStore, AuditGate auditGate, Clock clock) {
+            return new SchemaDiscoveryService(probe, schemaStore, auditGate, clock);
+        }
+
+        @Bean
+        SchemaQueryService schemaQueryService(SchemaStore schemaStore) {
+            return new SchemaQueryService(schemaStore);
+        }
     }
 
     // ---- fakes ----
@@ -354,6 +520,45 @@ class ConnectionApiTest {
                     List.of(new ConnectionTestItem("Connection", ConnectionTestItem.Status.PASSED,
                             "connected", null, null, null)),
                     NOW.toEpochMilli());
+        }
+    }
+
+    /** A discovery probe that captures the config it was driven with and returns a canned model for it. */
+    private static final class RecordingSchemaDiscoveryProbe implements SchemaDiscoveryProbe {
+        private ConnectionConfig captured;
+
+        void clear() {
+            captured = null;
+        }
+
+        ConnectionConfig captured() {
+            return captured;
+        }
+
+        @Override
+        public SourceModel discover(ConnectionConfig config) {
+            this.captured = config;
+            return new SourceModel(List.of(new SourceTable(
+                    "orders", List.of(new SourceField("id", "bigint")), List.of("id"), List.of())));
+        }
+    }
+
+    /** An in-memory latest-only schema store keyed by connection id. */
+    private static final class InMemorySchemaStore implements SchemaStore {
+        private final Map<String, DiscoveredSourceModel> byId = new LinkedHashMap<>();
+
+        void clear() {
+            byId.clear();
+        }
+
+        @Override
+        public void save(DiscoveredSourceModel discovered) {
+            byId.put(discovered.connectionId(), discovered);
+        }
+
+        @Override
+        public Optional<DiscoveredSourceModel> get(String connectionId) {
+            return Optional.ofNullable(byId.get(connectionId));
         }
     }
 

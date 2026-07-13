@@ -80,11 +80,15 @@ class ReplTest {
         ListOutcome listOutcome = new ListOutcome.Unreachable();
         ConnectionTestOutcome testOutcome = new ConnectionTestOutcome.Unreachable();
         ConnectionTestResultOutcome testResultOutcome = new ConnectionTestResultOutcome.Unreachable();
+        ConnectionDiscoverSchemaOutcome discoverSchemaOutcome = new ConnectionDiscoverSchemaOutcome.Unreachable();
+        ConnectionSchemaOutcome schemaOutcome = new ConnectionSchemaOutcome.Unreachable();
         final List<String> applyCalls = new ArrayList<>();
         final List<String> getCalls = new ArrayList<>();
         final List<String> listCalls = new ArrayList<>();
         final List<String> testCalls = new ArrayList<>();
         final List<String> testResultCalls = new ArrayList<>();
+        final List<String> discoverSchemaCalls = new ArrayList<>();
+        final List<String> schemaCalls = new ArrayList<>();
 
         FakeControlPlane(URI... healthy) {
             this.healthy = new LinkedHashSet<>(List.of(healthy));
@@ -137,6 +141,19 @@ class ReplTest {
         public ConnectionTestResultOutcome testResult(URI baseUrl, String credential, String id) {
             testResultCalls.add(credential + "@" + baseUrl + "/" + id);
             return healthy.contains(baseUrl) ? testResultOutcome : new ConnectionTestResultOutcome.Unreachable();
+        }
+
+        @Override
+        public ConnectionDiscoverSchemaOutcome discoverSchema(
+                URI baseUrl, String credential, String id, String connectorId, Map<String, Object> settings) {
+            discoverSchemaCalls.add(credential + "@" + baseUrl + "/" + id + "[" + connectorId + " " + settings + "]");
+            return healthy.contains(baseUrl) ? discoverSchemaOutcome : new ConnectionDiscoverSchemaOutcome.Unreachable();
+        }
+
+        @Override
+        public ConnectionSchemaOutcome schema(URI baseUrl, String credential, String id) {
+            schemaCalls.add(credential + "@" + baseUrl + "/" + id);
+            return healthy.contains(baseUrl) ? schemaOutcome : new ConnectionSchemaOutcome.Unreachable();
         }
     }
 
@@ -1029,6 +1046,285 @@ class ReplTest {
         assertThat(h.repl().dispatch("test-result my-mongo")).isTrue();
 
         assertThat(h.sink().toString()).contains("requires a connection").contains("test-result");
+    }
+
+    // --- schema discovery: `discover-schema <id>` discovers a stored connection's source model ---
+
+    /** A discovered two-table model the schema verbs render — orders (with pk + index) and customers. */
+    private static ConnectionSchema discoveredSchema() {
+        return new ConnectionSchema("my-mongo", "mongodb",
+                List.of(
+                        new ConnectionSchema.Table("orders",
+                                List.of(new ConnectionSchema.Field("id", "bigint"),
+                                        new ConnectionSchema.Field("note", null)),
+                                List.of("id"),
+                                List.of(new ConnectionSchema.Index("pk_orders", List.of("id"), true))),
+                        new ConnectionSchema.Table("customers",
+                                List.of(new ConnectionSchema.Field("email", "varchar")),
+                                List.of("email"),
+                                List.of())),
+                1752000000000L);
+    }
+
+    @Test
+    void discoverSchemaFetchesTheStoredConnectionThenDiscoversAndRendersTheTables() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.getOutcome = storedConnection();
+        client.discoverSchemaOutcome = new ConnectionDiscoverSchemaOutcome.Discovered(discoveredSchema());
+        Harness h = onlineSession(Path.of("cyn-work"), client);
+        int mark = h.sink().toString().length();
+
+        assertThat(h.repl().dispatch("discover-schema my-mongo")).isTrue();
+
+        String out = h.sink().toString().substring(mark);
+        // the summary renders the connection + connector and one line per discovered table
+        assertThat(out).contains("my-mongo").contains("mongodb")
+                .contains("orders").contains("customers").contains("2 tables");
+        // server-as-truth: it fetched the stored connection first, then posted the discovery with the
+        // parsed connector + settings under the session credential
+        assertThat(client.getCalls).containsExactly("jwt-tok@http://node1:7900/my-mongo");
+        assertThat(client.discoverSchemaCalls).containsExactly(
+                "jwt-tok@http://node1:7900/my-mongo[mongodb {host=db.internal, username=cdc}]");
+    }
+
+    @Test
+    void discoverSchemaRendersTheModelAsJsonWithTheOutputFlag() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.getOutcome = storedConnection();
+        client.discoverSchemaOutcome = new ConnectionDiscoverSchemaOutcome.Discovered(discoveredSchema());
+        Harness h = onlineSession(Path.of("cyn-work"), client);
+        int mark = h.sink().toString().length();
+
+        assertThat(h.repl().dispatch("discover-schema my-mongo -o json")).isTrue();
+
+        String out = h.sink().toString().substring(mark);
+        assertThat(out).contains("\"connectionId\"").contains("\"my-mongo\"")
+                .contains("\"tables\"").contains("\"orders\"").contains("\"primaryKey\"")
+                .contains("\"discoveredAt\"");
+    }
+
+    @Test
+    void discoverSchemaOnANonSourceIdReportsNotDiscoverableAndDoesNotDiscover() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.getOutcome = new GetOutcome.Found(
+                new RemoteArtifact("kfk2my", "pipeline", "kind: pipeline\nid: kfk2my\n"));
+        Harness h = onlineSession(Path.of("cyn-work"), client);
+        int mark = h.sink().toString().length();
+
+        assertThat(h.repl().dispatch("discover-schema kfk2my")).isTrue();
+
+        String out = h.sink().toString().substring(mark);
+        assertThat(out).contains("kfk2my").containsIgnoringCase("not a discoverable connection").contains("pipeline");
+        assertThat(client.discoverSchemaCalls).isEmpty();
+    }
+
+    @Test
+    void discoverSchemaWithNoIdReportsMissingOperandAndDoesNotCallTheServer() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        Harness h = onlineSession(Path.of("cyn-work"), client);
+        int mark = h.sink().toString().length();
+
+        assertThat(h.repl().dispatch("discover-schema")).isTrue();
+
+        assertThat(h.sink().toString().substring(mark)).contains("discover-schema:").contains("missing operand");
+        assertThat(client.getCalls).isEmpty();
+        assertThat(client.discoverSchemaCalls).isEmpty();
+    }
+
+    @Test
+    void discoverSchemaRenderingAServerRejectionShowsTheCodeAndMessage() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.getOutcome = storedConnection();
+        client.discoverSchemaOutcome =
+                new ConnectionDiscoverSchemaOutcome.Rejected("control.forbidden", "You lack the grade.");
+        Harness h = onlineSession(Path.of("cyn-work"), client);
+
+        h.repl().dispatch("discover-schema my-mongo");
+
+        assertThat(h.sink().toString()).contains("control.forbidden").contains("You lack the grade.");
+    }
+
+    @Test
+    void discoverSchemaOfflineReportsThatAConnectionIsRequired() {
+        Harness h = harness(Path.of("cyn-work"));
+
+        assertThat(h.repl().dispatch("discover-schema my-mongo")).isTrue();
+
+        assertThat(h.sink().toString()).contains("requires a connection").contains("discover-schema");
+    }
+
+    // --- schema read-back: `schema <id> [table]` reads the stored model without discovering ---
+
+    @Test
+    void schemaReadsBackTheStoredModelWithoutDiscovering() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.schemaOutcome = new ConnectionSchemaOutcome.Found(discoveredSchema());
+        Harness h = onlineSession(Path.of("cyn-work"), client);
+        int mark = h.sink().toString().length();
+
+        assertThat(h.repl().dispatch("schema my-mongo")).isTrue();
+
+        String out = h.sink().toString().substring(mark);
+        assertThat(out).contains("my-mongo").contains("mongodb").contains("orders").contains("customers");
+        // it read the stored model under the session credential — no discovery, no artifact fetch
+        assertThat(client.schemaCalls).containsExactly("jwt-tok@http://node1:7900/my-mongo");
+        assertThat(client.discoverSchemaCalls).isEmpty();
+        assertThat(client.getCalls).isEmpty();
+    }
+
+    @Test
+    void schemaWithATableOperandRendersJustThatTable() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.schemaOutcome = new ConnectionSchemaOutcome.Found(discoveredSchema());
+        Harness h = onlineSession(Path.of("cyn-work"), client);
+        int mark = h.sink().toString().length();
+
+        assertThat(h.repl().dispatch("schema my-mongo orders")).isTrue();
+
+        String out = h.sink().toString().substring(mark);
+        // the single-table view names the table, its fields with types, the pk marker and the index
+        assertThat(out).contains("orders").contains("id").contains("bigint").contains("pk")
+                .contains("pk_orders").contains("unique");
+        assertThat(out).doesNotContain("customers");
+    }
+
+    @Test
+    void schemaNarrowedToATableNamesThatTableInTheView() {
+        // `customers` shares no substring with its fields or indexes, so this witnesses the table name
+        // itself being rendered — not an accident of an index name embedding it.
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.schemaOutcome = new ConnectionSchemaOutcome.Found(discoveredSchema());
+        Harness h = onlineSession(Path.of("cyn-work"), client);
+        int mark = h.sink().toString().length();
+
+        assertThat(h.repl().dispatch("schema my-mongo customers")).isTrue();
+
+        String out = h.sink().toString().substring(mark);
+        assertThat(out).contains("customers").contains("email").contains("varchar");
+        assertThat(out).doesNotContain("orders");
+    }
+
+    @Test
+    void schemaForATableNotInTheModelReportsItAndTheAvailableTables() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.schemaOutcome = new ConnectionSchemaOutcome.Found(discoveredSchema());
+        Harness h = onlineSession(Path.of("cyn-work"), client);
+        int mark = h.sink().toString().length();
+
+        assertThat(h.repl().dispatch("schema my-mongo no_such")).isTrue();
+
+        String out = h.sink().toString().substring(mark);
+        // an unknown table is a benign line naming the miss, not a crash or a rendered model
+        assertThat(out).contains("no_such").containsIgnoringCase("not in the discovered model");
+    }
+
+    @Test
+    void schemaRendersTheFilteredModelAsJsonWithTheOutputFlag() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.schemaOutcome = new ConnectionSchemaOutcome.Found(discoveredSchema());
+        Harness h = onlineSession(Path.of("cyn-work"), client);
+        int mark = h.sink().toString().length();
+
+        assertThat(h.repl().dispatch("schema my-mongo orders -o json")).isTrue();
+
+        String out = h.sink().toString().substring(mark);
+        // the machine form keeps the envelope shape with tables filtered to the requested one
+        assertThat(out).contains("\"connectionId\"").contains("\"orders\"").doesNotContain("\"customers\"");
+    }
+
+    @Test
+    void schemaForANeverDiscoveredConnectionReportsNotDiscoveredYet() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.schemaOutcome = new ConnectionSchemaOutcome.Absent();
+        Harness h = onlineSession(Path.of("cyn-work"), client);
+        int mark = h.sink().toString().length();
+
+        assertThat(h.repl().dispatch("schema my-mongo")).isTrue();
+
+        assertThat(h.sink().toString().substring(mark))
+                .contains("my-mongo").containsIgnoringCase("not been discovered");
+    }
+
+    @Test
+    void schemaRenderingAServerRejectionShowsTheCodeAndMessage() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.schemaOutcome = new ConnectionSchemaOutcome.Rejected("control.forbidden", "You lack the grade.");
+        Harness h = onlineSession(Path.of("cyn-work"), client);
+
+        h.repl().dispatch("schema my-mongo");
+
+        assertThat(h.sink().toString()).contains("control.forbidden").contains("You lack the grade.");
+    }
+
+    @Test
+    void schemaRendersTheModelAsYamlWithTheOutputFlag() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.schemaOutcome = new ConnectionSchemaOutcome.Found(discoveredSchema());
+        Harness h = onlineSession(Path.of("cyn-work"), client);
+        int mark = h.sink().toString().length();
+
+        assertThat(h.repl().dispatch("schema my-mongo -o yaml")).isTrue();
+
+        String out = h.sink().toString().substring(mark);
+        assertThat(out).contains("connectionId: my-mongo").contains("name: orders").contains("unique: true");
+    }
+
+    @Test
+    void schemaWithNoIdReportsMissingOperandAndDoesNotCallTheServer() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        Harness h = onlineSession(Path.of("cyn-work"), client);
+        int mark = h.sink().toString().length();
+
+        assertThat(h.repl().dispatch("schema")).isTrue();
+
+        assertThat(h.sink().toString().substring(mark)).contains("schema:").contains("missing operand");
+        assertThat(client.schemaCalls).isEmpty();
+    }
+
+    @Test
+    void schemaWithAnUnknownOptionReportsItAndDoesNotCallTheServer() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        Harness h = onlineSession(Path.of("cyn-work"), client);
+        int mark = h.sink().toString().length();
+
+        assertThat(h.repl().dispatch("schema my-mongo -x")).isTrue();
+
+        assertThat(h.sink().toString().substring(mark)).contains("schema:").contains("unknown option");
+        assertThat(client.schemaCalls).isEmpty();
+    }
+
+    @Test
+    void schemaWithAnUnknownOutputFormatReportsItAndDoesNotCallTheServer() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        Harness h = onlineSession(Path.of("cyn-work"), client);
+        int mark = h.sink().toString().length();
+
+        assertThat(h.repl().dispatch("schema my-mongo -o xml")).isTrue();
+
+        assertThat(h.sink().toString().substring(mark))
+                .contains("schema:").contains("unknown output format").contains("xml");
+        assertThat(client.schemaCalls).isEmpty();
+    }
+
+    @Test
+    void schemaWithTooManyOperandsReportsUsageAndDoesNotCallTheServer() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        Harness h = onlineSession(Path.of("cyn-work"), client);
+        int mark = h.sink().toString().length();
+
+        assertThat(h.repl().dispatch("schema my-mongo orders extra")).isTrue();
+
+        assertThat(h.sink().toString().substring(mark)).contains("schema:").contains("too many operands");
+        assertThat(client.schemaCalls).isEmpty();
+    }
+
+    @Test
+    void schemaOfflineReportsThatAConnectionIsRequired() {
+        Harness h = harness(Path.of("cyn-work"));
+
+        assertThat(h.repl().dispatch("schema my-mongo")).isTrue();
+
+        assertThat(h.sink().toString()).contains("requires a connection").contains("schema");
     }
 
     // --- server-as-truth: a connected read verb sources the server store, never the local workspace ---

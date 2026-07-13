@@ -3,6 +3,7 @@ package io.cyntex.adapters.mongostore;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.model.ReplaceOptions;
 import io.cyntex.core.common.CyntexException;
+import io.cyntex.spi.store.DiscoveredSourceModel;
 import io.cyntex.spi.store.SchemaStore;
 import io.cyntex.spi.store.SourceField;
 import io.cyntex.spi.store.SourceIndex;
@@ -17,12 +18,12 @@ import java.util.Objects;
 import java.util.Optional;
 
 /**
- * The MongoDB source-schema store: stores the discovered source model for a connection as one
- * structured document keyed by the connection's id, holding the tables (with their fields, primary key
- * and indexes) as nested sub-documents.
+ * The MongoDB discovered-schema store: stores the discovery envelope for a connection as one
+ * structured document keyed by the connection's id — the connector id and discovery time it reports,
+ * and the source model's tables (with their fields, primary key and indexes) as nested sub-documents.
  *
- * <p>The model is a fixed shape of plain scalars and lists, so it is mapped field by field rather than
- * through a generic value normalization; on read the driver's {@code Document} / list values are
+ * <p>The envelope is a fixed shape of plain scalars and lists, so it is mapped field by field rather
+ * than through a generic value normalization; on read the driver's {@code Document} / list values are
  * reconstructed into the pure model, so no driver type escapes this module (rule R3). A stored document
  * whose shape cannot be reconstructed is surfaced as a coded {@code io.document-unreadable} diagnostic.
  */
@@ -35,29 +36,36 @@ public final class MongoSchemaStore implements SchemaStore {
     }
 
     @Override
-    public void save(String connectionId, SourceModel model) {
-        Objects.requireNonNull(connectionId, "connectionId");
-        Objects.requireNonNull(model, "model");
+    public void save(DiscoveredSourceModel discovered) {
+        Objects.requireNonNull(discovered, "discovered");
         // Upsert by the connection id (the document _id): the stored form is a full replacement, so a
         // re-discovery of the same connection overwrites in place rather than accumulating documents.
         StoreIo.run(() -> collection.replaceOne(
-                new Document("_id", connectionId), toDocument(connectionId, model), new ReplaceOptions().upsert(true)));
+                new Document("_id", discovered.connectionId()),
+                toDocument(discovered),
+                new ReplaceOptions().upsert(true)));
     }
 
     @Override
-    public Optional<SourceModel> get(String connectionId) {
+    public Optional<DiscoveredSourceModel> get(String connectionId) {
         Objects.requireNonNull(connectionId, "connectionId");
         Document document = StoreIo.call(() -> collection.find(new Document("_id", connectionId)).first());
-        return document == null ? Optional.empty() : Optional.of(toModel(document));
+        return document == null ? Optional.empty() : Optional.of(toDiscovered(document));
     }
 
-    /** Maps a discovered source model to its stored document: the connection id as {@code _id}, tables as a field. */
-    static Document toDocument(String connectionId, SourceModel model) {
+    /**
+     * Maps a discovery envelope to its stored document: the connection id as {@code _id}, the connector
+     * id and discovery time as scalars, and the model's tables as a field.
+     */
+    static Document toDocument(DiscoveredSourceModel discovered) {
         List<Document> tables = new ArrayList<>();
-        for (SourceTable table : model.tables()) {
+        for (SourceTable table : discovered.model().tables()) {
             tables.add(tableDocument(table));
         }
-        return new Document("_id", connectionId).append("tables", tables);
+        return new Document("_id", discovered.connectionId())
+                .append("connectorId", discovered.connectorId())
+                .append("discoveredAt", discovered.discoveredAt())
+                .append("tables", tables);
     }
 
     private static Document tableDocument(SourceTable table) {
@@ -78,14 +86,28 @@ public final class MongoSchemaStore implements SchemaStore {
                 .append("indexes", indexes);
     }
 
-    /** Reconstructs a source model from its stored document, or fails coded when the shape is unreadable. */
-    static SourceModel toModel(Document document) {
+    /** Reconstructs a discovery envelope from its stored document, or fails coded when the shape is unreadable. */
+    static DiscoveredSourceModel toDiscovered(Document document) {
         String id = document.getString("_id");
+        String connectorId = document.getString("connectorId");
+        if (connectorId == null) {
+            throw unreadable(id);
+        }
+        long discoveredAt = discoveredAt(document, id);
         List<SourceTable> tables = new ArrayList<>();
         for (Document table : documentList(document.get("tables"), id)) {
             tables.add(toTable(table, id));
         }
-        return new SourceModel(tables);
+        return new DiscoveredSourceModel(id, connectorId, discoveredAt, new SourceModel(tables));
+    }
+
+    /** Reads the stored discovery time: an absent or non-numeric value is corrupt. */
+    private static long discoveredAt(Document document, String id) {
+        Object value = document.get("discoveredAt");
+        if (!(value instanceof Number number)) {
+            throw unreadable(id);
+        }
+        return number.longValue();
     }
 
     private static SourceTable toTable(Document table, String id) {
