@@ -11,7 +11,9 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
-import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
+import java.util.List;
+
+import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * The pipeline lifecycle has a single write path on each side of the desired/actual split, and this
@@ -19,6 +21,11 @@ import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
  * actual state is written only through the runtime's one converge loop. No second control layer and no
  * second converger may write the store — a bypassing writer turns this red rather than quietly forking
  * the write path.
+ *
+ * <p>Each rule first asserts the write is actually called somewhere (a positive control) and only then
+ * asserts every caller sits in the one allowed ring. Written this way rather than as a plain
+ * {@code noClasses()} ban so the rule cannot pass vacuously: if the write call ever stops being matched (a
+ * rename, a moved method), the positive control fails on the empty set instead of a silent green.
  */
 class SingleWritePathRulesTest {
 
@@ -29,7 +36,7 @@ class SingleWritePathRulesTest {
             new DescribedPredicate<>("a call that writes actual pipeline state") {
                 @Override
                 public boolean test(JavaMethodCall call) {
-                    return call.getTargetOwner().getName().equals(StateStore.class.getName())
+                    return call.getTargetOwner().isAssignableTo(StateStore.class)
                             && (call.getName().equals("compareAndSwap") || call.getName().equals("create"));
                 }
             };
@@ -39,7 +46,7 @@ class SingleWritePathRulesTest {
             new DescribedPredicate<>("a call that writes desired pipeline intent") {
                 @Override
                 public boolean test(JavaMethodCall call) {
-                    return call.getTargetOwner().getName().equals(DesiredStore.class.getName())
+                    return call.getTargetOwner().isAssignableTo(DesiredStore.class)
                             && call.getName().equals("save");
                 }
             };
@@ -54,23 +61,32 @@ class SingleWritePathRulesTest {
     @Test
     @DisplayName("actual pipeline state is written only by the runtime converge loop")
     void actualStateIsWrittenOnlyByTheConvergeLoop() {
-        noClasses().that().resideOutsideOfPackage("io.cyntex.runtime.scheduler..")
-                .should().callMethodWhere(WRITES_ACTUAL_STATE)
-                .allowEmptyShould(true)
-                .because("actual state lands only through the single converge loop's fencing write and "
-                        + "its seed; no second writer may compare-and-swap or create the actual-state store")
-                .check(cyntexClasses);
+        assertSingleWriter(WRITES_ACTUAL_STATE, "io.cyntex.runtime.scheduler.",
+                "actual state lands only through the single converge loop's fencing write and its seed");
     }
 
     @Test
     @DisplayName("desired pipeline intent is written only by the control lifecycle service")
     void desiredIntentIsWrittenOnlyByTheControlLayer() {
-        noClasses().that().resideOutsideOfPackage("io.cyntex.control.core..")
-                .should().callMethodWhere(WRITES_DESIRED_INTENT)
-                .allowEmptyShould(true)
-                .because("desired intent is written only through the control layer's one lifecycle "
-                        + "service, the operation registry's single audited write path; no second "
-                        + "control layer may write desired state")
-                .check(cyntexClasses);
+        assertSingleWriter(WRITES_DESIRED_INTENT, "io.cyntex.control.core.",
+                "desired intent is written only through the control layer's one lifecycle service");
+    }
+
+    /**
+     * Asserts the write is called at all (positive control against a silently non-matching predicate) and
+     * that every calling class sits under {@code allowedPackagePrefix}.
+     */
+    private static void assertSingleWriter(
+            DescribedPredicate<JavaMethodCall> writes, String allowedPackagePrefix, String because) {
+        List<JavaMethodCall> writeCalls = cyntexClasses.stream()
+                .flatMap(type -> type.getMethodCallsFromSelf().stream())
+                .filter(writes::test)
+                .toList();
+        assertThat(writeCalls)
+                .as("positive control: %s — the write must be called somewhere, or this gate is checking nothing", because)
+                .isNotEmpty();
+        assertThat(writeCalls).allSatisfy(call -> assertThat(call.getOriginOwner().getName())
+                .as("%s; no second writer may call it", because)
+                .startsWith(allowedPackagePrefix));
     }
 }

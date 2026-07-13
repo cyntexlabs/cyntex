@@ -108,6 +108,8 @@ class PipelineConvergerTest {
         assertThat(actual.stateJson()).isEqualTo(StateJson.of(RUNNING));
         assertThat(actual.epoch()).isEqualTo(2); // 0 seed -> 1 competitor(PAUSED) -> 2 converger(RUNNING)
         assertThat(state.swapAttempts()).isEqualTo(2); // one fenced, one applied
+        // The rebased write it won was PAUSED -> RUNNING, so the actuation it drove is a resume.
+        assertThat(actuator.calls()).containsExactly("resume:p1");
     }
 
     @Test
@@ -131,6 +133,8 @@ class PipelineConvergerTest {
         assertThat(actual.stateJson()).isEqualTo(StateJson.of(RUNNING));
         assertThat(actual.epoch()).isEqualTo(1); // the competitor's write; the converger did not bump it again
         assertThat(state.swapAttempts()).isEqualTo(1); // one fenced attempt, then it conceded — no redundant re-swap
+        // It conceded the transition, so it must not drive the job side: actuation fires only on a won CAS.
+        assertThat(actuator.calls()).isEmpty();
     }
 
     @Test
@@ -149,6 +153,8 @@ class PipelineConvergerTest {
 
         assertThat(result.status()).isEqualTo(SUPERSEDED);
         assertThat(state.swapAttempts()).isEqualTo(PipelineConverger.MAX_CAS_ATTEMPTS);
+        // It never won a swap, so it never actuated: no job side is driven for a superseded pass.
+        assertThat(actuator.calls()).isEmpty();
     }
 
     @Test

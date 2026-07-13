@@ -3,6 +3,8 @@ package io.cyntex.app;
 import com.hazelcast.core.HazelcastInstance;
 import io.cyntex.runtime.engine.Engine;
 import io.cyntex.runtime.scheduler.LifecycleActuator;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -18,6 +20,8 @@ import org.springframework.context.annotation.Configuration;
 @ConditionalOnProperty(prefix = "cyntex.store.mongo", name = "enabled", matchIfMissing = true)
 class DataPlaneActuationConfiguration {
 
+    private static final Logger LOG = LoggerFactory.getLogger(DataPlaneActuationConfiguration.class);
+
     @Bean
     Engine engine(HazelcastInstance hazelcastMember) {
         return new Engine(hazelcastMember);
@@ -25,6 +29,11 @@ class DataPlaneActuationConfiguration {
 
     @Bean
     DagSource dagSource() {
+        // Surface the pre-integration state rather than letting it be silent: a started pipeline runs a
+        // stand-in idle job, so its lifecycle is real but it moves no data until the capture and transform
+        // planes are wired and the real per-pipeline topology replaces this.
+        LOG.warn("Data-plane topology is a placeholder: a started pipeline runs a stand-in idle job and "
+                + "moves no data until the capture and transform planes are wired");
         return new PlaceholderDagSource();
     }
 
