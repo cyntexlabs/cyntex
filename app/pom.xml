@@ -160,6 +160,14 @@
       <artifactId>spring-boot-starter-test</artifactId>
       <scope>test</scope>
     </dependency>
+    <!-- Test scope only: the assembly root never ships the CLI, but the single-node integration drives the
+         production CLI websocket client against a real server to prove the client<->server stream round-trip. -->
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>cli</artifactId>
+      <version>${revision}</version>
+      <scope>test</scope>
+    </dependency>
     <!-- Testcontainers: a throwaway Mongo replica-set to witness that the assembly root exposes a
          working StorePort bean (the all role) against a real store. Skipped automatically where
          Docker is absent, so a Docker-less build stays green. -->

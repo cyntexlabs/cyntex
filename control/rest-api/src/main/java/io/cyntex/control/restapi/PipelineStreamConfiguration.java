@@ -34,7 +34,7 @@ import java.time.Duration;
 @Configuration
 @ConditionalOnWebApplication(type = ConditionalOnWebApplication.Type.SERVLET)
 @EnableWebSocket
-class PipelineStreamConfiguration {
+public class PipelineStreamConfiguration {
 
     /** The poll cadence for both stream channels, ISO-8601 duration; a working single-node default. */
     private static final String DEFAULT_POLL_INTERVAL = "PT1S";
