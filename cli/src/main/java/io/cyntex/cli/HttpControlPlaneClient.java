@@ -293,6 +293,44 @@ final class HttpControlPlaneClient implements ControlPlaneClient {
         }
     }
 
+    @Override
+    public ConnectorListOutcome connectorList(URI baseUrl, String credential) {
+        try {
+            HttpRequest request = authed(baseUrl, "/api/connectors", credential).GET().build();
+            HttpResponse<String> response =
+                    client().send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            if (response.statusCode() == 200) {
+                return new ConnectorListOutcome.Listed(catalogConnectors(response.body()));
+            }
+            Rejection r = rejection(response.body(), "The server refused the read.");
+            return new ConnectorListOutcome.Rejected(r.code(), r.message());
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return new ConnectorListOutcome.Unreachable();
+        } catch (IOException | RuntimeException e) {
+            return new ConnectorListOutcome.Unreachable();
+        }
+    }
+
+    /** The connectors decoded from a 200 body's {@code connectors} array; empty if the shape is unexpected. */
+    private static List<CatalogConnector> catalogConnectors(String body) {
+        List<CatalogConnector> connectors = new ArrayList<>();
+        if (JsonReader.parse(body) instanceof Map<?, ?> map && map.get("connectors") instanceof List<?> list) {
+            for (Object o : list) {
+                if (o instanceof Map<?, ?> m && m.get("id") instanceof String id) {
+                    connectors.add(new CatalogConnector(
+                            id,
+                            stringOrNull(m.get("name")),
+                            stringOrNull(m.get("group")),
+                            stringList(m.get("modes")),
+                            m.get("sink") instanceof Boolean sink && sink,
+                            stringOrNull(m.get("origin"))));
+                }
+            }
+        }
+        return connectors;
+    }
+
     /** The register request body: {@code {"artifact":"<base64 of the jar bytes>"}}. */
     private static String registerBody(byte[] artifact) {
         Map<String, Object> body = new LinkedHashMap<>();

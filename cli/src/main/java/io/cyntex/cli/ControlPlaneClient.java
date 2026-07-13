@@ -89,4 +89,13 @@ interface ControlPlaneClient {
      * artifact, an id conflict), or unreachable on any I/O failure. Never throws.
      */
     ConnectorRegisterOutcome register(URI baseUrl, String credential, byte[] artifact);
+
+    /**
+     * Lists the connectors the online catalog exposes via {@code GET {baseUrl}/api/connectors},
+     * authenticated by the bearer {@code credential}: the bundled snapshot union the rows derived for
+     * registered connectors, each tagged bundled or registered. Returns the connectors on success
+     * (possibly empty), a coded rejection when the server refuses, or unreachable on any I/O failure.
+     * Never throws.
+     */
+    ConnectorListOutcome connectorList(URI baseUrl, String credential);
 }

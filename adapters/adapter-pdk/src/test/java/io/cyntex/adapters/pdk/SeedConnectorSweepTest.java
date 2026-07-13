@@ -6,6 +6,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.tuple;
 
 import io.cyntex.core.common.CyntexException;
+import io.cyntex.spi.store.CapabilityDeriver;
+import io.cyntex.spi.store.ConnectorCapabilities;
 import io.cyntex.spi.store.ConnectorRegistration;
 import io.cyntex.spi.store.RegistrationSource;
 import java.io.UncheckedIOException;
@@ -13,6 +15,7 @@ import java.nio.file.Files;
 import java.nio.file.NotDirectoryException;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Set;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -141,6 +144,8 @@ class SeedConnectorSweepTest {
     }
 
     private static SeedConnectorSweep sweepOver(InMemoryConnectorRegistry registry) {
-        return new SeedConnectorSweep(new ConnectorArtifactRegistrar(registry, new ConnectorIntrospector()));
+        CapabilityDeriver deriver = id -> new ConnectorCapabilities(Set.of("batch_read_function"));
+        return new SeedConnectorSweep(new ConnectorArtifactRegistrar(
+                registry, new ConnectorIntrospector(), deriver, new InMemoryConnectorCatalogStore()));
     }
 }

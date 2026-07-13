@@ -55,7 +55,7 @@ final class Repl {
      * either state until a server validate endpoint exists.
      */
     private static final List<String> ONLINE_VERBS =
-            List.of("apply", "get", "ls", "test", "test-result", "discover-schema", "schema", "register");
+            List.of("apply", "get", "ls", "test", "test-result", "discover-schema", "schema", "register", "connectors");
 
     private final CommandLine commandLine;
 
@@ -204,6 +204,12 @@ final class Repl {
         // positional-only guard the other verbs share.
         if (words.get(0).equals("register")) {
             registerOnline(words);
+            return;
+        }
+        // `connectors` lists the online catalog and returns a structured list worth machine-reading, so it
+        // accepts an `-o` output flag and takes no operand — routed before the positional-only guard.
+        if (words.get(0).equals("connectors")) {
+            connectorsOnline(words);
             return;
         }
         // The other connected verbs take positional operands only; a dash-option (e.g. `-o json`) is not yet
@@ -618,6 +624,101 @@ final class Repl {
         map.put("contentHash", connector.contentHash());
         putIfPresent(map, "pdkApiVersion", connector.pdkApiVersion());
         map.put("newlyRegistered", connector.newlyRegistered());
+        return map;
+    }
+
+    /**
+     * {@code connectors [-o text|json|yaml]} — lists the connectors the online catalog exposes (the bundled
+     * snapshot union the connectors registered at runtime), each tagged bundled or registered. Takes no
+     * operand; an unknown option is a benign usage line; a coded refusal renders its code and message.
+     */
+    private void connectorsOnline(List<String> words) {
+        OutputFormat format = parseFormatOnly("connectors", words);
+        if (format == null) {
+            return;
+        }
+        ConnectorListOutcome outcome = withFailover(() ->
+                controlPlane.connectorList(session.landingNode(), session.credential()),
+                o -> o instanceof ConnectorListOutcome.Unreachable);
+        switch (outcome) {
+            case ConnectorListOutcome.Listed listed -> renderConnectors(listed.connectors(), format);
+            case ConnectorListOutcome.Rejected rejected -> renderRejection(rejected.code(), rejected.message());
+            case ConnectorListOutcome.Unreachable ignored -> reportRequestFailed();
+        }
+    }
+
+    /**
+     * Parses {@code [-o text|json|yaml]} for a verb that takes no operand, printing its usage line to err
+     * and returning {@code null} on any error (an unknown option or a stray operand). Defaults to TEXT.
+     */
+    private OutputFormat parseFormatOnly(String verb, List<String> words) {
+        PrintWriter err = commandLine.getErr();
+        OutputFormat format = OutputFormat.TEXT;
+        for (int i = 1; i < words.size(); i++) {
+            String word = words.get(i);
+            if (word.equals("-o") || word.equals("--output")) {
+                if (i + 1 >= words.size()) {
+                    err.println(verb + ": " + word + " needs a format (text|json|yaml)");
+                    err.flush();
+                    return null;
+                }
+                OutputFormat chosen = outputFormat(words.get(++i));
+                if (chosen == null) {
+                    err.println(verb + ": unknown output format '" + words.get(i) + "' (expected text|json|yaml)");
+                    err.flush();
+                    return null;
+                }
+                format = chosen;
+            } else {
+                err.println(verb + ": takes no operand (usage: " + verb + " [-o text|json|yaml])");
+                err.flush();
+                return null;
+            }
+        }
+        return format;
+    }
+
+    /** Renders the connector catalog on the chosen surface: one human line per connector, or the machine tree. */
+    private void renderConnectors(List<CatalogConnector> connectors, OutputFormat format) {
+        PrintWriter out = commandLine.getOut();
+        switch (format) {
+            case TEXT -> {
+                if (connectors.isEmpty()) {
+                    out.println("no connectors");
+                } else {
+                    for (CatalogConnector connector : connectors) {
+                        out.println(connectorHeadline(connector));
+                    }
+                }
+            }
+            case JSON -> out.println(JsonOut.write(connectorsMap(connectors)));
+            case YAML -> out.println(YamlOut.write(connectorsMap(connectors)));
+        }
+        out.flush();
+    }
+
+    /** The human line: origin, group, id, the modes it may be paired with, and whether it can sink. */
+    private static String connectorHeadline(CatalogConnector connector) {
+        String modes = connector.modes().isEmpty() ? "-" : String.join(",", connector.modes());
+        String sink = connector.sink() ? "sink" : "no-sink";
+        return connector.origin() + "  " + connector.group() + "  " + connector.id() + "  [" + modes + "]  " + sink;
+    }
+
+    /** The connector list as an ordered tree for the machine surfaces, omitting null name / group / origin. */
+    private static Map<String, Object> connectorsMap(List<CatalogConnector> connectors) {
+        List<Object> rows = new ArrayList<>();
+        for (CatalogConnector connector : connectors) {
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("id", connector.id());
+            putIfPresent(row, "name", connector.name());
+            putIfPresent(row, "group", connector.group());
+            row.put("modes", connector.modes());
+            row.put("sink", connector.sink());
+            putIfPresent(row, "origin", connector.origin());
+            rows.add(row);
+        }
+        Map<String, Object> map = new LinkedHashMap<>();
+        map.put("connectors", rows);
         return map;
     }
 

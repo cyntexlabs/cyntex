@@ -3,6 +3,7 @@ package io.cyntex.spi.store;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import io.cyntex.core.catalog.ConnectorCatalogEntry;
 import io.cyntex.core.lifecycle.CasOutcome;
 import io.cyntex.core.lifecycle.CheckpointDoc;
 import io.cyntex.core.lifecycle.EpochCas;
@@ -38,7 +39,7 @@ class StorePortTest {
     // --- facade ---
 
     @Test
-    void facadeExposesTheSevenStores() {
+    void facadeExposesTheEightStores() {
         StorePort store = new InMemoryStore();
 
         assertThat(store.artifacts()).isNotNull();
@@ -48,6 +49,7 @@ class StorePortTest {
         assertThat(store.connectors()).isNotNull();
         assertThat(store.connectionTestResults()).isNotNull();
         assertThat(store.meta()).isNotNull();
+        assertThat(store.connectorCatalog()).isNotNull();
     }
 
     // --- artifacts (the canonical truth layer) ---
@@ -266,6 +268,50 @@ class StorePortTest {
                 .containsExactlyInAnyOrder("mysql", "postgres");
     }
 
+    // --- connector catalog (derived rows, latest-only per connector id) ---
+
+    private static ConnectorCatalogEntry row(String id, String displayName) {
+        // Only the identity and a distinguishing field matter to the store contract; the row's
+        // capability fields are the catalog assembler's concern, exercised where a real row is built.
+        return new ConnectorCatalogEntry(id, id, displayName, null, null, List.of(), null, null, false, List.of(), null);
+    }
+
+    @Test
+    void connectorCatalogUpsertThenGetRoundTrips() {
+        ConnectorCatalogStore rows = new InMemoryStore().connectorCatalog();
+        ConnectorCatalogEntry mysql = row("mysql", "MySQL");
+
+        rows.upsert(mysql);
+
+        assertThat(rows.get("mysql")).contains(mysql);
+    }
+
+    @Test
+    void connectorCatalogGetAbsentIsEmpty() {
+        assertThat(new InMemoryStore().connectorCatalog().get("never-registered")).isEmpty();
+    }
+
+    @Test
+    void connectorCatalogListReturnsEveryUpserted() {
+        ConnectorCatalogStore rows = new InMemoryStore().connectorCatalog();
+        rows.upsert(row("mysql", "MySQL"));
+        rows.upsert(row("postgres", "PostgreSQL"));
+
+        assertThat(rows.list()).extracting(ConnectorCatalogEntry::id).containsExactlyInAnyOrder("mysql", "postgres");
+    }
+
+    @Test
+    void reRegisterReplacesTheDerivedRowInPlace() {
+        ConnectorCatalogStore rows = new InMemoryStore().connectorCatalog();
+        rows.upsert(row("mysql", "MySQL"));
+        ConnectorCatalogEntry reDerived = row("mysql", "MySQL (v2)");
+
+        rows.upsert(reDerived);
+
+        assertThat(rows.get("mysql")).contains(reDerived);
+        assertThat(rows.list()).hasSize(1);
+    }
+
     // --- connection test results (latest-only per connection) ---
 
     private static ConnectionTestResult passed(String connectionId, String connectorId) {
@@ -418,6 +464,7 @@ class StorePortTest {
         private final Map<String, DiscoveredSourceModel> schemas = new HashMap<>();
         private final Map<String, ConnectorRegistration> registrations = new HashMap<>();
         private final Map<String, byte[]> connectorArtifacts = new HashMap<>();
+        private final Map<String, ConnectorCatalogEntry> connectorCatalogRows = new HashMap<>();
         private final Map<String, ConnectionTestResult> testResults = new HashMap<>();
         private final Map<String, SrsMeta> srsMeta = new HashMap<>();
 
@@ -534,6 +581,26 @@ class StorePortTest {
                 public Optional<byte[]> artifact(String contentHash) {
                     byte[] bytes = connectorArtifacts.get(contentHash);
                     return bytes == null ? Optional.empty() : Optional.of(bytes.clone());
+                }
+            };
+        }
+
+        @Override
+        public ConnectorCatalogStore connectorCatalog() {
+            return new ConnectorCatalogStore() {
+                @Override
+                public void upsert(ConnectorCatalogEntry entry) {
+                    connectorCatalogRows.put(entry.id(), entry);
+                }
+
+                @Override
+                public Optional<ConnectorCatalogEntry> get(String connectorId) {
+                    return Optional.ofNullable(connectorCatalogRows.get(connectorId));
+                }
+
+                @Override
+                public List<ConnectorCatalogEntry> list() {
+                    return new ArrayList<>(connectorCatalogRows.values());
                 }
             };
         }

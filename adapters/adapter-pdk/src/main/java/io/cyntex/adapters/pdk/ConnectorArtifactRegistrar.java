@@ -1,7 +1,14 @@
 package io.cyntex.adapters.pdk;
 
+import io.cyntex.core.catalog.CatalogEntryAssembler;
+import io.cyntex.core.catalog.ConnectorCatalogEntry;
+import io.cyntex.core.catalog.NormalizedSpec;
+import io.cyntex.core.catalog.SpecNormalizer;
 import io.cyntex.core.common.CyntexException;
 import io.cyntex.core.common.JsonReader;
+import io.cyntex.spi.store.CapabilityDeriver;
+import io.cyntex.spi.store.ConnectorCapabilities;
+import io.cyntex.spi.store.ConnectorCatalogStore;
 import io.cyntex.spi.store.ConnectorRegistrar;
 import io.cyntex.spi.store.ConnectorRegistration;
 import io.cyntex.spi.store.ConnectorRegistry;
@@ -11,6 +18,7 @@ import io.cyntex.spi.store.RegistrationSource;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
@@ -29,15 +37,26 @@ import java.util.Objects;
  * artifact under. A different artifact under an already-registered id is likewise refused — a single
  * active artifact is kept per id. A raw I/O failure reading the artifact is not a connector defect and
  * surfaces as an unchecked I/O exception.
+ *
+ * <p>After the bytes are registered, the connector's normalized catalog row is derived (its declared
+ * capabilities merged with its spec) and stored, so the online catalog view can list the connector and
+ * validate against it. Derivation is skipped when the bytes were already registered and a row already
+ * exists; a re-register whose row is missing backfills it, so a crash between the two never leaves a
+ * registered connector without a row.
  */
 public final class ConnectorArtifactRegistrar implements ConnectorRegistrar {
 
     private final ConnectorRegistry registry;
     private final ConnectorIntrospector introspector;
+    private final CapabilityDeriver capabilityDeriver;
+    private final ConnectorCatalogStore catalogStore;
 
-    public ConnectorArtifactRegistrar(ConnectorRegistry registry, ConnectorIntrospector introspector) {
+    public ConnectorArtifactRegistrar(ConnectorRegistry registry, ConnectorIntrospector introspector,
+                                      CapabilityDeriver capabilityDeriver, ConnectorCatalogStore catalogStore) {
         this.registry = Objects.requireNonNull(registry, "registry");
         this.introspector = Objects.requireNonNull(introspector, "introspector");
+        this.capabilityDeriver = Objects.requireNonNull(capabilityDeriver, "capabilityDeriver");
+        this.catalogStore = Objects.requireNonNull(catalogStore, "catalogStore");
     }
 
     /** Registers the artifact at {@code artifact} if its content hash is not already registered. */
@@ -45,10 +64,23 @@ public final class ConnectorArtifactRegistrar implements ConnectorRegistrar {
         Objects.requireNonNull(artifact, "artifact");
         Objects.requireNonNull(source, "source");
         IntrospectedConnector introspected = introspector.introspect(List.of(artifact));
-        String connectorId = specDeclaredId(introspected, artifact);
+        Object specTree = parseSpecTree(introspected, artifact);
+        String connectorId = declaredId(specTree, introspected, artifact);
         byte[] bytes = bytesOf(artifact);
         rejectConflictingArtifact(connectorId, ContentHash.of(bytes));
-        return registry.register(connectorId, introspected.pdkApiVersion(), source, bytes);
+        RegistrationOutcome outcome = registry.register(connectorId, introspected.pdkApiVersion(), source, bytes);
+        try {
+            persistCatalogRow(connectorId, introspected, specTree, outcome);
+        } catch (CyntexException containedDerivationFailure) {
+            // The catalog row is best-effort: the artifact is registered whether or not its capabilities can
+            // be derived. A connector that introspects (entry class + spec id) but will not load in this
+            // deployment (an incompatible PDK level, or a construct-time failure) fails derivation; that coded
+            // failure is contained so the register never reports failure over already-stored bytes and wedges
+            // the id. The row stays absent — so the connector is out of the online catalog — until a
+            // re-register derives it (the missing-row backfill re-runs derivation). A programmer bug (a bare
+            // RuntimeException, not a coded one) still crashes rather than being swallowed.
+        }
+        return outcome;
     }
 
     /**
@@ -108,21 +140,48 @@ public final class ConnectorArtifactRegistrar implements ConnectorRegistrar {
         }
     }
 
-    /** The connector id the spec declares under {@code properties.id} — the registration identity. */
-    private static String specDeclaredId(IntrospectedConnector introspected, Path artifact) {
-        Object tree;
+    /** Parses the spec text to its object tree, refusing coded when it is not valid JSON. */
+    private static Object parseSpecTree(IntrospectedConnector introspected, Path artifact) {
         try {
-            tree = JsonReader.parse(introspected.spec());
+            return JsonReader.parse(introspected.spec());
         } catch (IllegalArgumentException e) {
             throw specInvalid(introspected, artifact, "the spec is not valid JSON", e);
         }
-        if (tree instanceof Map<?, ?> root
+    }
+
+    /** The connector id the spec declares under {@code properties.id} — the registration identity. */
+    private static String declaredId(Object specTree, IntrospectedConnector introspected, Path artifact) {
+        if (specTree instanceof Map<?, ?> root
                 && root.get("properties") instanceof Map<?, ?> properties
                 && properties.get("id") instanceof String id
                 && !id.isBlank()) {
             return id;
         }
         throw specInvalid(introspected, artifact, "the spec does not declare properties.id as a non-blank string", null);
+    }
+
+    /**
+     * Derives the connector's normalized catalog row and stores it, so the online catalog view can see
+     * the registered connector. Skipped when the bytes were already registered and a row already exists;
+     * otherwise the row is (re)derived, which backfills a row missing after a prior partial register.
+     */
+    private void persistCatalogRow(
+            String connectorId, IntrospectedConnector introspected, Object specTree, RegistrationOutcome outcome) {
+        if (!outcome.newlyRegistered() && catalogStore.get(connectorId).isPresent()) {
+            return;
+        }
+        ConnectorCapabilities capabilities = capabilityDeriver.derive(connectorId);
+        NormalizedSpec normalized = SpecNormalizer.normalize(asSpecObject(specTree));
+        String specHash = ContentHash.of(introspected.spec().getBytes(StandardCharsets.UTF_8));
+        ConnectorCatalogEntry row = CatalogEntryAssembler.assemble(
+                normalized, capabilities.capabilityIds(), null, introspected.specPath(), specHash);
+        catalogStore.upsert(row);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> asSpecObject(Object specTree) {
+        // declaredId has already confirmed the spec parses to a JSON object carrying properties.id.
+        return (Map<String, Object>) specTree;
     }
 
     private static CyntexException specInvalid(

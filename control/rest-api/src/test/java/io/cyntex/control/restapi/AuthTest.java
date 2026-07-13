@@ -6,6 +6,7 @@ import io.cyntex.control.core.AuditGate;
 import io.cyntex.control.core.BootstrapService;
 import io.cyntex.control.core.ConnectionTestResultQueryService;
 import io.cyntex.control.core.ConnectionTestService;
+import io.cyntex.control.core.ConnectorCatalogView;
 import io.cyntex.control.core.ConnectorRegisterService;
 import io.cyntex.control.core.ControlOperations;
 import io.cyntex.control.core.CredentialAuthenticator;
@@ -453,7 +454,7 @@ class AuthTest {
 
         @Bean
         ApplyService applyService(InMemoryArtifactStore store) {
-            return new ApplyService(CyntexCatalog.load(), store);
+            return new ApplyService(CyntexCatalog::load, store);
         }
 
         @Bean
@@ -541,6 +542,29 @@ class AuthTest {
                 throw new UnsupportedOperationException("connector.register is not exercised in this test");
             };
             return new ConnectorRegisterService(registrar, auditGate);
+        }
+
+        // The connector list controller comes in with the whole ControlHttpFace bundle, so its view must be
+        // present for the context to stand up; this suite exercises the auth matrix, not the listing, so the
+        // catalog store is inert (empty).
+        @Bean
+        ConnectorCatalogView connectorCatalogView() {
+            io.cyntex.spi.store.ConnectorCatalogStore store = new io.cyntex.spi.store.ConnectorCatalogStore() {
+                @Override
+                public void upsert(io.cyntex.core.catalog.ConnectorCatalogEntry entry) {
+                }
+
+                @Override
+                public Optional<io.cyntex.core.catalog.ConnectorCatalogEntry> get(String connectorId) {
+                    return Optional.empty();
+                }
+
+                @Override
+                public List<io.cyntex.core.catalog.ConnectorCatalogEntry> list() {
+                    return List.of();
+                }
+            };
+            return new ConnectorCatalogView(CyntexCatalog.load(), store);
         }
     }
 

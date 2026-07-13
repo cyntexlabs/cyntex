@@ -1,9 +1,11 @@
 package io.cyntex.control.restapi;
 
+import io.cyntex.control.core.ConnectorCatalogView;
 import io.cyntex.control.core.ConnectorRegisterService;
 import io.cyntex.control.core.ConnectorRegistrationReport;
 import io.cyntex.core.common.CyntexException;
 import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
@@ -22,14 +24,20 @@ import java.util.Base64;
  * server. A missing body / field or non-base64 artifact is refused at the boundary as a coded 400; a bad
  * artifact that decodes but does not load, declares no connector or identity, or collides with a
  * registered id surfaces the register service's coded connector-domain refusal.
+ *
+ * <p>The read peer lists the online catalog view — the bundled snapshot union the rows derived for
+ * registered connectors — so a registered connector is visible without a restart; each row is tagged
+ * bundled or registered. It reads nothing but derived catalog state, so it is a plain read.
  */
 @RestController
 class ConnectorController {
 
     private final ConnectorRegisterService registerService;
+    private final ConnectorCatalogView catalogView;
 
-    ConnectorController(ConnectorRegisterService registerService) {
+    ConnectorController(ConnectorRegisterService registerService, ConnectorCatalogView catalogView) {
         this.registerService = registerService;
+        this.catalogView = catalogView;
     }
 
     @Verb("connector.register")
@@ -54,6 +62,12 @@ class ConnectorController {
             }
             throw e;
         }
+    }
+
+    @Verb("connector.list")
+    @GetMapping("/connectors")
+    ConnectorCatalogList list() {
+        return new ConnectorCatalogList(catalogView.summaries());
     }
 
     /** Decodes the base64 artifact, refusing a non-base64 body field at the boundary as a coded 400. */

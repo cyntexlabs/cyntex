@@ -7,6 +7,7 @@ import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 import io.cyntex.core.catalog.CatalogEntryReader;
+import io.cyntex.core.catalog.CatalogEntryWriter;
 import io.cyntex.core.catalog.ConfigField;
 import io.cyntex.core.catalog.ConfigType;
 import io.cyntex.core.catalog.ConnectorCatalogEntry;

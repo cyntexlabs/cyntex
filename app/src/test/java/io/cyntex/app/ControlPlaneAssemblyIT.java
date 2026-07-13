@@ -201,6 +201,37 @@ class ControlPlaneAssemblyIT {
         assertThat(body.get("code")).isEqualTo("connector.no-connector-class");
     }
 
+    @Test
+    void connectorListIsWiredOverARealStoreAndReturnsTheBundledCatalog() {
+        int port = start();
+        RestClient client = RestClient.create("http://localhost:" + port);
+
+        client.post().uri("/auth/bootstrap").contentType(MediaType.APPLICATION_JSON)
+                .body(Map.of("username", "admin", "password", "s3cret")).retrieve().toBodilessEntity();
+        Map<?, ?> login = client.post().uri("/auth/login").contentType(MediaType.APPLICATION_JSON)
+                .body(Map.of("username", "admin", "password", "s3cret")).retrieve().body(Map.class);
+        String token = (String) login.get("token");
+
+        // The connector.list read verb is assembled over the real store: the online catalog view (the
+        // bundled snapshot union the derived rows for registered connectors) is served through the
+        // authenticated /api face. With no connector registered yet the view is the bundled snapshot, every
+        // row tagged bundled — proving the endpoint, the view and the store are wired, not stubbed. The
+        // register -> derive -> list happy path needs a real connector jar (a gated real-jar test), so it is
+        // not exercised here; the empty-jar register above proves the write chain reaches the introspector.
+        Map<?, ?> body = client.get().uri("/api/connectors")
+                .header("Authorization", "Bearer " + token)
+                .retrieve().body(Map.class);
+        List<?> connectors = (List<?>) body.get("connectors");
+        assertThat(connectors).isNotEmpty();
+        assertThat(connectors).allSatisfy(row ->
+                assertThat(((Map<?, ?>) row).get("origin")).isEqualTo("bundled"));
+
+        // The read verb is guarded like every other: an anonymous request is refused.
+        HttpStatusCode anonymous = client.get().uri("/api/connectors")
+                .exchange((request, response) -> response.getStatusCode());
+        assertThat(anonymous).isEqualTo(HttpStatus.UNAUTHORIZED);
+    }
+
     /** A valid, empty jar (a manifest, no classes): it opens and scans, but carries no connector class. */
     private static byte[] emptyJar() throws IOException {
         Manifest manifest = new Manifest();

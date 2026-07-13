@@ -1,10 +1,15 @@
 package io.cyntex.control.restapi;
 
 import io.cyntex.control.core.AuditGate;
+import io.cyntex.control.core.ConnectorCatalogView;
 import io.cyntex.control.core.ConnectorRegisterService;
 import io.cyntex.control.core.ConnectorRegistrationReport;
+import io.cyntex.control.core.ConnectorSummary;
 import io.cyntex.control.core.ControlOperations;
 import io.cyntex.control.core.CredentialAuthenticator;
+import io.cyntex.core.catalog.CatalogEntryReader;
+import io.cyntex.core.catalog.ConnectorCatalogEntry;
+import io.cyntex.core.catalog.CyntexCatalog;
 import io.cyntex.control.core.GeneratedSecret;
 import io.cyntex.control.core.OperationRegistry;
 import io.cyntex.control.core.Scope;
@@ -17,6 +22,7 @@ import io.cyntex.core.common.CyntexException;
 import io.cyntex.core.common.Severity;
 import io.cyntex.spi.store.AuditRecord;
 import io.cyntex.spi.store.AuditStore;
+import io.cyntex.spi.store.ConnectorCatalogStore;
 import io.cyntex.spi.store.ConnectorRegistrar;
 import io.cyntex.spi.store.ConnectorRegistration;
 import io.cyntex.spi.store.ContentHash;
@@ -92,6 +98,7 @@ class ConnectorApiTest {
         context.getBean(FakeConnectorRegistrar.class).clear();
         context.getBean(RecordingAuditStore.class).clear();
         context.getBean(FakeTokenStore.class).clear();
+        context.getBean(SeedableConnectorCatalogStore.class).clear();
     }
 
     private RestClient client() {
@@ -161,6 +168,40 @@ class ConnectorApiTest {
             assertThat(record.principal()).isEqualTo(expectedPrincipal);
             assertThat(record.resourceId()).isEqualTo(ContentHash.of(ARTIFACT));
         });
+    }
+
+    // ---- the read peer lists the online catalog, registered rows included and tagged ----
+
+    private static final String ORDERS_ROW = """
+            {
+              "id": "orders", "name": "Orders", "displayName": "Orders", "icon": null,
+              "group": "database", "modes": ["snapshot"], "discovery": "catalog",
+              "sink": {"capable": false, "writeSemantics": []}, "pushOut": false, "config": [],
+              "provenance": {"connectorRepoSha": null, "specPath": "spec.json", "specContentHash": "h",
+                "pdkApiVersion": "1.3.5", "requiredLevel": null, "modeSource": {"snapshot": "derived"}}
+            }
+            """;
+
+    @Test
+    void listsTheOnlineCatalogWithRegisteredRowsTaggedRegistered() {
+        context.getBean(SeedableConnectorCatalogStore.class).upsert(CatalogEntryReader.read(ORDERS_ROW));
+
+        ConnectorCatalogList listed = client().get().uri("/api/connectors")
+                .header("Authorization", "Bearer " + token(Scope.READ))
+                .retrieve().toEntity(ConnectorCatalogList.class).getBody();
+
+        ConnectorSummary orders = listed.connectors().stream()
+                .filter(c -> c.id().equals("orders")).findFirst().orElseThrow();
+        assertThat(orders.origin()).isEqualTo("registered");
+        assertThat(orders.modes()).contains("snapshot");
+    }
+
+    @Test
+    void listingRequiresAnAuthenticatedCaller() {
+        HttpStatusCode status = client().get().uri("/api/connectors")
+                .exchange((request, response) -> response.getStatusCode());
+
+        assertThat(status).isEqualTo(HttpStatus.UNAUTHORIZED);
     }
 
     // ---- the verb is a write, guarded like every other ----
@@ -318,6 +359,16 @@ class ConnectorApiTest {
         ConnectorRegisterService connectorRegisterService(ConnectorRegistrar registrar, AuditGate auditGate) {
             return new ConnectorRegisterService(registrar, auditGate);
         }
+
+        @Bean
+        SeedableConnectorCatalogStore connectorCatalogStore() {
+            return new SeedableConnectorCatalogStore();
+        }
+
+        @Bean
+        ConnectorCatalogView connectorCatalogView(SeedableConnectorCatalogStore store) {
+            return new ConnectorCatalogView(CyntexCatalog.load(), store);
+        }
     }
 
     // ---- fakes ----
@@ -364,6 +415,30 @@ class ConnectorApiTest {
             }
             return new RegistrationOutcome(
                     new ConnectorRegistration("orders", ContentHash.of(artifact), "1.3.5", source), newlyRegistered);
+        }
+    }
+
+    /** An in-memory connector catalog row store the list test seeds; cleared between tests. */
+    private static final class SeedableConnectorCatalogStore implements ConnectorCatalogStore {
+        private final Map<String, ConnectorCatalogEntry> rows = new LinkedHashMap<>();
+
+        void clear() {
+            rows.clear();
+        }
+
+        @Override
+        public void upsert(ConnectorCatalogEntry entry) {
+            rows.put(entry.id(), entry);
+        }
+
+        @Override
+        public Optional<ConnectorCatalogEntry> get(String connectorId) {
+            return Optional.ofNullable(rows.get(connectorId));
+        }
+
+        @Override
+        public List<ConnectorCatalogEntry> list() {
+            return new ArrayList<>(rows.values());
         }
     }
 

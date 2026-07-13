@@ -389,6 +389,40 @@ class HttpControlPlaneClientTest {
     }
 
     @Test
+    void connectorListReturnsTheConnectorsWithOriginTagsAndSendsTheCredential() throws Exception {
+        AtomicReference<CapturedRequest> seen = new AtomicReference<>();
+        HttpServer server = apiServer("/api/connectors", 200,
+                "{\"connectors\":[{\"id\":\"mysql\",\"name\":\"MySQL\",\"group\":\"database\","
+                        + "\"modes\":[\"snapshot\",\"cdc\"],\"sink\":true,\"origin\":\"bundled\"},"
+                        + "{\"id\":\"acme\",\"name\":\"Acme\",\"group\":\"database\","
+                        + "\"modes\":[\"snapshot\"],\"sink\":false,\"origin\":\"registered\"}]}", seen);
+        try {
+            ConnectorListOutcome outcome = new HttpControlPlaneClient().connectorList(baseOf(server), "tok-1");
+            assertThat(outcome).isInstanceOf(ConnectorListOutcome.Listed.class);
+            assertThat(((ConnectorListOutcome.Listed) outcome).connectors()).containsExactly(
+                    new CatalogConnector("mysql", "MySQL", "database", List.of("snapshot", "cdc"), true, "bundled"),
+                    new CatalogConnector("acme", "Acme", "database", List.of("snapshot"), false, "registered"));
+            assertThat(seen.get().path()).isEqualTo("/api/connectors");
+            assertThat(seen.get().authorization()).isEqualTo("Bearer tok-1");
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void connectorListReturnsRejectedWithTheServerCodeAndMessageOnACodedErrorStatus() throws Exception {
+        HttpServer server = apiServer("/api/connectors", 403,
+                "{\"code\":\"control.forbidden\",\"params\":{},\"message\":\"You lack the grade.\"}",
+                new AtomicReference<>());
+        try {
+            ConnectorListOutcome outcome = new HttpControlPlaneClient().connectorList(baseOf(server), "tok");
+            assertThat(outcome).isEqualTo(new ConnectorListOutcome.Rejected("control.forbidden", "You lack the grade."));
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
     void listWithoutAKindSendsNoQueryFilter() throws Exception {
         AtomicReference<CapturedRequest> seen = new AtomicReference<>();
         HttpServer server = apiServer("/api/artifacts", 200, "{\"artifacts\":[]}", seen);

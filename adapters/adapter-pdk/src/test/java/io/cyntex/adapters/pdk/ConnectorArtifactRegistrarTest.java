@@ -4,12 +4,17 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatNullPointerException;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import io.cyntex.core.catalog.ConnectorCatalogEntry;
 import io.cyntex.core.common.CyntexException;
+import io.cyntex.core.model.SourceMode;
+import io.cyntex.spi.store.CapabilityDeriver;
+import io.cyntex.spi.store.ConnectorCapabilities;
 import io.cyntex.spi.store.ConnectorRegistration;
 import io.cyntex.spi.store.RegistrationOutcome;
 import io.cyntex.spi.store.RegistrationSource;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Set;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -125,14 +130,95 @@ class ConnectorArtifactRegistrarTest {
     }
 
     @Test
+    void registerDerivesAndPersistsTheConnectorCatalogRow(@TempDir Path dir) {
+        // After a connector's bytes are registered, its normalized catalog row is derived and stored so
+        // the online catalog view can see it: batch_read_function derives the snapshot source mode.
+        Path jar = Synthetic.seedableOrdersConnector(dir);
+        InMemoryConnectorCatalogStore rows = new InMemoryConnectorCatalogStore();
+        ConnectorArtifactRegistrar registrar = new ConnectorArtifactRegistrar(
+                new InMemoryConnectorRegistry(), new ConnectorIntrospector(),
+                id -> new ConnectorCapabilities(Set.of("batch_read_function")), rows);
+
+        registrar.register(jar, RegistrationSource.REGISTER);
+
+        ConnectorCatalogEntry row = rows.get("orders").orElseThrow();
+        assertThat(row.id()).isEqualTo("orders");
+        assertThat(row.modes()).contains(SourceMode.SNAPSHOT);
+    }
+
+    @Test
+    void reRegisteringDoesNotReDeriveWhenTheRowIsAlreadyStored(@TempDir Path dir) {
+        // An idempotent re-register (same bytes, already registered and already rowed) must not pay the
+        // classload-derive cost again — the stored row is reused.
+        Path jar = Synthetic.seedableOrdersConnector(dir);
+        int[] derivations = {0};
+        CapabilityDeriver counting = id -> {
+            derivations[0]++;
+            return new ConnectorCapabilities(Set.of("batch_read_function"));
+        };
+        ConnectorArtifactRegistrar registrar = new ConnectorArtifactRegistrar(
+                new InMemoryConnectorRegistry(), new ConnectorIntrospector(), counting, new InMemoryConnectorCatalogStore());
+
+        registrar.register(jar, RegistrationSource.SEED);
+        registrar.register(jar, RegistrationSource.SEED);
+
+        assertThat(derivations[0]).isEqualTo(1);
+    }
+
+    @Test
+    void reRegisteringBackfillsTheRowWhenItIsMissing(@TempDir Path dir) throws Exception {
+        // The bytes were registered by a prior run but no catalog row was derived (a crash between the
+        // two, or a pre-feature registration): a re-register backfills the missing row even though the
+        // bytes are not newly registered.
+        Path jar = Synthetic.seedableOrdersConnector(dir);
+        byte[] bytes = Files.readAllBytes(jar);
+        InMemoryConnectorRegistry registry = new InMemoryConnectorRegistry();
+        registry.register("orders", "1.3.5", RegistrationSource.SEED, bytes);
+        InMemoryConnectorCatalogStore rows = new InMemoryConnectorCatalogStore();
+        ConnectorArtifactRegistrar registrar = new ConnectorArtifactRegistrar(
+                registry, new ConnectorIntrospector(),
+                id -> new ConnectorCapabilities(Set.of("batch_read_function")), rows);
+
+        RegistrationOutcome outcome = registrar.register(jar, RegistrationSource.SEED);
+
+        assertThat(outcome.newlyRegistered()).isFalse();
+        assertThat(rows.get("orders")).isPresent();
+    }
+
+    @Test
+    void containsACodedDerivationFailureAndStillRegistersTheBytes(@TempDir Path dir) {
+        // Derivation is best-effort: a connector that introspects but whose capabilities cannot be derived
+        // (it will not load in this deployment) is still registered — its bytes are stored and the op
+        // succeeds — rather than reporting failure over already-stored bytes and wedging the id. The catalog
+        // row is simply absent until derivation succeeds on a re-register. A coded connector/derive failure
+        // is contained; a programmer bug (a bare RuntimeException) still crashes.
+        Path jar = Synthetic.seedableOrdersConnector(dir);
+        CapabilityDeriver failing = id -> {
+            throw new CyntexException(ConnectorError.LOAD_FAILED, java.util.Map.of("connector", id), null);
+        };
+        InMemoryConnectorCatalogStore rows = new InMemoryConnectorCatalogStore();
+        ConnectorArtifactRegistrar registrar = new ConnectorArtifactRegistrar(
+                new InMemoryConnectorRegistry(), new ConnectorIntrospector(), failing, rows);
+
+        RegistrationOutcome outcome = registrar.register(jar, RegistrationSource.REGISTER);
+
+        assertThat(outcome.newlyRegistered()).isTrue();
+        assertThat(rows.get("orders")).isEmpty();
+    }
+
+    @Test
     void requiresItsCollaboratorsAndArguments(@TempDir Path dir) {
         InMemoryConnectorRegistry registry = new InMemoryConnectorRegistry();
         ConnectorIntrospector introspector = new ConnectorIntrospector();
+        CapabilityDeriver deriver = id -> new ConnectorCapabilities(Set.of());
+        InMemoryConnectorCatalogStore rows = new InMemoryConnectorCatalogStore();
 
-        assertThatNullPointerException().isThrownBy(() -> new ConnectorArtifactRegistrar(null, introspector));
-        assertThatNullPointerException().isThrownBy(() -> new ConnectorArtifactRegistrar(registry, null));
+        assertThatNullPointerException().isThrownBy(() -> new ConnectorArtifactRegistrar(null, introspector, deriver, rows));
+        assertThatNullPointerException().isThrownBy(() -> new ConnectorArtifactRegistrar(registry, null, deriver, rows));
+        assertThatNullPointerException().isThrownBy(() -> new ConnectorArtifactRegistrar(registry, introspector, null, rows));
+        assertThatNullPointerException().isThrownBy(() -> new ConnectorArtifactRegistrar(registry, introspector, deriver, null));
 
-        ConnectorArtifactRegistrar registrar = new ConnectorArtifactRegistrar(registry, introspector);
+        ConnectorArtifactRegistrar registrar = new ConnectorArtifactRegistrar(registry, introspector, deriver, rows);
         assertThatNullPointerException().isThrownBy(() -> registrar.register((Path) null, RegistrationSource.SEED));
         assertThatNullPointerException().isThrownBy(() -> registrar.register(dir.resolve("x.jar"), null));
         assertThatNullPointerException().isThrownBy(() -> registrar.register((byte[]) null, RegistrationSource.SEED));
@@ -140,6 +226,7 @@ class ConnectorArtifactRegistrarTest {
     }
 
     private static ConnectorArtifactRegistrar registrarOver(InMemoryConnectorRegistry registry) {
-        return new ConnectorArtifactRegistrar(registry, new ConnectorIntrospector());
+        return new ConnectorArtifactRegistrar(registry, new ConnectorIntrospector(),
+                id -> new ConnectorCapabilities(Set.of("batch_read_function")), new InMemoryConnectorCatalogStore());
     }
 }

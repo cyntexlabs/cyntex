@@ -83,6 +83,7 @@ class ReplTest {
         ConnectionDiscoverSchemaOutcome discoverSchemaOutcome = new ConnectionDiscoverSchemaOutcome.Unreachable();
         ConnectionSchemaOutcome schemaOutcome = new ConnectionSchemaOutcome.Unreachable();
         ConnectorRegisterOutcome registerOutcome = new ConnectorRegisterOutcome.Unreachable();
+        ConnectorListOutcome connectorListOutcome = new ConnectorListOutcome.Unreachable();
         final List<String> applyCalls = new ArrayList<>();
         final List<String> getCalls = new ArrayList<>();
         final List<String> listCalls = new ArrayList<>();
@@ -91,6 +92,7 @@ class ReplTest {
         final List<String> discoverSchemaCalls = new ArrayList<>();
         final List<String> schemaCalls = new ArrayList<>();
         final List<String> registerCalls = new ArrayList<>();
+        final List<String> connectorListCalls = new ArrayList<>();
 
         FakeControlPlane(URI... healthy) {
             this.healthy = new LinkedHashSet<>(List.of(healthy));
@@ -162,6 +164,12 @@ class ReplTest {
         public ConnectorRegisterOutcome register(URI baseUrl, String credential, byte[] artifact) {
             registerCalls.add(credential + "@" + baseUrl + " x" + artifact.length);
             return healthy.contains(baseUrl) ? registerOutcome : new ConnectorRegisterOutcome.Unreachable();
+        }
+
+        @Override
+        public ConnectorListOutcome connectorList(URI baseUrl, String credential) {
+            connectorListCalls.add(credential + "@" + baseUrl);
+            return healthy.contains(baseUrl) ? connectorListOutcome : new ConnectorListOutcome.Unreachable();
         }
     }
 
@@ -812,6 +820,54 @@ class ReplTest {
         Harness h = onlineSession(Path.of("cyn-work"), client);
         h.repl().dispatch("ls source");
         assertThat(client.listCalls).containsExactly("jwt-tok@http://node1:7900?source");
+    }
+
+    // --- online verb: `connectors` lists the online catalog view (registered rows included) --------
+
+    @Test
+    void connectorsWhileAuthenticatedListsTheOnlineCatalogWithOriginTags() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.connectorListOutcome = new ConnectorListOutcome.Listed(List.of(
+                new CatalogConnector("mysql", "MySQL", "database", List.of("snapshot", "cdc"), true, "bundled"),
+                new CatalogConnector("acme", "Acme", "database", List.of("snapshot"), false, "registered")));
+        Harness h = onlineSession(Path.of("cyn-work"), client);
+        int mark = h.sink().toString().length();
+        assertThat(h.repl().dispatch("connectors")).isTrue();
+        String out = h.sink().toString().substring(mark);
+        assertThat(out).contains("mysql").contains("acme")
+                .contains("bundled").contains("registered").contains("snapshot");
+        assertThat(client.connectorListCalls).containsExactly("jwt-tok@http://node1:7900");
+    }
+
+    @Test
+    void connectorsWithJsonOutputEmitsTheMachineForm() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.connectorListOutcome = new ConnectorListOutcome.Listed(List.of(
+                new CatalogConnector("acme", "Acme", "database", List.of("snapshot"), false, "registered")));
+        Harness h = onlineSession(Path.of("cyn-work"), client);
+        int mark = h.sink().toString().length();
+        assertThat(h.repl().dispatch("connectors -o json")).isTrue();
+        String out = h.sink().toString().substring(mark);
+        assertThat(out).contains("connectors").contains("acme").contains("origin").contains("registered");
+    }
+
+    @Test
+    void connectorsRenderingAServerRejectionShowsTheCodeAndMessage() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.connectorListOutcome = new ConnectorListOutcome.Rejected("control.forbidden", "You lack the grade.");
+        Harness h = onlineSession(Path.of("cyn-work"), client);
+        h.repl().dispatch("connectors");
+        assertThat(h.sink().toString()).contains("control.forbidden").contains("You lack the grade.");
+    }
+
+    @Test
+    void connectorsRejectsAStrayOperandWithAUsageLine() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        Harness h = onlineSession(Path.of("cyn-work"), client);
+        int mark = h.sink().toString().length();
+        h.repl().dispatch("connectors nope");
+        assertThat(h.sink().toString().substring(mark)).contains("connectors:").contains("takes no operand");
+        assertThat(client.connectorListCalls).isEmpty();
     }
 
     // --- connection test: `test <id>` sources the stored connection, then probes it and renders the report ---

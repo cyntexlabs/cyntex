@@ -13,6 +13,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.function.Supplier;
 
 /**
  * The resource-type-agnostic apply pipeline. {@link #plan} is the front half — validate -> canonical
@@ -26,6 +27,10 @@ import java.util.Optional;
  * nothing is written on a validation failure. The batch is the closure: references resolve within the
  * submitted set. The union with store-resident artifacts is layered in where the store is consulted.
  *
+ * <p>The catalog is supplied per plan rather than fixed, so the online path validates against the live
+ * catalog view — the bundled snapshot union the connectors registered so far — and a connector
+ * registered at runtime is honoured without a restart.
+ *
  * <p>The no-op is keyed by the content hash over the canonical form, so re-applying identical content
  * — even with different raw key order — writes nothing. Apply writes the changed set — the created and
  * updated artifacts — as one atomic batch, so a mid-batch write failure rolls the whole batch back and
@@ -33,12 +38,12 @@ import java.util.Optional;
  */
 public final class ApplyService {
 
-    private final CyntexCatalog catalog;
+    private final Supplier<CyntexCatalog> catalog;
     private final ArtifactStore store;
     private final DslParser parser = new DslParser();
     private final CanonicalWriter writer = new CanonicalWriter();
 
-    public ApplyService(CyntexCatalog catalog, ArtifactStore store) {
+    public ApplyService(Supplier<CyntexCatalog> catalog, ArtifactStore store) {
         this.catalog = Objects.requireNonNull(catalog, "catalog");
         this.store = Objects.requireNonNull(store, "store");
     }
@@ -54,7 +59,7 @@ public final class ApplyService {
         for (ArtifactDraft draft : drafts) {
             resources.add(parse(draft));
         }
-        Workspace workspace = Workspace.of(resources, catalog);
+        Workspace workspace = Workspace.of(resources, catalog.get());
         List<PreparedArtifact> prepared = new ArrayList<>();
         for (Resource resource : workspace.resources()) {
             String canonicalForm = writer.write(resource);

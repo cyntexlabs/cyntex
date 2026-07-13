@@ -5,11 +5,13 @@ import io.cyntex.adapters.mongostore.MongoConnection;
 import io.cyntex.adapters.pdk.ConnectorArtifactRegistrar;
 import io.cyntex.adapters.pdk.ConnectorIntrospector;
 import io.cyntex.adapters.pdk.ConnectorProvisioner;
+import io.cyntex.adapters.pdk.PdkCapabilityDeriver;
 import io.cyntex.adapters.pdk.PdkConnectionTester;
 import io.cyntex.adapters.pdk.PdkSchemaDiscoverer;
 import io.cyntex.adapters.pdk.RegistryConnectorProvisioner;
 import io.cyntex.adapters.pdk.SeedConnectorSweep;
 import io.cyntex.control.core.ApplyService;
+import io.cyntex.control.core.ConnectorCatalogView;
 import io.cyntex.control.core.ArtifactQueryService;
 import io.cyntex.control.core.AuditGate;
 import io.cyntex.control.core.BootstrapService;
@@ -35,6 +37,8 @@ import io.cyntex.runtime.probe.SchemaDiscoveryProbe;
 import io.cyntex.spi.store.AuditStore;
 import io.cyntex.spi.store.ConnectionTestResultStore;
 import io.cyntex.spi.store.ConnectionTester;
+import io.cyntex.spi.store.CapabilityDeriver;
+import io.cyntex.spi.store.ConnectorCatalogStore;
 import io.cyntex.spi.store.ConnectorRegistry;
 import io.cyntex.spi.store.SchemaDiscoverer;
 import io.cyntex.spi.store.SchemaStore;
@@ -154,8 +158,10 @@ class ControlPlaneConfiguration {
     }
 
     @Bean
-    ApplyService applyService(StorePort storePort) {
-        return new ApplyService(CyntexCatalog.load(), storePort.artifacts());
+    ApplyService applyService(StorePort storePort, ConnectorCatalogView connectorCatalogView) {
+        // The online apply validates against the live catalog view (the bundled snapshot union the
+        // connectors registered so far), so a connector registered at runtime is honoured without a restart.
+        return new ApplyService(connectorCatalogView::merged, storePort.artifacts());
     }
 
     @Bean
@@ -170,6 +176,23 @@ class ControlPlaneConfiguration {
     @Bean
     ConnectorRegistry connectorRegistry(StorePort storePort) {
         return storePort.connectors();
+    }
+
+    @Bean
+    ConnectorCatalogStore connectorCatalogStore(StorePort storePort) {
+        return storePort.connectorCatalog();
+    }
+
+    @Bean
+    CapabilityDeriver capabilityDeriver(ConnectorProvisioner provisioner) {
+        return new PdkCapabilityDeriver(provisioner);
+    }
+
+    @Bean
+    ConnectorCatalogView connectorCatalogView(ConnectorCatalogStore connectorCatalogStore) {
+        // The online catalog view = the bundled snapshot overlaid with the rows derived for registered
+        // connectors, read live; the offline native CLI keeps reading only the bundled snapshot.
+        return new ConnectorCatalogView(CyntexCatalog.load(), connectorCatalogStore);
     }
 
     @Bean
@@ -193,8 +216,9 @@ class ControlPlaneConfiguration {
 
     @Bean
     ConnectorArtifactRegistrar connectorArtifactRegistrar(
-            ConnectorRegistry registry, ConnectorIntrospector introspector) {
-        return new ConnectorArtifactRegistrar(registry, introspector);
+            ConnectorRegistry registry, ConnectorIntrospector introspector,
+            CapabilityDeriver capabilityDeriver, ConnectorCatalogStore connectorCatalogStore) {
+        return new ConnectorArtifactRegistrar(registry, introspector, capabilityDeriver, connectorCatalogStore);
     }
 
     @Bean

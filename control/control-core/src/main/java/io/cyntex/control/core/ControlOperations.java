@@ -45,6 +45,12 @@ public final class ControlOperations {
     // dispatching to the runtime, so it adds no member to the synchronous control-to-runtime whitelist.
     public static final Operation CONNECTOR_REGISTER =
             new Operation("connector.register", Scope.WRITE, true, null, CLI_POC);
+    // connector.list reads the online catalog view — the bundled snapshot union the rows derived for
+    // registered connectors — so a registered connector becomes visible without a restart. It reads
+    // derived catalog state, mutates nothing, and needs no member on the synchronous control-to-runtime
+    // whitelist; it is read-scoped and unaudited.
+    public static final Operation CONNECTOR_LIST =
+            new Operation("connector.list", Scope.READ, false, null, CLI_POC);
 
     // cluster domain: topology is sensitive, so listing members is a registry operation (authenticated
     // like every other verb) rather than an anonymous endpoint — only the process-liveness probe stays
@@ -68,6 +74,7 @@ public final class ControlOperations {
             CONNECTION_DISCOVER_SCHEMA,
             CONNECTION_SCHEMA,
             CONNECTOR_REGISTER,
+            CONNECTOR_LIST,
             CLUSTER_MEMBERS,
             USER_CREATE,
             USER_PASSWD,

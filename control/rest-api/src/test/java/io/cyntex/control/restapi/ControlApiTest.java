@@ -330,7 +330,7 @@ class ControlApiTest {
 
         @Bean
         ApplyService applyService(ArtifactStore store) {
-            return new ApplyService(CyntexCatalog.load(), store);
+            return new ApplyService(CyntexCatalog::load, store);
         }
 
         @Bean

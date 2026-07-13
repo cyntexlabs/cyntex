@@ -46,6 +46,14 @@
       <artifactId>core-dsl</artifactId>
       <version>${revision}</version>
     </dependency>
+    <!-- The connector catalog row model and its serde (writer / reader): the derived-row store persists
+         a normalized ConnectorCatalogEntry, reusing the catalog product's serde so the persisted shape
+         matches the bundled one. -->
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>core-catalog</artifactId>
+      <version>${revision}</version>
+    </dependency>
     <!-- The Mongo sync driver. Rule R3: this is the only module permitted to depend on it. -->
     <dependency>
       <groupId>org.mongodb</groupId>

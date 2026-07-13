@@ -11,6 +11,10 @@ import io.cyntex.adapters.pdk.ConnectorArtifactRegistrar;
 import io.cyntex.adapters.pdk.ConnectorIntrospector;
 import io.cyntex.adapters.pdk.SeedConnectorSweep;
 import io.cyntex.adapters.pdk.SeedOutcome;
+import io.cyntex.core.catalog.ConnectorCatalogEntry;
+import io.cyntex.spi.store.CapabilityDeriver;
+import io.cyntex.spi.store.ConnectorCapabilities;
+import io.cyntex.spi.store.ConnectorCatalogStore;
 import io.cyntex.spi.store.ConnectorRegistration;
 import io.cyntex.spi.store.ConnectorRegistry;
 import io.cyntex.spi.store.RegistrationOutcome;
@@ -96,7 +100,24 @@ class SeedSweepRunnerTest {
     }
 
     private static SeedConnectorSweep sweepOver(ConnectorRegistry registry) {
-        return new SeedConnectorSweep(new ConnectorArtifactRegistrar(registry, new ConnectorIntrospector()));
+        CapabilityDeriver deriver = id -> new ConnectorCapabilities(java.util.Set.of("batch_read_function"));
+        ConnectorCatalogStore catalog = new ConnectorCatalogStore() {
+            @Override
+            public void upsert(ConnectorCatalogEntry entry) {
+            }
+
+            @Override
+            public Optional<ConnectorCatalogEntry> get(String connectorId) {
+                return Optional.empty();
+            }
+
+            @Override
+            public List<ConnectorCatalogEntry> list() {
+                return List.of();
+            }
+        };
+        return new SeedConnectorSweep(
+                new ConnectorArtifactRegistrar(registry, new ConnectorIntrospector(), deriver, catalog));
     }
 
     /** An in-memory register-if-absent stand-in that records what reached it. */

@@ -53,6 +53,25 @@ public final class CyntexCatalog {
         return new CyntexCatalog(ids, byId);
     }
 
+    /**
+     * Overlays server-registered rows on the bundled snapshot to form the online catalog view. A
+     * registered entry shadows a bundled one with the same id (whole-row replace; identity is
+     * id-only), and a registered-only id appends after the bundled ids in the given order. Used
+     * only on the online (server) side — the offline path stays on {@link #load()} so it never
+     * claims a connector it cannot run.
+     */
+    public static CyntexCatalog merged(CyntexCatalog bundled, List<ConnectorCatalogEntry> registered) {
+        List<String> ids = new ArrayList<>(bundled.ids);
+        Map<String, ConnectorCatalogEntry> byId = new LinkedHashMap<>(bundled.byId);
+        for (ConnectorCatalogEntry entry : registered) {
+            if (!byId.containsKey(entry.id())) {
+                ids.add(entry.id());
+            }
+            byId.put(entry.id(), entry);
+        }
+        return new CyntexCatalog(ids, byId);
+    }
+
     /** Connector ids in index (catalog) order. */
     public List<String> ids() {
         return ids;
