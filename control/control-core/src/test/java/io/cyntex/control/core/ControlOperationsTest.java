@@ -25,6 +25,7 @@ class ControlOperationsTest {
                         "pipeline.status",
                         "pipeline.metrics",
                         "pipeline.snapshot",
+                        "pipeline.logs",
                         "user.create",
                         "user.passwd",
                         "user.list",
@@ -47,8 +48,9 @@ class ControlOperationsTest {
         for (String id : List.of("pipeline.start", "pipeline.stop", "pipeline.pause", "pipeline.resume")) {
             assertThat(registry.resolve(id).scope()).as(id).isEqualTo(Scope.WRITE);
         }
-        // the three pipeline observation reads are store-backed read faces; read-scoped, unaudited.
-        for (String id : List.of("pipeline.status", "pipeline.metrics", "pipeline.snapshot")) {
+        // the pipeline observation reads (status/metrics/snapshot store-backed, logs node-local) are all
+        // read faces; read-scoped, unaudited.
+        for (String id : List.of("pipeline.status", "pipeline.metrics", "pipeline.snapshot", "pipeline.logs")) {
             assertThat(registry.resolve(id).scope()).as(id).isEqualTo(Scope.READ);
         }
         for (String id : List.of("user.create", "user.passwd", "user.list", "token.create", "token.revoke", "token.list")) {
@@ -73,7 +75,7 @@ class ControlOperationsTest {
             assertThat(registry.resolve(id).audited()).as(id).isTrue();
         }
         for (String id : List.of("artifact.get", "artifact.list", "cluster.members", "user.list", "token.list",
-                "pipeline.status", "pipeline.metrics", "pipeline.snapshot")) {
+                "pipeline.status", "pipeline.metrics", "pipeline.snapshot", "pipeline.logs")) {
             assertThat(registry.resolve(id).audited()).as(id).isFalse();
         }
     }
@@ -81,7 +83,7 @@ class ControlOperationsTest {
     @Test
     void everyL1OperationIsOnTheCliPocSurface() {
         assertThat(registry.exposedOn(Frontend.CLI, Maturity.POC))
-                .hasSize(18)
+                .hasSize(19)
                 .allSatisfy(op -> assertThat(op.exposure()).containsEntry(Frontend.CLI, Maturity.POC));
     }
 

@@ -11,6 +11,7 @@ import io.cyntex.control.core.LoginService;
 import io.cyntex.control.core.OperationRegistry;
 import io.cyntex.control.core.PasswordHasher;
 import io.cyntex.control.core.PipelineLifecycleService;
+import io.cyntex.control.core.PipelineLogQueryService;
 import io.cyntex.control.core.PipelineObservationQueryService;
 import io.cyntex.control.core.Scope;
 import io.cyntex.control.core.TokenSecrets;
@@ -29,6 +30,8 @@ import io.cyntex.spi.store.ArtifactStore;
 import io.cyntex.spi.store.AuditRecord;
 import io.cyntex.spi.store.AuditStore;
 import io.cyntex.spi.store.DesiredStore;
+import io.cyntex.core.logging.LogSink;
+import io.cyntex.core.logging.RingBufferLogSink;
 import io.cyntex.spi.store.ObservationStore;
 import io.cyntex.spi.store.TokenRecord;
 import io.cyntex.spi.store.TokenStore;
@@ -270,11 +273,11 @@ class PipelineApiTest {
         });
 
         assertThat(projectedPipelineVerbs)
-                .as("the full pipeline surface — four lifecycle writes and three observation reads — projects "
+                .as("the full pipeline surface — four lifecycle writes and four observation reads — projects "
                         + "onto the authenticated /api surface (this test boots the whole face bundle)")
                 .containsExactlyInAnyOrder(
                         "pipeline.start", "pipeline.stop", "pipeline.pause", "pipeline.resume",
-                        "pipeline.status", "pipeline.metrics", "pipeline.snapshot");
+                        "pipeline.status", "pipeline.metrics", "pipeline.snapshot", "pipeline.logs");
     }
 
     // ---- fixtures ----
@@ -445,6 +448,18 @@ class PipelineApiTest {
         @Bean
         PipelineObservationQueryService pipelineObservationQueryService(ObservationStore observations) {
             return new PipelineObservationQueryService(observations);
+        }
+
+        @Bean
+        LogSink logSink() {
+            // The lifecycle write tests do not read logs; an empty node-local sink is enough to bring the
+            // logs controller up so the full-face bundle boots. The logs face is proven in PipelineLogsApiTest.
+            return new RingBufferLogSink(64, 200);
+        }
+
+        @Bean
+        PipelineLogQueryService pipelineLogQueryService(LogSink sink) {
+            return new PipelineLogQueryService(sink);
         }
     }
 

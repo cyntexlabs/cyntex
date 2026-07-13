@@ -12,12 +12,15 @@ import io.cyntex.control.core.LoginService;
 import io.cyntex.control.core.OperationRegistry;
 import io.cyntex.control.core.PasswordHasher;
 import io.cyntex.control.core.PipelineLifecycleService;
+import io.cyntex.control.core.PipelineLogQueryService;
 import io.cyntex.control.core.PipelineObservationQueryService;
 import io.cyntex.control.core.TokenSecrets;
 import io.cyntex.control.core.TokenService;
 import io.cyntex.control.core.TokenSigner;
 import io.cyntex.control.restapi.ControlHttpFace;
 import io.cyntex.core.catalog.CyntexCatalog;
+import io.cyntex.core.logging.LogSink;
+import io.cyntex.core.logging.RingBufferLogSink;
 import io.cyntex.spi.store.AuditStore;
 import io.cyntex.spi.store.StorePort;
 import io.cyntex.spi.store.TokenStore;
@@ -57,6 +60,10 @@ class ControlPlaneConfiguration {
 
     /** The number of random bytes in an ephemeral signing secret when none is configured. */
     private static final int EPHEMERAL_SECRET_BYTES = 32;
+
+    /** The node-local log tail bounds: how many pipelines to retain lines for, and how many lines each. */
+    private static final int MAX_LOGGED_PIPELINES = 64;
+    private static final int MAX_LOG_LINES_PER_PIPELINE = 200;
 
     // ---- authentication ports over the store (the counterpart to StoreConfiguration's StorePort) ----
 
@@ -153,6 +160,29 @@ class ControlPlaneConfiguration {
     @Bean
     PipelineObservationQueryService pipelineObservationQueryService(StorePort storePort) {
         return new PipelineObservationQueryService(storePort.observations());
+    }
+
+    // ---- the node-local log tail: the sink, the appender that feeds it, and the read face over it ----
+
+    /**
+     * The one in-process log sink for this node. It is node-local, not store-backed: logs are not fanned
+     * into the shared store like the other observation reads, so this bean is both fed (by the appender) and
+     * read (by the logs read face) in-process.
+     */
+    @Bean
+    LogSink logSink() {
+        return new RingBufferLogSink(MAX_LOGGED_PIPELINES, MAX_LOG_LINES_PER_PIPELINE);
+    }
+
+    /** Attaches the pipeline log appender to the logging backend so the sink is fed; detaches on shutdown. */
+    @Bean
+    PipelineLogCapture pipelineLogCapture(LogSink logSink) {
+        return new PipelineLogCapture(logSink);
+    }
+
+    @Bean
+    PipelineLogQueryService pipelineLogQueryService(LogSink logSink) {
+        return new PipelineLogQueryService(logSink);
     }
 
     /**

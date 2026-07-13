@@ -546,6 +546,89 @@ class HttpControlPlaneClientTest {
     }
 
     @Test
+    void logsGetsThePipelineTailOldestToNewest() throws Exception {
+        AtomicReference<CapturedRequest> seen = new AtomicReference<>();
+        HttpServer server = apiServer("/api/pipelines/pl1/logs", 200,
+                "{\"pipelineId\":\"pl1\",\"lines\":["
+                        + "{\"timestampMillis\":1700000000000,\"level\":\"INFO\",\"message\":\"submitted job\"},"
+                        + "{\"timestampMillis\":1700000000100,\"level\":\"WARN\",\"message\":\"slow tick\"}]}", seen);
+        try {
+            LogsOutcome outcome = new HttpControlPlaneClient().logs(baseOf(server), "tok", "pl1");
+            assertThat(outcome).isEqualTo(new LogsOutcome.Found("pl1", List.of(
+                    new RemoteLogLine(1700000000000L, "INFO", "submitted job"),
+                    new RemoteLogLine(1700000000100L, "WARN", "slow tick"))));
+            assertThat(seen.get().method()).isEqualTo("GET");
+            assertThat(seen.get().path()).isEqualTo("/api/pipelines/pl1/logs");
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void logsWithNoLinesIsABenignEmptyFound() throws Exception {
+        HttpServer server = apiServer("/api/pipelines/pl1/logs", 200,
+                "{\"pipelineId\":\"pl1\",\"lines\":[]}", new AtomicReference<>());
+        try {
+            assertThat(new HttpControlPlaneClient().logs(baseOf(server), "tok", "pl1"))
+                    .isEqualTo(new LogsOutcome.Found("pl1", List.of()));
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void logsDropsAMalformedLineButKeepsTheValidOnes() throws Exception {
+        // A malformed line entry (missing fields) is dropped rather than crashing the read; valid lines in the
+        // same tail are still returned.
+        HttpServer server = apiServer("/api/pipelines/pl1/logs", 200,
+                "{\"pipelineId\":\"pl1\",\"lines\":["
+                        + "{\"timestampMillis\":1,\"level\":\"INFO\",\"message\":\"kept\"},"
+                        + "{\"level\":\"WARN\"}]}", new AtomicReference<>());
+        try {
+            assertThat(new HttpControlPlaneClient().logs(baseOf(server), "tok", "pl1"))
+                    .isEqualTo(new LogsOutcome.Found("pl1", List.of(new RemoteLogLine(1L, "INFO", "kept"))));
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void logsReturnsRejectedWithTheServerCodeAndMessageOnACodedError() throws Exception {
+        HttpServer server = apiServer("/api/pipelines/pl1/logs", 403,
+                "{\"code\":\"control.forbidden\",\"params\":{},\"message\":\"You lack the grade.\"}",
+                new AtomicReference<>());
+        try {
+            assertThat(new HttpControlPlaneClient().logs(baseOf(server), "tok", "pl1"))
+                    .isEqualTo(new LogsOutcome.Rejected("control.forbidden", "You lack the grade."));
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void logsReturnsUnreachableOnAWrongShapeTwoHundred() throws Exception {
+        // A 200 whose body is not the expected shape (a proxy splash, a wrong endpoint) is unusable: it maps
+        // to unreachable, not a falsely-successful empty tail.
+        HttpServer server = apiServer("/api/pipelines/pl1/logs", 200, "{\"unexpected\":true}", new AtomicReference<>());
+        try {
+            assertThat(new HttpControlPlaneClient().logs(baseOf(server), "tok", "pl1"))
+                    .isInstanceOf(LogsOutcome.Unreachable.class);
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void logsReturnsUnreachableWhenTheServerIsDownWithoutThrowing() throws Exception {
+        int closedPort;
+        try (ServerSocket socket = new ServerSocket(0)) {
+            closedPort = socket.getLocalPort();
+        }
+        assertThat(new HttpControlPlaneClient().logs(URI.create("http://127.0.0.1:" + closedPort), "tok", "pl1"))
+                .isInstanceOf(LogsOutcome.Unreachable.class);
+    }
+
+    @Test
     void snapshotReturnsAnEmptyMapOutsideASnapshotPhase() throws Exception {
         // Honest-empty: outside a snapshot phase the per-table map is empty — a legitimate Found, not a miss.
         HttpServer server = apiServer("/api/pipelines/pl1/snapshot", 200,

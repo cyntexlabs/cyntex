@@ -71,6 +71,20 @@
       <artifactId>core-common</artifactId>
       <version>${revision}</version>
     </dependency>
+    <!-- The node-local log tail: the assembly root owns the one in-process log sink, feeds it from a
+         logging appender it attaches, and exposes it to the logs read face. -->
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>core-logging</artifactId>
+      <version>${revision}</version>
+    </dependency>
+    <!-- The logging implementation (already the runtime backend via the Boot logging starter): the
+         assembly root attaches its own appender to feed the node-local log sink. Version-managed by the
+         platform BOM. -->
+    <dependency>
+      <groupId>ch.qos.logback</groupId>
+      <artifactId>logback-classic</artifactId>
+    </dependency>
     <!-- The control ring's ports the assembly root binds concrete implementations to: the password
          hasher and the session-token signer are framework-free interfaces in the control kernel, and
          their real (library-backed) implementations live here at the assembly point. -->

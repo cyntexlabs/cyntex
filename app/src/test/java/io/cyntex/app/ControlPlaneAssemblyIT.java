@@ -87,6 +87,14 @@ class ControlPlaneAssemblyIT {
                 .retrieve().body(Map.class);
         assertThat(got.get("id")).isEqualTo("src_ora");
         assertThat(got.get("canonicalForm")).isEqualTo(offlineCanonical(SOURCE));
+
+        // The node-local logs read face is served by the assembled control plane: a pipeline that has logged
+        // nothing yields a benign empty tail with a normal 200, not a 404 like a missing observation.
+        Map<?, ?> logs = client.get().uri("/api/pipelines/ghost/logs")
+                .header("Authorization", "Bearer " + token)
+                .retrieve().body(Map.class);
+        assertThat(logs.get("pipelineId")).isEqualTo("ghost");
+        assertThat((List<?>) logs.get("lines")).isEmpty();
     }
 
     private int start() {

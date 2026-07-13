@@ -16,6 +16,7 @@ import java.io.UncheckedIOException;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -54,7 +55,7 @@ final class Repl {
      * validate endpoint exists.
      */
     private static final List<String> ONLINE_VERBS = List.of(
-            "apply", "get", "ls", "start", "stop", "pause", "resume", "status", "metrics", "snapshot");
+            "apply", "get", "ls", "start", "stop", "pause", "resume", "status", "metrics", "snapshot", "logs");
 
     private final CommandLine commandLine;
 
@@ -196,6 +197,7 @@ final class Repl {
             case "status" -> statusOnline(words);
             case "metrics" -> metricsOnline(words);
             case "snapshot" -> snapshotOnline(words);
+            case "logs" -> logsOnline(words);
             default -> throw new IllegalStateException("not an online verb: " + words.get(0));
         }
     }
@@ -408,6 +410,34 @@ final class Repl {
             case SnapshotOutcome.Rejected rejected -> renderRejection(rejected.code(), rejected.message());
             case SnapshotOutcome.Unreachable ignored -> reportRequestFailed();
         }
+    }
+
+    private void logsOnline(List<String> words) {
+        String id = readTargetId(words);
+        if (id == null) {
+            return;
+        }
+        LogsOutcome outcome = withFailover(() ->
+                controlPlane.logs(session.landingNode(), session.credential(), id),
+                o -> o instanceof LogsOutcome.Unreachable);
+        PrintWriter out = commandLine.getOut();
+        switch (outcome) {
+            case LogsOutcome.Found found -> {
+                if (found.lines().isEmpty()) {
+                    out.println("no logs");
+                } else {
+                    found.lines().forEach(line -> out.println(renderLogLine(line)));
+                }
+                out.flush();
+            }
+            case LogsOutcome.Rejected rejected -> renderRejection(rejected.code(), rejected.message());
+            case LogsOutcome.Unreachable ignored -> reportRequestFailed();
+        }
+    }
+
+    /** One tailed line as {@code <iso-timestamp> <level> <message>}. */
+    private static String renderLogLine(RemoteLogLine line) {
+        return Instant.ofEpochMilli(line.timestampMillis()) + "  " + line.level() + "  " + line.message();
     }
 
     /**

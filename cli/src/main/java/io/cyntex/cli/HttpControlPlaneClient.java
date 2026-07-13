@@ -307,6 +307,45 @@ final class HttpControlPlaneClient implements ControlPlaneClient {
         return null;
     }
 
+    @Override
+    public LogsOutcome logs(URI baseUrl, String credential, String pipelineId) {
+        try {
+            HttpRequest request =
+                    authed(baseUrl, "/api/pipelines/" + pipelineId + "/logs", credential).GET().build();
+            HttpResponse<String> response =
+                    client().send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            if (response.statusCode() == 200) {
+                LogsOutcome.Found found = logsFound(response.body());
+                return found == null ? new LogsOutcome.Unreachable() : found;
+            }
+            Rejection r = rejection(response.body(), "The server refused the read.");
+            return new LogsOutcome.Rejected(r.code(), r.message());
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return new LogsOutcome.Unreachable();
+        } catch (IOException | RuntimeException e) {
+            return new LogsOutcome.Unreachable();
+        }
+    }
+
+    private static LogsOutcome.Found logsFound(String body) {
+        if (JsonReader.parse(body) instanceof Map<?, ?> m
+                && m.get("pipelineId") instanceof String id
+                && m.get("lines") instanceof List<?> lines) {
+            List<RemoteLogLine> parsed = new ArrayList<>();
+            for (Object element : lines) {
+                if (element instanceof Map<?, ?> line
+                        && line.get("timestampMillis") instanceof Number ts
+                        && line.get("level") instanceof String level
+                        && line.get("message") instanceof String message) {
+                    parsed.add(new RemoteLogLine(ts.longValue(), level, message));
+                }
+            }
+            return new LogsOutcome.Found(id, parsed);
+        }
+        return null;
+    }
+
     /** A request builder for {@code path} against a base, carrying the timeout and the bearer credential. */
     private static HttpRequest.Builder authed(URI baseUrl, String path, String credential) {
         return HttpRequest.newBuilder(endpoint(baseUrl, path))

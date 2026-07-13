@@ -75,4 +75,12 @@ interface ControlPlaneClient {
      * rejection when the server refuses, or unreachable on any I/O failure. Never throws.
      */
     SnapshotOutcome snapshot(URI baseUrl, String credential, String pipelineId);
+
+    /**
+     * Reads a pipeline's recent log lines via {@code GET {baseUrl}/api/pipelines/{pipelineId}/logs},
+     * authenticated by the bearer {@code credential}: the tail on success (empty when the pipeline has
+     * logged nothing on the served node), a coded rejection when the server refuses, or unreachable on any
+     * I/O failure. Never throws.
+     */
+    LogsOutcome logs(URI baseUrl, String credential, String pipelineId);
 }

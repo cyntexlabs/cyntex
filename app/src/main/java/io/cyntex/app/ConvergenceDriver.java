@@ -5,6 +5,7 @@ import io.cyntex.runtime.scheduler.PipelineConverger;
 import io.cyntex.spi.store.DesiredStore;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 import org.springframework.scheduling.annotation.Scheduled;
 
 /**
@@ -32,11 +33,16 @@ final class ConvergenceDriver {
     @Scheduled(fixedDelayString = "${cyntex.converge.interval-ms:1000}")
     void reconcile() {
         for (String pipelineId : desired.pipelineIds()) {
+            // Attribute every line logged while reconciling this pipeline to it, so the logs read face can
+            // tail per pipeline. Cleared per pipeline so the slot never leaks onto the next one or an idle tick.
+            MDC.put(PipelineLogAppender.PIPELINE_ID_MDC_KEY, pipelineId);
             try {
                 converger.converge(pipelineId);
                 publisher.publish(pipelineId);
             } catch (RuntimeException e) {
                 LOG.warn("Reconcile pass for pipeline {} failed; retrying on the next tick", pipelineId, e);
+            } finally {
+                MDC.remove(PipelineLogAppender.PIPELINE_ID_MDC_KEY);
             }
         }
     }

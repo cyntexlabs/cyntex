@@ -82,6 +82,7 @@ class ReplTest {
         StatusOutcome statusOutcome = new StatusOutcome.Unreachable();
         MetricsOutcome metricsOutcome = new MetricsOutcome.Unreachable();
         SnapshotOutcome snapshotOutcome = new SnapshotOutcome.Unreachable();
+        LogsOutcome logsOutcome = new LogsOutcome.Unreachable();
         final List<String> applyCalls = new ArrayList<>();
         final List<String> getCalls = new ArrayList<>();
         final List<String> listCalls = new ArrayList<>();
@@ -89,6 +90,7 @@ class ReplTest {
         final List<String> statusCalls = new ArrayList<>();
         final List<String> metricsCalls = new ArrayList<>();
         final List<String> snapshotCalls = new ArrayList<>();
+        final List<String> logsCalls = new ArrayList<>();
 
         FakeControlPlane(URI... healthy) {
             this.healthy = new LinkedHashSet<>(List.of(healthy));
@@ -152,6 +154,12 @@ class ReplTest {
         public SnapshotOutcome snapshot(URI baseUrl, String credential, String pipelineId) {
             snapshotCalls.add(credential + "@" + baseUrl + "/" + pipelineId);
             return healthy.contains(baseUrl) ? snapshotOutcome : new SnapshotOutcome.Unreachable();
+        }
+
+        @Override
+        public LogsOutcome logs(URI baseUrl, String credential, String pipelineId) {
+            logsCalls.add(credential + "@" + baseUrl + "/" + pipelineId);
+            return healthy.contains(baseUrl) ? logsOutcome : new LogsOutcome.Unreachable();
         }
     }
 
@@ -1090,6 +1098,31 @@ class ReplTest {
     }
 
     @Test
+    void logsWhileAuthenticatedPrintsTheTailOldestToNewest() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.logsOutcome = new LogsOutcome.Found("pl1", List.of(
+                new RemoteLogLine(1_700_000_000_000L, "INFO", "submitted job"),
+                new RemoteLogLine(1_700_000_000_100L, "WARN", "slow tick")));
+        Harness h = onlineSession(Path.of("cyn-work"), client);
+        int mark = h.sink().toString().length();
+        h.repl().dispatch("logs pl1");
+        String out = h.sink().toString().substring(mark);
+        assertThat(out).contains("submitted job").contains("INFO").contains("slow tick").contains("WARN");
+        // oldest to newest
+        assertThat(out.indexOf("submitted job")).isLessThan(out.indexOf("slow tick"));
+    }
+
+    @Test
+    void logsWithNoLinesPrintsABenignNoLogsLine() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.logsOutcome = new LogsOutcome.Found("pl1", List.of());
+        Harness h = onlineSession(Path.of("cyn-work"), client);
+        int mark = h.sink().toString().length();
+        h.repl().dispatch("logs pl1");
+        assertThat(h.sink().toString().substring(mark)).contains("no logs");
+    }
+
+    @Test
     void aReadVerbRejectionShowsTheCodeAndMessageAndDoesNotFailOver() {
         FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
         client.statusOutcome = new StatusOutcome.Rejected(
@@ -1128,9 +1161,9 @@ class ReplTest {
 
     @Test
     void readVerbsWhileOfflineFallThroughToTheConnectionRequiredNotice() {
-        // status is a connected verb offline; metrics and snapshot are too, so all three are discoverable
-        // rather than reported as unknown.
-        for (String verb : List.of("status pl1", "metrics pl1", "snapshot pl1")) {
+        // status is a connected verb offline; metrics, snapshot and logs are too, so all four are
+        // discoverable rather than reported as unknown.
+        for (String verb : List.of("status pl1", "metrics pl1", "snapshot pl1", "logs pl1")) {
             Harness h = harness();
             assertThat(h.repl().dispatch(verb)).isTrue();
             assertThat(h.sink().toString()).contains("requires a connection");

@@ -1,10 +1,15 @@
 package io.cyntex.app;
 
+import ch.qos.logback.classic.Logger;
 import io.cyntex.core.lifecycle.DesiredState;
 import io.cyntex.core.lifecycle.StateJson;
+import io.cyntex.core.logging.LogLine;
+import io.cyntex.core.logging.RingBufferLogSink;
 import io.cyntex.runtime.scheduler.ObservationPublisher;
 import io.cyntex.runtime.scheduler.PipelineConverger;
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 
 import java.time.Clock;
 import java.time.Instant;
@@ -54,5 +59,31 @@ class ConvergenceDriverTest {
 
         // The healthy pipeline still converges even though the broken one threw mid-pass.
         assertThat(state.read("healthy").orElseThrow().stateJson()).isEqualTo(StateJson.of(RUNNING));
+    }
+
+    @Test
+    void logsEmittedDuringAPipelinesPassAreAttributedToThatPipeline() {
+        // Feed the node-local sink from the driver's own logger via the pipeline appender; make one pipeline
+        // fail so the driver logs a warning during that pipeline's turn. The warning must land under that
+        // pipeline id, proving the driver sets the pipeline attribution slot around each pipeline's work.
+        RingBufferLogSink sink = new RingBufferLogSink(8, 8);
+        Logger driverLogger = (Logger) LoggerFactory.getLogger(ConvergenceDriver.class);
+        PipelineLogAppender appender = new PipelineLogAppender(sink);
+        appender.setContext(driverLogger.getLoggerContext());
+        appender.start();
+        driverLogger.addAppender(appender);
+        try {
+            desired.save(new DesiredState("broken", RUNNING, "rev-1"));
+            state.failFor("broken");
+
+            driver.reconcile();
+        } finally {
+            driverLogger.detachAppender(appender);
+            appender.stop();
+        }
+
+        assertThat(sink.tail("broken")).extracting(LogLine::level).containsExactly("WARN");
+        // The attribution slot is cleared after the pass, so an unrelated later log is not misattributed.
+        assertThat(MDC.get("pipeline_id")).isNull();
     }
 }
