@@ -28,6 +28,9 @@ public enum Domain {
     STORE,
     // pdk bridge: loading, level-gating, driving and projecting a connector (adapters)
     CONNECTOR,
+    // stateless row transforms: evaluating an author's CEL expression or js script against an event
+    // (adapters)
+    TRANSFORM,
     // storage data-plane: operating on the backing store at runtime and reading its stored documents
     // back — distinct from STORE, which polices reaching the store at startup (adapters)
     IO,

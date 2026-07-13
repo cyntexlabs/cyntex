@@ -16,14 +16,25 @@ import java.util.Objects;
  * {@link DdlPolicy#FAIL}). {@code writeMode} and {@code ddl} are resolved values — any authoring
  * default is already applied.
  *
+ * <p>{@code target} is the resolved model of the table to write — its columns and primary key. It is
+ * what an upsert keys on and what a create-table builds, already resolved (renames applied, key
+ * chosen). It is null when no target model was resolved; the sink then falls back to a bare table id
+ * and leaves structure and keying to the connector.
+ *
  * <p>{@code settings} is held as an unmodifiable defensive copy; a null map is normalized to empty.
  */
-public record SinkConfig(String connectorId, Map<String, Object> settings, WriteMode writeMode, DdlPolicy ddl) {
+public record SinkConfig(
+        String connectorId, Map<String, Object> settings, WriteMode writeMode, DdlPolicy ddl, TargetTable target) {
 
     public SinkConfig {
         Objects.requireNonNull(connectorId, "connectorId");
         Objects.requireNonNull(writeMode, "writeMode");
         Objects.requireNonNull(ddl, "ddl");
         settings = settings == null ? Map.of() : Collections.unmodifiableMap(new LinkedHashMap<>(settings));
+    }
+
+    /** A config with no resolved target model — the sink falls back to a bare table id. */
+    public SinkConfig(String connectorId, Map<String, Object> settings, WriteMode writeMode, DdlPolicy ddl) {
+        this(connectorId, settings, writeMode, ddl, null);
     }
 }

@@ -226,6 +226,11 @@ class SrsCoordinatorTest {
         }
 
         @Override
+        public void advanceSinkAckedSrcpos(String miningChainId, String pipelineId, String srcpos) {
+            mutations.add("sinkAck:" + miningChainId + ":" + pipelineId);
+        }
+
+        @Override
         public void setCdcStartPosition(String miningChainId, String cdcStartPosition) {
             mutations.add("cdcStart:" + miningChainId);
         }

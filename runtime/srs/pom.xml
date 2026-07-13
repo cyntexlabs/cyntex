@@ -53,6 +53,16 @@
       <artifactId>hazelcast</artifactId>
     </dependency>
 
+    <!-- The execution engine (DAG builder + generic sink adapter): a test-scope dependency for the
+         source-to-DAG composition test only. The engine never depends on this source ring in either
+         direction at compile scope; this edge exists solely so a test can wire the projected source
+         into a builder-assembled DAG and run it. -->
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>engine</artifactId>
+      <version>${revision}</version>
+      <scope>test</scope>
+    </dependency>
     <dependency>
       <groupId>org.junit.jupiter</groupId>
       <artifactId>junit-jupiter</artifactId>

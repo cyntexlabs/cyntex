@@ -230,6 +230,11 @@ class SnapshotPhaseTest {
         }
 
         @Override
+        public void advanceSinkAckedSrcpos(String miningChainId, String pipelineId, String srcpos) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
         public void appendSchemaVersion(String miningChainId, SchemaVersion version) {
             throw new UnsupportedOperationException();
         }

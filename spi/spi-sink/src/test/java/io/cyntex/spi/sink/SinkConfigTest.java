@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatNullPointerException;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 
@@ -46,5 +47,22 @@ class SinkConfigTest {
                 .isThrownBy(() -> new SinkConfig("mysql", Map.of(), null, DdlPolicy.FAIL));
         assertThatNullPointerException()
                 .isThrownBy(() -> new SinkConfig("mysql", Map.of(), WriteMode.APPEND, null));
+    }
+
+    @Test
+    void carriesTheResolvedTargetTable() {
+        TargetTable target = new TargetTable("orders", List.of(new TargetField("id", "int", true)));
+        SinkConfig config =
+                new SinkConfig("mysql", Map.of(), WriteMode.UPSERT, DdlPolicy.FAIL, target);
+
+        assertThat(config.target()).isEqualTo(target);
+    }
+
+    @Test
+    void theTargetTableIsOptionalAndAbsentWithoutIt() {
+        // The four-arg form omits the target model; a null target means the sink was handed no resolved
+        // table model and falls back to a bare table id.
+        assertThat(new SinkConfig("mysql", Map.of(), WriteMode.UPSERT, DdlPolicy.FAIL).target()).isNull();
+        assertThat(new SinkConfig("mysql", Map.of(), WriteMode.UPSERT, DdlPolicy.FAIL, null).target()).isNull();
     }
 }

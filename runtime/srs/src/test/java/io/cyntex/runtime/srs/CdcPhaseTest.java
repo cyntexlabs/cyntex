@@ -309,6 +309,11 @@ class CdcPhaseTest {
         }
 
         @Override
+        public void advanceSinkAckedSrcpos(String miningChainId, String pipelineId, String srcpos) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
         public void setCdcStartPosition(String miningChainId, String cdcStartPosition) {
             throw new UnsupportedOperationException();
         }

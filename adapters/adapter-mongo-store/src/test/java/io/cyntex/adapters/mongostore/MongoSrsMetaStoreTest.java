@@ -113,4 +113,35 @@ class MongoSrsMetaStoreTest {
         assertThat(update.get("$set", Document.class))
                 .containsExactly(Map.entry("consumerOffsets.p1.perTableSeq.orders", 42L));
     }
+
+    @Test
+    void sinkAckedSrcposUpdateTargetsOnlyThatConsumersAckPathNotThePerTableCursor() {
+        // The sink's ack advance is a path-scoped $set: it touches only
+        // consumerOffsets.<pipelineId>.sinkAckedSrcpos, so a sink advancing its acked position never clobbers
+        // the per-table read cursor the reader writes to the same consumer document -- the two are
+        // independent writers on one consumer record.
+        Document update = MongoSrsMetaStore.sinkAckedSrcposUpdate("p1", "gtid:aaa-1:99");
+
+        assertThat(update.get("$set", Document.class))
+                .containsExactly(Map.entry("consumerOffsets.p1.sinkAckedSrcpos", "gtid:aaa-1:99"));
+    }
+
+    @Test
+    void aConsumerWithOnlyASinkAckedPositionAndNoReadCursorReadsBackWithAnEmptyCursor() {
+        // The sink and the reader are independent writers of one consumer; the sink may create the consumer
+        // entry (a sink-ack-only $set) before the reader publishes any per-table cursor. Such a consumer
+        // carries a sinkAckedSrcpos and no perTableSeq sub-document, and must read back as an empty cursor --
+        // not as corruption -- mirroring how an absent sinkAckedSrcpos reads back as null.
+        Document doc = new Document("_id", "chain")
+                .append("consumerOffsets", new Document("p1", new Document("sinkAckedSrcpos", "gtid:aaa-1:99")))
+                .append("schemaHistory", List.of());
+
+        SrsMeta meta = MongoSrsMetaStore.toMeta(doc);
+
+        assertThat(meta.consumerOffsets()).hasSize(1);
+        ConsumerOffset p1 = meta.consumerOffsets().get(0);
+        assertThat(p1.pipelineId()).isEqualTo("p1");
+        assertThat(p1.perTableSeq()).isEmpty();
+        assertThat(p1.sinkAckedSrcpos()).isEqualTo("gtid:aaa-1:99");
+    }
 }

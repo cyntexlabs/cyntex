@@ -83,6 +83,11 @@ public final class MongoSrsMetaStore implements SrsMetaStore {
         update(miningChainId, consumerReadSeqUpdate(pipelineId, table, lastReadSeq));
     }
 
+    @Override
+    public void advanceSinkAckedSrcpos(String miningChainId, String pipelineId, String srcpos) {
+        update(miningChainId, sinkAckedSrcposUpdate(pipelineId, srcpos));
+    }
+
     /**
      * The path-scoped update advancing one consumer's read cursor for one table: it sets only
      * {@code consumerOffsets.<pipelineId>.perTableSeq.<table>}, so the consumer's sink-acked position is
@@ -96,6 +101,20 @@ public final class MongoSrsMetaStore implements SrsMetaStore {
         Objects.requireNonNull(table, "table");
         return new Document("$set",
                 new Document("consumerOffsets." + pipelineId + ".perTableSeq." + table, lastReadSeq));
+    }
+
+    /**
+     * The path-scoped update that advances one consumer's durable sink-acked position: a {@code $set} on
+     * {@code consumerOffsets.<pipelineId>.sinkAckedSrcpos}, so the reader's per-table cursor is left
+     * untouched by a sink-ack advance. The pipeline id is a resource id the grammar forbids a dot in, so
+     * the dotted path addresses exactly one field. A deep {@code $set} creates the intermediate objects, so
+     * a sink may ack before the consumer has any other cursor state.
+     */
+    static Document sinkAckedSrcposUpdate(String pipelineId, String srcpos) {
+        Objects.requireNonNull(pipelineId, "pipelineId");
+        Objects.requireNonNull(srcpos, "srcpos");
+        return new Document("$set",
+                new Document("consumerOffsets." + pipelineId + ".sinkAckedSrcpos", srcpos));
     }
 
     @Override
@@ -187,13 +206,18 @@ public final class MongoSrsMetaStore implements SrsMetaStore {
 
     /** Reconstructs one consumer cursor from its stored sub-document, keyed by the pipeline id. */
     private static ConsumerOffset consumerFromDocument(String pipelineId, Document document) {
-        Object perTableRaw = document.get("perTableSeq");
-        if (!(perTableRaw instanceof Document perTableDoc)) {
-            throw new CyntexException(IoError.DOCUMENT_UNREADABLE, Map.of("id", pipelineId), null);
-        }
         Map<String, Long> perTableSeq = new LinkedHashMap<>();
-        for (Map.Entry<String, Object> entry : perTableDoc.entrySet()) {
-            perTableSeq.put(entry.getKey(), ((Number) entry.getValue()).longValue());
+        Object perTableRaw = document.get("perTableSeq");
+        if (perTableRaw instanceof Document perTableDoc) {
+            for (Map.Entry<String, Object> entry : perTableDoc.entrySet()) {
+                perTableSeq.put(entry.getKey(), ((Number) entry.getValue()).longValue());
+            }
+        } else if (perTableRaw != null) {
+            // Present but not a sub-document is store corruption. Absent is a valid sink-ack-only consumer:
+            // the sink created the entry (a sinkAckedSrcpos-only $set) before the reader published any
+            // per-table cursor, mirroring how an absent sinkAckedSrcpos reads back as null. It reads as an
+            // empty cursor rather than as corruption.
+            throw new CyntexException(IoError.DOCUMENT_UNREADABLE, Map.of("id", pipelineId), null);
         }
         return new ConsumerOffset(pipelineId, perTableSeq, document.getString("sinkAckedSrcpos"));
     }

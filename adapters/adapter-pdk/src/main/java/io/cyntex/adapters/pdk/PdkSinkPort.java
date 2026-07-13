@@ -46,7 +46,7 @@ public final class PdkSinkPort implements SinkPort {
             connector.close();
             throw PdkSinkWriter.writeFailed(connector.connectorId(), t);
         }
-        return new PdkSinkWriter(connector, write, config.writeMode(), config.ddl());
+        return new PdkSinkWriter(connector, write, config.writeMode(), config.ddl(), config.target());
     }
 
     private static WriteRecordFunction requireWriteFunction(WriteRecordFunction function) {
