@@ -3,6 +3,7 @@ package io.cyntex.adapters.mongostore;
 import io.cyntex.core.common.CyntexException;
 import io.cyntex.core.dsl.DslParser;
 import io.cyntex.core.model.Resource;
+import io.cyntex.core.model.canonical.CanonicalHash;
 import io.cyntex.core.model.canonical.CanonicalWriter;
 import org.bson.Document;
 import org.junit.jupiter.api.Test;
@@ -107,6 +108,9 @@ class MongoArtifactStoreTest {
             assertThat(document.getString("_id")).as("%s _id", fixture.label()).isEqualTo(fixture.id());
             assertThat(document.getString("kind")).as("%s kind", fixture.label()).isEqualTo(fixture.kind());
             assertThat(document.getString("canonical")).as("%s body", fixture.label()).isEqualTo(canonical);
+            assertThat(document.getString("contentHash"))
+                    .as("%s canonical content hash", fixture.label())
+                    .isEqualTo(CanonicalHash.of(canonical));
         }
     }
 

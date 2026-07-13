@@ -17,6 +17,36 @@ import java.util.Optional;
 public interface ArtifactStore {
 
     /**
+     * Atomically inserts {@code artifact} by its top-level id. The artifact is stored only when that
+     * id is absent; an existing artifact is left unchanged and returns {@link
+     * ArtifactMutation#ALREADY_EXISTS}.
+     */
+    default ArtifactMutation create(Resource artifact) {
+        throw new UnsupportedOperationException("atomic artifact create is not implemented");
+    }
+
+    /**
+     * Atomically replaces the artifact identified by {@code id} only when its stored content hash
+     * equals {@code expectedContentHash}. The expected hash is the 64-character lowercase SHA-256 of
+     * the stored canonical UTF-8 bytes. {@code replacement.id()} must equal {@code id}; identity cannot
+     * change during replacement. The version check and replacement are one indivisible store
+     * operation, so a stale writer never changes the stored canonical bytes.
+     */
+    default ArtifactMutation replace(String id, String expectedContentHash, Resource replacement) {
+        throw new UnsupportedOperationException("atomic artifact replace is not implemented");
+    }
+
+    /**
+     * Atomically deletes the artifact identified by {@code id} only when its stored content hash
+     * equals {@code expectedContentHash}. The expected hash is the 64-character lowercase SHA-256 of
+     * the stored canonical UTF-8 bytes. The version check and deletion are one indivisible store
+     * operation, so a stale writer never removes the stored artifact.
+     */
+    default ArtifactMutation delete(String id, String expectedContentHash) {
+        throw new UnsupportedOperationException("atomic artifact delete is not implemented");
+    }
+
+    /**
      * Atomically upserts every resource in {@code artifacts} by its top-level id: either all are
      * stored or, on any failure, none is — there is no partial batch. The stored form is canonical, and
      * an empty batch writes nothing. Ordering follows the list, though the atomic outcome does not

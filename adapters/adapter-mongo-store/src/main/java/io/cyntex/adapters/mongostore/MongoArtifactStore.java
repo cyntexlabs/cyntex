@@ -1,5 +1,7 @@
 package io.cyntex.adapters.mongostore;
 
+import com.mongodb.ErrorCategory;
+import com.mongodb.MongoException;
 import com.mongodb.client.ClientSession;
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoCollection;
@@ -8,7 +10,9 @@ import com.mongodb.client.model.ReplaceOptions;
 import io.cyntex.core.common.CyntexException;
 import io.cyntex.core.dsl.DslParser;
 import io.cyntex.core.model.Resource;
+import io.cyntex.core.model.canonical.CanonicalHash;
 import io.cyntex.core.model.canonical.CanonicalWriter;
+import io.cyntex.spi.store.ArtifactMutation;
 import io.cyntex.spi.store.ArtifactStore;
 import org.bson.Document;
 
@@ -20,17 +24,17 @@ import java.util.Optional;
 
 /**
  * The MongoDB artifact truth layer: stores each applied resource as one document keyed by the
- * resource's top-level id, holding the resource in its canonical form. Reading reconstructs the
- * resource from that canonical form through the canonical parser — the inverse of the canonical
- * writer — so the store keeps a single serialization contract and a written artifact reads back to
- * the same canonical form.
+ * resource's top-level id, holding the resource in its canonical form and its canonical content
+ * hash. Reading reconstructs the resource from that canonical form through the canonical parser —
+ * the inverse of the canonical writer — so the store keeps a single serialization contract and a
+ * written artifact reads back to the same canonical form.
  *
- * <p>The document carries the id (as {@code _id}) and the kind as structured fields, and the
- * canonical text as the body. A batch is written in one multi-document transaction, so a mid-batch
- * write failure aborts the whole transaction and leaves no partial batch behind; the transaction is
- * why the store binds a replica-set. Driver IO failures during save / get / list are translated into
- * coded io diagnostics, and a stored body that no longer reconstructs is surfaced as an io diagnostic
- * rather than a leaked authoring code, so no driver type escapes the module (rule R3).
+ * <p>The document carries the id (as {@code _id}), kind, canonical text, and canonical content hash.
+ * A batch is written in one multi-document transaction, so a mid-batch write failure aborts the whole
+ * transaction and leaves no partial batch behind; the transaction is why the store binds a
+ * replica-set. Driver IO failures during mutations, save, get, or list are translated into coded io
+ * diagnostics, and a stored body that no longer reconstructs is surfaced as an io diagnostic rather
+ * than a leaked authoring code, so no driver type escapes the module (rule R3).
  */
 public final class MongoArtifactStore implements ArtifactStore {
 
@@ -43,6 +47,56 @@ public final class MongoArtifactStore implements ArtifactStore {
     public MongoArtifactStore(MongoClient client, MongoCollection<Document> collection) {
         this.client = Objects.requireNonNull(client, "client");
         this.collection = Objects.requireNonNull(collection, "collection");
+    }
+
+    @Override
+    public ArtifactMutation create(Resource artifact) {
+        Objects.requireNonNull(artifact, "artifact");
+        return StoreIo.call(() -> {
+            try {
+                collection.insertOne(toDocument(artifact));
+                return ArtifactMutation.CREATED;
+            } catch (MongoException e) {
+                if (ErrorCategory.fromErrorCode(e.getCode()) == ErrorCategory.DUPLICATE_KEY) {
+                    return ArtifactMutation.ALREADY_EXISTS;
+                }
+                throw e;
+            }
+        });
+    }
+
+    @Override
+    public ArtifactMutation replace(String id, String expectedContentHash, Resource replacement) {
+        Objects.requireNonNull(id, "id");
+        Objects.requireNonNull(expectedContentHash, "expectedContentHash");
+        Objects.requireNonNull(replacement, "replacement");
+        if (!id.equals(replacement.id())) {
+            throw new IllegalArgumentException("replacement id must equal the artifact id");
+        }
+        return StoreIo.call(() -> {
+            Document filter = new Document("_id", id).append("contentHash", expectedContentHash);
+            if (collection.replaceOne(filter, toDocument(replacement)).getMatchedCount() == 1) {
+                return ArtifactMutation.REPLACED;
+            }
+            return collection.find(new Document("_id", id)).first() == null
+                    ? ArtifactMutation.NOT_FOUND
+                    : ArtifactMutation.VERSION_CONFLICT;
+        });
+    }
+
+    @Override
+    public ArtifactMutation delete(String id, String expectedContentHash) {
+        Objects.requireNonNull(id, "id");
+        Objects.requireNonNull(expectedContentHash, "expectedContentHash");
+        return StoreIo.call(() -> {
+            Document filter = new Document("_id", id).append("contentHash", expectedContentHash);
+            if (collection.findOneAndDelete(filter) != null) {
+                return ArtifactMutation.DELETED;
+            }
+            return collection.find(new Document("_id", id)).first() == null
+                    ? ArtifactMutation.NOT_FOUND
+                    : ArtifactMutation.VERSION_CONFLICT;
+        });
     }
 
     @Override
@@ -106,11 +160,13 @@ public final class MongoArtifactStore implements ArtifactStore {
         });
     }
 
-    /** Maps a resource to its stored document: the id and kind as structured fields, canonical text as body. */
+    /** Maps a resource to its stored id, kind, canonical text, and canonical-content hash. */
     static Document toDocument(Resource artifact) {
+        String canonical = WRITER.write(artifact);
         return new Document("_id", artifact.id())
                 .append("kind", artifact.kind())
-                .append("canonical", WRITER.write(artifact));
+                .append("canonical", canonical)
+                .append("contentHash", CanonicalHash.of(canonical));
     }
 
     /** Reconstructs a resource from its stored document by parsing the canonical body. */

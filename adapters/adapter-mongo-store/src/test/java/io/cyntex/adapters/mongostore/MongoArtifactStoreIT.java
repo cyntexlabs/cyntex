@@ -7,7 +7,9 @@ import com.mongodb.client.model.IndexOptions;
 import io.cyntex.core.common.CyntexException;
 import io.cyntex.core.dsl.DslParser;
 import io.cyntex.core.model.Resource;
+import io.cyntex.core.model.canonical.CanonicalHash;
 import io.cyntex.core.model.canonical.CanonicalWriter;
+import io.cyntex.spi.store.ArtifactMutation;
 import org.bson.Document;
 import org.junit.jupiter.api.Test;
 import org.testcontainers.containers.MongoDBContainer;
@@ -19,6 +21,7 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.catchThrowable;
 
 /**
@@ -103,6 +106,62 @@ class MongoArtifactStoreIT {
             assertThat(store.list()).extracting(Resource::id).containsExactly("orders");
             assertThat(WRITER.write(store.get("orders").orElseThrow()))
                     .isEqualTo(WRITER.write(PARSER.parse(changed)));
+        });
+    }
+
+    @Test
+    void versionedMutationsAreAtomicAndStaleWritesLeaveCanonicalBytesUnchanged() {
+        withStore((store, collection) -> {
+            Resource source = PARSER.parse(ORDERS);
+            Resource changed = PARSER.parse("""
+                    version: cyntex/v1
+                    kind: source
+                    id: orders
+                    connector: mysql
+                    config:
+                      host: replica
+                    """);
+            Resource changedAgain = PARSER.parse("""
+                    version: cyntex/v1
+                    kind: source
+                    id: orders
+                    connector: mysql
+                    config:
+                      host: stale-writer
+                    """);
+            Resource differentId = PARSER.parse("""
+                    version: cyntex/v1
+                    kind: source
+                    id: customers
+                    connector: mysql
+                    config:
+                      host: replica
+                    """);
+            String oldHash = CanonicalHash.of(WRITER.write(source));
+            String newHash = CanonicalHash.of(WRITER.write(changed));
+
+            assertThat(store.create(source)).isEqualTo(ArtifactMutation.CREATED);
+            assertThat(store.create(source)).isEqualTo(ArtifactMutation.ALREADY_EXISTS);
+            assertThat(store.replace("orders", oldHash, changed)).isEqualTo(ArtifactMutation.REPLACED);
+
+            String canonicalAfterReplace = collection.find(new Document("_id", "orders"))
+                    .first().getString("canonical");
+            assertThat(store.replace("orders", oldHash, changedAgain))
+                    .isEqualTo(ArtifactMutation.VERSION_CONFLICT);
+            assertThat(collection.find(new Document("_id", "orders")).first().getString("canonical"))
+                    .isEqualTo(canonicalAfterReplace);
+
+            assertThatThrownBy(() -> store.replace("orders", newHash, differentId))
+                    .isInstanceOf(IllegalArgumentException.class);
+            assertThat(collection.find(new Document("_id", "orders")).first().getString("canonical"))
+                    .isEqualTo(canonicalAfterReplace);
+
+            assertThat(store.delete("orders", oldHash)).isEqualTo(ArtifactMutation.VERSION_CONFLICT);
+            assertThat(collection.find(new Document("_id", "orders")).first().getString("canonical"))
+                    .isEqualTo(canonicalAfterReplace);
+
+            assertThat(store.delete("orders", newHash)).isEqualTo(ArtifactMutation.DELETED);
+            assertThat(store.delete("orders", newHash)).isEqualTo(ArtifactMutation.NOT_FOUND);
         });
     }
 
