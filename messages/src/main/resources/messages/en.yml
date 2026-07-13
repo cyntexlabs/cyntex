@@ -197,18 +197,36 @@ engine.no-such-job:
 monitor.no-observation:
   message: "No observation is available for pipeline {pipeline}."
   solution: "Check the pipeline id for typos; a freshly started pipeline may take a moment to publish its first observation."
+source.already-exists:
+  message: "A Source with id '{id}' already exists."
+  solution: "Choose a different id, or replace the existing Source with its current ETag."
+source.id-mismatch:
+  message: "Source id '{bodyId}' in the request body does not match path id '{pathId}'."
+  solution: "Use the same immutable Source id in the request path and body."
+source.in-use:
+  message: "Source '{id}' is still referenced by: {referrers}."
+  solution: "Remove those references before deleting the Source."
+source.not-found:
+  message: "No Source with id '{id}' exists."
+  solution: "List Sources to find an existing id."
+source.precondition-required:
+  message: "Source '{id}' requires its current ETag for this operation."
+  solution: "Read the Source, then retry with its ETag in If-Match."
+source.version-conflict:
+  message: "Source '{id}' changed after it was read."
+  solution: "Read the current Source and retry the operation with its new ETag."
 transform.expression-failed:
   message: "Expression {expr} could not be evaluated for a row: {detail}."
   solution: "Check the expression against the fields and types the row actually carries at runtime."
 transform.script-compile-failed:
   message: "The js transform script could not be compiled: {detail}."
   solution: "Fix the script so it parses as valid JavaScript."
-transform.script-no-process:
-  message: "The js transform script defines no process(record, ctx) function."
-  solution: "Add a process(record, ctx) function; it is the required entry point of a js transform."
 transform.script-failed:
   message: "The js transform script raised an error while processing a row: {detail}."
   solution: "Fix the script so it does not throw for this input, or guard the failing operation."
+transform.script-no-process:
+  message: "The js transform script defines no process(record, ctx) function."
+  solution: "Add a process(record, ctx) function; it is the required entry point of a js transform."
 transform.script-output-invalid:
   message: "The js transform script produced output that is not a valid record: {detail}."
   solution: "Ensure process returns a record (or emits one) whose before, after and schema are objects or null."

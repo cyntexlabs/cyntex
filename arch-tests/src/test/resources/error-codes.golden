@@ -62,6 +62,12 @@ lifecycle.incompatible-revision
 lifecycle.unknown-pipeline
 monitor.no-observation
 role.unsupported
+source.already-exists
+source.id-mismatch
+source.in-use
+source.not-found
+source.precondition-required
+source.version-conflict
 store.invalid-uri
 store.not-replica-set
 store.tls-ca-unreadable

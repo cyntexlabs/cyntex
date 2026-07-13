@@ -46,6 +46,8 @@ public enum Domain {
     // observation read faces: reading a pipeline's store-backed status / metrics / snapshot;
     // diagnosable failures such as reading a pipeline that has published no observation (control)
     MONITOR,
+    // source-specific control operations: identity, optimistic concurrency and reference protection
+    SOURCE,
     // runtime data plane: reading a source's snapshot / cdc into the replay store — diagnosable
     // capture-configuration faults such as an unparsable consumption start point (runtime)
     CAPTURE;
