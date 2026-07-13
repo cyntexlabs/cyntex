@@ -1,7 +1,15 @@
 package io.cyntex.app;
 
+import io.cyntex.control.core.AuditedSourceService;
+import io.cyntex.control.core.ApplyService;
+import io.cyntex.control.core.SourceRepresentation;
+import io.cyntex.control.core.SourceService;
+import io.cyntex.core.catalog.CyntexCatalog;
 import io.cyntex.core.dsl.DslParser;
+import io.cyntex.core.model.SourceResource;
 import io.cyntex.core.model.canonical.CanonicalWriter;
+import io.cyntex.spi.store.ArtifactStore;
+import io.cyntex.spi.store.StorePort;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -11,9 +19,11 @@ import org.springframework.boot.builder.SpringApplicationBuilder;
 import org.springframework.boot.web.server.context.WebServerApplicationContext;
 import org.springframework.context.ConfigurableApplicationContext;
 import org.springframework.context.annotation.Import;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.client.RestClient;
 import org.testcontainers.containers.MongoDBContainer;
 import org.testcontainers.junit.jupiter.Container;
@@ -22,6 +32,7 @@ import org.testcontainers.utility.DockerImageName;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.lang.reflect.Field;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -60,9 +71,19 @@ class ControlPlaneAssemblyIT {
     }
 
     @Test
-    void bootstrapThenLoginThenApplyThenReadBackOverARealStore() {
+    void assemblesAuthenticatedArtifactAndStructuredSourceFlowsOverTheSingletonStore() {
         int port = start();
         RestClient client = RestClient.create("http://localhost:" + port);
+
+        assertThat(context.getBeansOfType(CyntexCatalog.class)).hasSize(1);
+        assertThat(context.getBeansOfType(SourceRepresentation.class)).hasSize(1);
+        assertThat(context.getBeansOfType(SourceService.class)).hasSize(1);
+        assertThat(context.getBeansOfType(AuditedSourceService.class)).hasSize(1);
+        assertThat(context.getBeansOfType(StorePort.class)).hasSize(1);
+        assertThat(context.getBeansOfType(ArtifactStore.class)).isEmpty();
+        CyntexCatalog catalog = context.getBean(CyntexCatalog.class);
+        assertThat(field(context.getBean(ApplyService.class), "catalog")).isSameAs(catalog);
+        assertThat(field(context.getBean(SourceService.class), "catalog")).isSameAs(catalog);
 
         // Anonymous: the verb surface is guarded from the first request.
         HttpStatusCode anonymous = client.get().uri("/api/artifacts")
@@ -105,6 +126,96 @@ class ControlPlaneAssemblyIT {
                 .retrieve().body(Map.class);
         assertThat(logs.get("pipelineId")).isEqualTo("ghost");
         assertThat((List<?>) logs.get("lines")).isEmpty();
+
+        ResponseEntity<Map> created = client.post().uri("/api/sources")
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(sourceDraft("db-primary", true))
+                .retrieve().toEntity(Map.class);
+        assertThat(created.getStatusCode()).isEqualTo(HttpStatus.CREATED);
+        assertThat(created.getHeaders().getLocation().getPath())
+                .isEqualTo("/api/sources/frontend_source");
+        assertThat(created.getHeaders().getETag()).matches("\"[0-9a-f]{64}\"");
+        assertStructuredSource(created.getBody(), "db-primary");
+
+        StorePort store = context.getBean(StorePort.class);
+        assertThat(store.artifacts().get("frontend_source"))
+                .containsInstanceOf(SourceResource.class);
+
+        ResponseEntity<Map> read = client.get().uri("/api/sources/frontend_source")
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+                .retrieve().toEntity(Map.class);
+        assertThat(read.getHeaders().getETag()).isEqualTo(created.getHeaders().getETag());
+        assertStructuredSource(read.getBody(), "db-primary");
+
+        ResponseEntity<Map> replaced = client.put().uri("/api/sources/frontend_source")
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+                .header(HttpHeaders.IF_MATCH, created.getHeaders().getETag())
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(sourceDraft("db-replica", false))
+                .retrieve().toEntity(Map.class);
+        assertThat(replaced.getHeaders().getETag())
+                .matches("\"[0-9a-f]{64}\"")
+                .isNotEqualTo(created.getHeaders().getETag());
+        assertStructuredSource(replaced.getBody(), "db-replica");
+        SourceResource storedReplacement = (SourceResource) store.artifacts()
+                .get("frontend_source").orElseThrow();
+        assertThat(storedReplacement.config())
+                .containsEntry("host", "db-replica")
+                .containsEntry("password", "not-returned");
+
+        HttpStatusCode deleted = client.delete().uri("/api/sources/frontend_source")
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+                .header(HttpHeaders.IF_MATCH, replaced.getHeaders().getETag())
+                .exchange((request, response) -> response.getStatusCode());
+        assertThat(deleted).isEqualTo(HttpStatus.NO_CONTENT);
+        assertThat(store.artifacts().get("frontend_source")).isEmpty();
+
+        HttpStatusCode noYamlSourceEndpoint = client.post().uri("/api/sources:apply")
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(Map.of("content", SOURCE))
+                .exchange((request, response) -> response.getStatusCode());
+        assertThat(noYamlSourceEndpoint).isEqualTo(HttpStatus.NOT_FOUND);
+    }
+
+    private static void assertStructuredSource(Map<?, ?> source, String host) {
+        assertThat(source.get("id")).isEqualTo("frontend_source");
+        assertThat(source.get("connector")).isEqualTo("mysql");
+        assertThat(source.containsKey("canonicalForm")).isFalse();
+        assertThat(source.containsKey("kind")).isFalse();
+        assertThat(source.containsKey("version")).isFalse();
+        assertThat(source.containsKey("clearSecrets")).isFalse();
+        Map<?, ?> config = (Map<?, ?>) source.get("config");
+        assertThat(config.get("host")).isEqualTo(host);
+        assertThat(config.containsKey("password")).isFalse();
+        assertThat(source.get("configuredSecrets")).isEqualTo(List.of("password"));
+        assertThat(String.valueOf(source.get("contentHash"))).matches("[0-9a-f]{64}");
+    }
+
+    private static Map<String, Object> sourceDraft(String host, boolean includePassword) {
+        Map<String, Object> config = includePassword
+                ? Map.of("host", host, "password", "not-returned")
+                : Map.of("host", host);
+        return Map.of(
+                "id", "frontend_source",
+                "connector", "mysql",
+                "config", config,
+                "mode", "cdc",
+                "tables", List.of(Map.of("type", "literal", "name", "orders")),
+                "options", Map.of(),
+                "experimental", Map.of(),
+                "clearSecrets", List.of());
+    }
+
+    private static Object field(Object target, String name) {
+        try {
+            Field field = target.getClass().getDeclaredField(name);
+            field.setAccessible(true);
+            return field.get(target);
+        } catch (ReflectiveOperationException error) {
+            throw new AssertionError("missing expected field: " + name, error);
+        }
     }
 
     @Test
