@@ -39,6 +39,13 @@ public final class ControlOperations {
     public static final Operation CONNECTION_SCHEMA =
             new Operation("connection.schema", Scope.READ, false, null, CLI_POC);
 
+    // connector domain: registering a connector artifact ingests executable connector code into the
+    // distribution store, so it mutates persisted state (a write) and is audited. A remote caller hands
+    // over the artifact bytes; the operation classloads and stores in the control process rather than
+    // dispatching to the runtime, so it adds no member to the synchronous control-to-runtime whitelist.
+    public static final Operation CONNECTOR_REGISTER =
+            new Operation("connector.register", Scope.WRITE, true, null, CLI_POC);
+
     // cluster domain: topology is sensitive, so listing members is a registry operation (authenticated
     // like every other verb) rather than an anonymous endpoint — only the process-liveness probe stays
     // outside the registry. Reading topology mutates nothing, so it is read-scoped and unaudited.
@@ -60,6 +67,7 @@ public final class ControlOperations {
             CONNECTION_TEST_RESULT,
             CONNECTION_DISCOVER_SCHEMA,
             CONNECTION_SCHEMA,
+            CONNECTOR_REGISTER,
             CLUSTER_MEMBERS,
             USER_CREATE,
             USER_PASSWD,

@@ -83,6 +83,48 @@ class ConnectorArtifactRegistrarTest {
     }
 
     @Test
+    void registersFromArtifactBytesJustLikeFromAPath(@TempDir Path dir) throws Exception {
+        // The runtime register operation hands the registrar bytes off the wire, not a server path; the
+        // bytes entry must land the same registration the on-disk seed path does — same id, same hash.
+        Path jar = Synthetic.seedableOrdersConnector(dir);
+        byte[] bytes = Files.readAllBytes(jar);
+        InMemoryConnectorRegistry registry = new InMemoryConnectorRegistry();
+
+        RegistrationOutcome outcome = registrarOver(registry).register(bytes, RegistrationSource.REGISTER);
+
+        assertThat(outcome.newlyRegistered()).isTrue();
+        ConnectorRegistration registration = outcome.registration();
+        assertThat(registration.connectorId()).isEqualTo("orders");
+        assertThat(registration.pdkApiVersion()).isEqualTo("1.3.5");
+        assertThat(registration.source()).isEqualTo(RegistrationSource.REGISTER);
+        assertThat(registry.artifact(registration.contentHash())).contains(bytes);
+    }
+
+    @Test
+    void refusesADifferentArtifactUnderAnAlreadyRegisteredId(@TempDir Path dir) {
+        // Same bytes re-registering is a no-op (idempotent by hash); a DIFFERENT artifact claiming an
+        // already-registered id is a conflict — selecting among versions is out of scope, so it is
+        // refused at register time rather than silently accepted to blow up at load.
+        InMemoryConnectorRegistry registry = new InMemoryConnectorRegistry();
+        ConnectorArtifactRegistrar registrar = registrarOver(registry);
+        RegistrationOutcome first = registrar.register(
+                Synthetic.seedableOrdersConnector(dir), RegistrationSource.SEED);
+
+        assertThatThrownBy(() -> registrar.register(
+                        Synthetic.conflictingOrdersConnector(dir), RegistrationSource.REGISTER))
+                .isInstanceOf(CyntexException.class)
+                .satisfies(e -> {
+                    CyntexException coded = (CyntexException) e;
+                    assertThat(coded.code()).isEqualTo(ConnectorError.REGISTRATION_CONFLICT);
+                    assertThat(coded.args()).containsKeys("connector", "existing", "incoming");
+                    assertThat(coded.args().get("connector")).isEqualTo("orders");
+                    assertThat(coded.args().get("existing")).isEqualTo(first.registration().contentHash());
+                });
+        // The conflicting artifact is not stored: the store still holds exactly the first registration.
+        assertThat(registry.list()).hasSize(1);
+    }
+
+    @Test
     void requiresItsCollaboratorsAndArguments(@TempDir Path dir) {
         InMemoryConnectorRegistry registry = new InMemoryConnectorRegistry();
         ConnectorIntrospector introspector = new ConnectorIntrospector();
@@ -91,8 +133,10 @@ class ConnectorArtifactRegistrarTest {
         assertThatNullPointerException().isThrownBy(() -> new ConnectorArtifactRegistrar(registry, null));
 
         ConnectorArtifactRegistrar registrar = new ConnectorArtifactRegistrar(registry, introspector);
-        assertThatNullPointerException().isThrownBy(() -> registrar.register(null, RegistrationSource.SEED));
+        assertThatNullPointerException().isThrownBy(() -> registrar.register((Path) null, RegistrationSource.SEED));
         assertThatNullPointerException().isThrownBy(() -> registrar.register(dir.resolve("x.jar"), null));
+        assertThatNullPointerException().isThrownBy(() -> registrar.register((byte[]) null, RegistrationSource.SEED));
+        assertThatNullPointerException().isThrownBy(() -> registrar.register(new byte[0], null));
     }
 
     private static ConnectorArtifactRegistrar registrarOver(InMemoryConnectorRegistry registry) {

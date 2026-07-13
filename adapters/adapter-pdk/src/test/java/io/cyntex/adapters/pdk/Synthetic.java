@@ -481,6 +481,20 @@ final class Synthetic {
                 Map.of("PDK-API-Version", "1.3.5"));
     }
 
+    /**
+     * A second registrable connector declaring the SAME id as {@link #seedableOrdersConnector} but with
+     * different bytes (a distinct entry class) — a different artifact competing for one connector id,
+     * the register-time conflict the registrar refuses.
+     */
+    static Path conflictingOrdersConnector(Path dir) {
+        String src = SELF_SCAN_IMPORTS
+                + "@TapConnectorClass(\"orders-spec.json\")"
+                + "public class OtherOrders implements TapConnector {" + INERT_CONNECTOR_BODY + "}";
+        return SyntheticJar.compileToJar(dir, "synthetic.OtherOrders", src,
+                Map.of("orders-spec.json", "{\"properties\":{\"id\":\"orders\"}}"),
+                Map.of("PDK-API-Version", "1.3.5"));
+    }
+
     /** A second registrable connector under a distinct id, whose manifest declares no PDK API version. */
     static Path seedablePaymentsConnector(Path dir) {
         String src = SELF_SCAN_IMPORTS

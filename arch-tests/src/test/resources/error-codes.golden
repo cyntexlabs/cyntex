@@ -22,6 +22,7 @@ connector.load-failed
 connector.no-connector-class
 connector.not-registered
 connector.projection-failed
+connector.registration-conflict
 connector.spec-invalid
 connector.spec-not-found
 connector.test-failed

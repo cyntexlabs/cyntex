@@ -2,13 +2,11 @@ package io.cyntex.adapters.pdk;
 
 import io.cyntex.spi.store.ConnectorRegistration;
 import io.cyntex.spi.store.ConnectorRegistry;
+import io.cyntex.spi.store.ContentHash;
 import io.cyntex.spi.store.RegistrationOutcome;
 import io.cyntex.spi.store.RegistrationSource;
 
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
-import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -28,7 +26,7 @@ final class InMemoryConnectorRegistry implements ConnectorRegistry {
     @Override
     public RegistrationOutcome register(
             String connectorId, String pdkApiVersion, RegistrationSource source, byte[] artifact) {
-        String hash = sha256(artifact);
+        String hash = ContentHash.of(artifact);
         for (ConnectorRegistration existing : registrations) {
             if (existing.contentHash().equals(hash)) {
                 return new RegistrationOutcome(existing, false);
@@ -56,13 +54,5 @@ final class InMemoryConnectorRegistry implements ConnectorRegistry {
     void addDanglingRegistration(String connectorId, String contentHash, String pdkApiVersion) {
         registrations.add(new ConnectorRegistration(
                 connectorId, contentHash, pdkApiVersion, RegistrationSource.REGISTER));
-    }
-
-    private static String sha256(byte[] bytes) {
-        try {
-            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));
-        } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException(e);
-        }
     }
 }

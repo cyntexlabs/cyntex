@@ -6,6 +6,7 @@ import io.cyntex.control.core.AuditGate;
 import io.cyntex.control.core.BootstrapService;
 import io.cyntex.control.core.ConnectionTestResultQueryService;
 import io.cyntex.control.core.ConnectionTestService;
+import io.cyntex.control.core.ConnectorRegisterService;
 import io.cyntex.control.core.ControlOperations;
 import io.cyntex.control.core.CredentialAuthenticator;
 import io.cyntex.control.core.GeneratedSecret;
@@ -529,6 +530,17 @@ class AuthTest {
                     return Optional.empty();
                 }
             });
+        }
+
+        // The connector register controller is bundled with the whole ControlHttpFace, so its service must be
+        // present for the context to stand up; this suite exercises the auth matrix, not registration, so the
+        // registrar is inert (never driven).
+        @Bean
+        ConnectorRegisterService connectorRegisterService(AuditGate auditGate) {
+            io.cyntex.spi.store.ConnectorRegistrar registrar = (artifact, source) -> {
+                throw new UnsupportedOperationException("connector.register is not exercised in this test");
+            };
+            return new ConnectorRegisterService(registrar, auditGate);
         }
     }
 

@@ -82,6 +82,7 @@ class ReplTest {
         ConnectionTestResultOutcome testResultOutcome = new ConnectionTestResultOutcome.Unreachable();
         ConnectionDiscoverSchemaOutcome discoverSchemaOutcome = new ConnectionDiscoverSchemaOutcome.Unreachable();
         ConnectionSchemaOutcome schemaOutcome = new ConnectionSchemaOutcome.Unreachable();
+        ConnectorRegisterOutcome registerOutcome = new ConnectorRegisterOutcome.Unreachable();
         final List<String> applyCalls = new ArrayList<>();
         final List<String> getCalls = new ArrayList<>();
         final List<String> listCalls = new ArrayList<>();
@@ -89,6 +90,7 @@ class ReplTest {
         final List<String> testResultCalls = new ArrayList<>();
         final List<String> discoverSchemaCalls = new ArrayList<>();
         final List<String> schemaCalls = new ArrayList<>();
+        final List<String> registerCalls = new ArrayList<>();
 
         FakeControlPlane(URI... healthy) {
             this.healthy = new LinkedHashSet<>(List.of(healthy));
@@ -154,6 +156,12 @@ class ReplTest {
         public ConnectionSchemaOutcome schema(URI baseUrl, String credential, String id) {
             schemaCalls.add(credential + "@" + baseUrl + "/" + id);
             return healthy.contains(baseUrl) ? schemaOutcome : new ConnectionSchemaOutcome.Unreachable();
+        }
+
+        @Override
+        public ConnectorRegisterOutcome register(URI baseUrl, String credential, byte[] artifact) {
+            registerCalls.add(credential + "@" + baseUrl + " x" + artifact.length);
+            return healthy.contains(baseUrl) ? registerOutcome : new ConnectorRegisterOutcome.Unreachable();
         }
     }
 
@@ -1151,6 +1159,115 @@ class ReplTest {
         assertThat(h.repl().dispatch("discover-schema my-mongo")).isTrue();
 
         assertThat(h.sink().toString()).contains("requires a connection").contains("discover-schema");
+    }
+
+    // --- register: `register <path>` uploads a local artifact to the server -----------------------
+
+    @Test
+    void registerUploadsALocalArtifactAndRendersTheRegistration(@TempDir Path workdir) throws Exception {
+        Files.write(workdir.resolve("orders.jar"), new byte[] {1, 2, 3, 4});
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.registerOutcome = new ConnectorRegisterOutcome.Registered(
+                new RegisteredConnector("orders", "hash-abc", "1.3.5", true));
+        Harness h = onlineSession(workdir, client);
+        int mark = h.sink().toString().length();
+
+        assertThat(h.repl().dispatch("register orders.jar")).isTrue();
+
+        String out = h.sink().toString().substring(mark);
+        assertThat(out).contains("registered").contains("orders").contains("hash-abc");
+        // the artifact bytes (4) travel to the current landing node under the session credential
+        assertThat(client.registerCalls).containsExactly("jwt-tok@http://node1:7900 x4");
+    }
+
+    @Test
+    void registerRendersAnAlreadyRegisteredArtifactAsANoOp(@TempDir Path workdir) throws Exception {
+        Files.write(workdir.resolve("orders.jar"), new byte[] {1, 2, 3});
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.registerOutcome = new ConnectorRegisterOutcome.Registered(
+                new RegisteredConnector("orders", "hash-abc", "1.3.5", false));
+        Harness h = onlineSession(workdir, client);
+        int mark = h.sink().toString().length();
+
+        assertThat(h.repl().dispatch("register orders.jar")).isTrue();
+
+        assertThat(h.sink().toString().substring(mark)).contains("already registered").contains("orders");
+    }
+
+    @Test
+    void registerRendersTheRegistrationAsJsonWithTheOutputFlag(@TempDir Path workdir) throws Exception {
+        Files.write(workdir.resolve("orders.jar"), new byte[] {1, 2, 3, 4});
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.registerOutcome = new ConnectorRegisterOutcome.Registered(
+                new RegisteredConnector("orders", "hash-abc", "1.3.5", true));
+        Harness h = onlineSession(workdir, client);
+        int mark = h.sink().toString().length();
+
+        assertThat(h.repl().dispatch("register orders.jar -o json")).isTrue();
+
+        String out = h.sink().toString().substring(mark);
+        assertThat(out).contains("\"connectorId\"").contains("\"orders\"")
+                .contains("\"contentHash\"").contains("\"newlyRegistered\"");
+    }
+
+    @Test
+    void registerForAMissingFileReportsCannotReadAndDoesNotCallTheServer(@TempDir Path workdir) {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        Harness h = onlineSession(workdir, client);
+        int mark = h.sink().toString().length();
+
+        assertThat(h.repl().dispatch("register nope.jar")).isTrue();
+
+        assertThat(h.sink().toString().substring(mark)).contains("register:").containsIgnoringCase("cannot read");
+        assertThat(client.registerCalls).isEmpty();
+    }
+
+    @Test
+    void registerWithNoOperandReportsMissingOperandAndDoesNotCallTheServer(@TempDir Path workdir) {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        Harness h = onlineSession(workdir, client);
+        int mark = h.sink().toString().length();
+
+        assertThat(h.repl().dispatch("register")).isTrue();
+
+        assertThat(h.sink().toString().substring(mark)).contains("register:").contains("missing operand");
+        assertThat(client.registerCalls).isEmpty();
+    }
+
+    @Test
+    void registerRenderingAServerRejectionShowsTheCodeAndMessage(@TempDir Path workdir) throws Exception {
+        Files.write(workdir.resolve("orders.jar"), new byte[] {1, 2, 3, 4});
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.registerOutcome = new ConnectorRegisterOutcome.Rejected(
+                "connector.registration-conflict", "A different artifact already holds that id.");
+        Harness h = onlineSession(workdir, client);
+
+        h.repl().dispatch("register orders.jar");
+
+        assertThat(h.sink().toString())
+                .contains("connector.registration-conflict").contains("A different artifact already holds that id.");
+    }
+
+    @Test
+    void registerWhileConnectedButNotAuthenticatedReportsAndDoesNotCallTheServer() {
+        // The not-authenticated guard fires before the file is even read, so no file need exist.
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        Harness h = harness(Path.of("cyn-work"), client, new ScriptedPrompter());
+        h.repl().dispatch("connect node1:7900");   // connected, never logged in
+
+        assertThat(h.repl().dispatch("register orders.jar")).isTrue();
+
+        assertThat(h.sink().toString()).contains("cli.not-authenticated").contains("register");
+        assertThat(client.registerCalls).isEmpty();
+    }
+
+    @Test
+    void registerOfflineReportsThatAConnectionIsRequired() {
+        Harness h = harness(Path.of("cyn-work"));
+
+        assertThat(h.repl().dispatch("register orders.jar")).isTrue();
+
+        assertThat(h.sink().toString()).contains("requires a connection").contains("register");
     }
 
     // --- schema read-back: `schema <id> [table]` reads the stored model without discovering ---

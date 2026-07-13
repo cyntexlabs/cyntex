@@ -244,6 +244,56 @@ class HttpControlPlaneClientTest {
     }
 
     @Test
+    void registerPostsTheBase64ArtifactWithABearerCredentialAndReturnsTheRegistration() throws Exception {
+        AtomicReference<CapturedRequest> seen = new AtomicReference<>();
+        HttpServer server = apiServer("/api/connectors:register", 200,
+                "{\"connectorId\":\"orders\",\"contentHash\":\"hash-abc\",\"pdkApiVersion\":\"1.3.5\","
+                        + "\"newlyRegistered\":true}",
+                seen);
+        try {
+            ConnectorRegisterOutcome outcome =
+                    new HttpControlPlaneClient().register(baseOf(server), "tok-abc", new byte[] {1, 2, 3, 4});
+            assertThat(outcome).isEqualTo(new ConnectorRegisterOutcome.Registered(
+                    new RegisteredConnector("orders", "hash-abc", "1.3.5", true)));
+            assertThat(seen.get().method()).isEqualTo("POST");
+            assertThat(seen.get().path()).isEqualTo("/api/connectors:register");
+            assertThat(seen.get().authorization()).isEqualTo("Bearer tok-abc");
+            // The artifact bytes travel base64-encoded in the JSON body.
+            Map<?, ?> sent = (Map<?, ?>) JsonReader.parse(seen.get().body());
+            assertThat(sent.get("artifact")).isEqualTo("AQIDBA==");
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void registerReturnsRejectedWithTheServerCodeAndMessageOnACodedError() throws Exception {
+        HttpServer server = apiServer("/api/connectors:register", 400,
+                "{\"code\":\"connector.registration-conflict\",\"params\":{},"
+                        + "\"message\":\"A different artifact already holds that id.\"}",
+                new AtomicReference<>());
+        try {
+            ConnectorRegisterOutcome outcome =
+                    new HttpControlPlaneClient().register(baseOf(server), "tok", new byte[] {9});
+            assertThat(outcome).isEqualTo(new ConnectorRegisterOutcome.Rejected(
+                    "connector.registration-conflict", "A different artifact already holds that id."));
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void registerReturnsUnreachableWhenTheServerIsDownWithoutThrowing() throws Exception {
+        int closedPort;
+        try (ServerSocket socket = new ServerSocket(0)) {
+            closedPort = socket.getLocalPort();
+        }
+        ConnectorRegisterOutcome outcome = new HttpControlPlaneClient()
+                .register(URI.create("http://127.0.0.1:" + closedPort), "tok", new byte[] {1});
+        assertThat(outcome).isInstanceOf(ConnectorRegisterOutcome.Unreachable.class);
+    }
+
+    @Test
     void applyReturnsRejectedWithTheServerCodeAndMessageOnACodedError() throws Exception {
         HttpServer server = apiServer("/api/artifacts:apply", 400,
                 "{\"code\":\"dsl.illegal-value\",\"params\":{},\"message\":\"Not a known kind.\"}",

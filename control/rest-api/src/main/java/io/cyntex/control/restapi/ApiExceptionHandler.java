@@ -42,6 +42,19 @@ class ApiExceptionHandler {
     }
 
     /**
+     * A coded error a verb boundary has attributed to the client's request answers 400 while rendering the
+     * same coded body. This is how a domain code that is a client error in one verb's context but a
+     * server-side failure in another gets the right status: the verb that has the context wraps it here,
+     * rather than {@link #statusFor} guessing globally from the code alone.
+     */
+    @ExceptionHandler(BadRequestCodedException.class)
+    ResponseEntity<ApiError> handle(BadRequestCodedException e) {
+        MessageCatalog.Rendered rendered = catalog.render(e.code(), e.args());
+        ApiError body = new ApiError(e.code().code(), new TreeMap<>(e.args()), rendered.message());
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(body);
+    }
+
+    /**
      * The HTTP status for a coded error. The authentication codes are client-attributable and map to the
      * usual auth statuses: no / invalid credential and a rejected login are 401, an under-scoped or
      * non-loopback caller is 403, and a bootstrap channel that has already closed is a 409 state conflict.

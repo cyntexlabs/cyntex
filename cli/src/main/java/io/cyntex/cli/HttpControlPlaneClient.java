@@ -11,6 +11,7 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -264,6 +265,50 @@ final class HttpControlPlaneClient implements ControlPlaneClient {
         } catch (IOException | RuntimeException e) {
             return new ConnectionSchemaOutcome.Unreachable();
         }
+    }
+
+    @Override
+    public ConnectorRegisterOutcome register(URI baseUrl, String credential, byte[] artifact) {
+        try {
+            HttpRequest request = authed(baseUrl, "/api/connectors:register", credential)
+                    .header("Content-Type", "application/json")
+                    .POST(HttpRequest.BodyPublishers.ofString(registerBody(artifact), StandardCharsets.UTF_8))
+                    .build();
+            HttpResponse<String> response =
+                    client().send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            if (response.statusCode() == 200) {
+                RegisteredConnector registered = registeredConnector(response.body());
+                // a 200 that is not a usable registration (a proxy / non-Cyntex reply) is treated as unreachable
+                return registered == null
+                        ? new ConnectorRegisterOutcome.Unreachable()
+                        : new ConnectorRegisterOutcome.Registered(registered);
+            }
+            Rejection r = rejection(response.body(), "The server refused the connector registration.");
+            return new ConnectorRegisterOutcome.Rejected(r.code(), r.message());
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return new ConnectorRegisterOutcome.Unreachable();
+        } catch (IOException | RuntimeException e) {
+            return new ConnectorRegisterOutcome.Unreachable();
+        }
+    }
+
+    /** The register request body: {@code {"artifact":"<base64 of the jar bytes>"}}. */
+    private static String registerBody(byte[] artifact) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("artifact", Base64.getEncoder().encodeToString(artifact));
+        return JsonOut.write(body);
+    }
+
+    /** The registration decoded from a 200 body, or {@code null} if the body is not a usable registration. */
+    private static RegisteredConnector registeredConnector(String body) {
+        if (JsonReader.parse(body) instanceof Map<?, ?> m
+                && m.get("connectorId") instanceof String connectorId
+                && m.get("contentHash") instanceof String contentHash) {
+            boolean newlyRegistered = m.get("newlyRegistered") instanceof Boolean b && b;
+            return new RegisteredConnector(connectorId, contentHash, stringOrNull(m.get("pdkApiVersion")), newlyRegistered);
+        }
+        return null;
     }
 
     /** The discovered model decoded from a 200 body, or {@code null} if the body is not a usable model. */

@@ -20,6 +20,7 @@ class ControlOperationsTest {
                         "connection.test-result",
                         "connection.discover-schema",
                         "connection.schema",
+                        "connector.register",
                         "cluster.members",
                         "user.create",
                         "user.passwd",
@@ -43,6 +44,9 @@ class ControlOperationsTest {
         assertThat(registry.resolve("connection.discover-schema").scope()).isEqualTo(Scope.WRITE);
         // connection.schema reads back the latest persisted source model; it mutates nothing, so it is read.
         assertThat(registry.resolve("connection.schema").scope()).isEqualTo(Scope.READ);
+        // connector.register ingests a connector artifact into the distribution store, so it is a
+        // state-mutating write.
+        assertThat(registry.resolve("connector.register").scope()).isEqualTo(Scope.WRITE);
         // cluster.members reads live topology; it is authenticated like every registry operation, but
         // needs no write or admin privilege.
         assertThat(registry.resolve("cluster.members").scope()).isEqualTo(Scope.READ);
@@ -58,6 +62,7 @@ class ControlOperationsTest {
                         "artifact.apply",
                         "connection.test",
                         "connection.discover-schema",
+                        "connector.register",
                         "user.create",
                         "user.passwd",
                         "token.create",
@@ -73,7 +78,7 @@ class ControlOperationsTest {
     @Test
     void everyL1OperationIsOnTheCliPocSurface() {
         assertThat(registry.exposedOn(Frontend.CLI, Maturity.POC))
-                .hasSize(14)
+                .hasSize(15)
                 .allSatisfy(op -> assertThat(op.exposure()).containsEntry(Frontend.CLI, Maturity.POC));
     }
 

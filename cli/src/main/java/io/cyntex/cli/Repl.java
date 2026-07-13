@@ -55,7 +55,7 @@ final class Repl {
      * either state until a server validate endpoint exists.
      */
     private static final List<String> ONLINE_VERBS =
-            List.of("apply", "get", "ls", "test", "test-result", "discover-schema", "schema");
+            List.of("apply", "get", "ls", "test", "test-result", "discover-schema", "schema", "register");
 
     private final CommandLine commandLine;
 
@@ -197,6 +197,13 @@ final class Repl {
         }
         if (words.get(0).equals("schema")) {
             schemaOnline(words);
+            return;
+        }
+        // `register` uploads a local artifact and returns a structured report worth machine-reading, so it
+        // accepts an `-o` output flag and parses its own operand (a local path) — routed before the
+        // positional-only guard the other verbs share.
+        if (words.get(0).equals("register")) {
+            registerOnline(words);
             return;
         }
         // The other connected verbs take positional operands only; a dash-option (e.g. `-o json`) is not yet
@@ -506,6 +513,112 @@ final class Repl {
             case ConnectionTestResultOutcome.Rejected rejected -> renderRejection(rejected.code(), rejected.message());
             case ConnectionTestResultOutcome.Unreachable ignored -> reportRequestFailed();
         }
+    }
+
+    /**
+     * {@code register <path> [-o text|json|yaml]} — registers a local connector artifact with the server. It
+     * reads the jar bytes and uploads them; the server introspects the artifact and stores it content-hash
+     * idempotently, then reports what was registered (newly, or an already-registered no-op). A missing
+     * operand or unknown option is a benign usage line; an unreadable path is a benign "cannot read" line; a
+     * coded refusal (a bad artifact, an id conflict) renders its code and message.
+     */
+    private void registerOnline(List<String> words) {
+        PathAndFormat parsed = parsePathAndFormat(words);
+        if (parsed == null) {
+            return;
+        }
+        PrintWriter err = commandLine.getErr();
+        Path artifactPath = workdir.resolve(parsed.path()).normalize();
+        byte[] artifact;
+        try {
+            artifact = Files.readAllBytes(artifactPath);
+        } catch (IOException e) {
+            err.println("register: cannot read " + artifactPath + ": " + e.getMessage());
+            err.flush();
+            return;
+        }
+        ConnectorRegisterOutcome outcome = withFailover(() -> controlPlane.register(
+                session.landingNode(), session.credential(), artifact),
+                o -> o instanceof ConnectorRegisterOutcome.Unreachable);
+        switch (outcome) {
+            case ConnectorRegisterOutcome.Registered registered -> renderRegistered(registered.connector(), parsed.format());
+            case ConnectorRegisterOutcome.Rejected rejected -> renderRejection(rejected.code(), rejected.message());
+            case ConnectorRegisterOutcome.Unreachable ignored -> reportRequestFailed();
+        }
+    }
+
+    /**
+     * Parses {@code <path> [-o text|json|yaml]} for the register verb, printing its usage line to err and
+     * returning {@code null} on any error. The single positional operand is the local artifact path to upload.
+     */
+    private PathAndFormat parsePathAndFormat(List<String> words) {
+        PrintWriter err = commandLine.getErr();
+        String path = null;
+        OutputFormat format = OutputFormat.TEXT;
+        for (int i = 1; i < words.size(); i++) {
+            String word = words.get(i);
+            if (word.equals("-o") || word.equals("--output")) {
+                if (i + 1 >= words.size()) {
+                    err.println("register: " + word + " needs a format (text|json|yaml)");
+                    err.flush();
+                    return null;
+                }
+                OutputFormat chosen = outputFormat(words.get(++i));
+                if (chosen == null) {
+                    err.println("register: unknown output format '" + words.get(i) + "' (expected text|json|yaml)");
+                    err.flush();
+                    return null;
+                }
+                format = chosen;
+            } else if (word.startsWith("-")) {
+                err.println("register: unknown option " + word);
+                err.flush();
+                return null;
+            } else if (path == null) {
+                path = word;
+            } else {
+                err.println("register: too many operands (usage: register <path> [-o text|json|yaml])");
+                err.flush();
+                return null;
+            }
+        }
+        if (path == null || path.isBlank()) {
+            err.println("register: missing operand (usage: register <path> [-o text|json|yaml])");
+            err.flush();
+            return null;
+        }
+        return new PathAndFormat(path, format);
+    }
+
+    /** The parsed operands of the register verb: the local artifact path and the chosen output format. */
+    private record PathAndFormat(String path, OutputFormat format) {
+    }
+
+    /** Renders a connector registration on the chosen surface: a human line, or the structured machine form. */
+    private void renderRegistered(RegisteredConnector connector, OutputFormat format) {
+        PrintWriter out = commandLine.getOut();
+        switch (format) {
+            case TEXT -> out.println(registeredHeadline(connector));
+            case JSON -> out.println(JsonOut.write(registeredMap(connector)));
+            case YAML -> out.println(YamlOut.write(registeredMap(connector)));
+        }
+        out.flush();
+    }
+
+    /** The human line: whether the artifact was newly registered or already present, then its id and hash. */
+    private static String registeredHeadline(RegisteredConnector connector) {
+        String state = connector.newlyRegistered() ? "registered" : "already registered";
+        return state + "  " + connector.connectorId() + "  " + connector.contentHash();
+    }
+
+    /** The registration as an ordered tree for the machine surfaces, omitting a null PDK API version. */
+    private static Map<String, Object> registeredMap(RegisteredConnector connector) {
+        Map<String, Object> map = new LinkedHashMap<>();
+        map.put("connectorId", connector.connectorId());
+        map.put("contentHash", connector.contentHash());
+        putIfPresent(map, "pdkApiVersion", connector.pdkApiVersion());
+        map.put("newlyRegistered", connector.newlyRegistered());
+        return map;
     }
 
     /**

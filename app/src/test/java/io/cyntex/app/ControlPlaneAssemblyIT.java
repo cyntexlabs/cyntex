@@ -20,12 +20,17 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.List;
 import java.util.Map;
+import java.util.jar.Attributes;
+import java.util.jar.JarOutputStream;
+import java.util.jar.Manifest;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -166,6 +171,45 @@ class ControlPlaneAssemblyIT {
 
         String health = client.get().uri("/healthz").retrieve().body(String.class);
         assertThat(health).isEqualTo("ok");
+    }
+
+    @Test
+    void connectorRegisterIsWiredThroughToTheIntrospectorAndStoreOverARealStore() throws IOException {
+        int port = start();
+        RestClient client = RestClient.create("http://localhost:" + port);
+
+        // Bootstrap the first admin over loopback and sign in; the admin session covers the write verb.
+        client.post().uri("/auth/bootstrap").contentType(MediaType.APPLICATION_JSON)
+                .body(Map.of("username", "admin", "password", "s3cret")).retrieve().toBodilessEntity();
+        Map<?, ?> login = client.post().uri("/auth/login").contentType(MediaType.APPLICATION_JSON)
+                .body(Map.of("username", "admin", "password", "s3cret")).retrieve().body(Map.class);
+        String token = (String) login.get("token");
+
+        // The register verb is assembled over the same chain as production: control verb -> adapter-pdk
+        // registrar -> introspector -> connector registry. A valid jar that carries no connector class is
+        // refused with the coded connector-domain error, proving the chain reaches the real introspector and
+        // registry rather than a stub, and that a bad upload is a client-attributable 400 (not a bare 500).
+        String artifact = Base64.getEncoder().encodeToString(emptyJar());
+        Map<?, ?> body = client.post().uri("/api/connectors:register")
+                .header("Authorization", "Bearer " + token)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(Map.of("artifact", artifact))
+                .exchange((request, response) -> {
+                    assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+                    return response.bodyTo(Map.class);
+                });
+        assertThat(body.get("code")).isEqualTo("connector.no-connector-class");
+    }
+
+    /** A valid, empty jar (a manifest, no classes): it opens and scans, but carries no connector class. */
+    private static byte[] emptyJar() throws IOException {
+        Manifest manifest = new Manifest();
+        manifest.getMainAttributes().put(Attributes.Name.MANIFEST_VERSION, "1.0");
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+        try (JarOutputStream jar = new JarOutputStream(bytes, manifest)) {
+            // no entries: a structurally valid jar the introspector opens but finds no connector class in
+        }
+        return bytes.toByteArray();
     }
 
     private int start(String... extraProperties) {

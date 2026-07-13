@@ -80,4 +80,13 @@ interface ControlPlaneClient {
      * I/O failure. Never throws.
      */
     ConnectionSchemaOutcome schema(URI baseUrl, String credential, String id);
+
+    /**
+     * Registers a connector artifact via {@code POST {baseUrl}/api/connectors:register}, authenticated by
+     * the bearer {@code credential}: the {@code artifact} bytes are uploaded (base64-encoded in the body),
+     * and the server introspects and content-hash idempotently stores them. Returns what was registered on
+     * success (newly, or an already-registered no-op), a coded rejection when the server refuses (a bad
+     * artifact, an id conflict), or unreachable on any I/O failure. Never throws.
+     */
+    ConnectorRegisterOutcome register(URI baseUrl, String credential, byte[] artifact);
 }

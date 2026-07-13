@@ -40,6 +40,15 @@ public enum ConnectorError implements CyntexErrorCode {
     AMBIGUOUS_REGISTRATION("connector.ambiguous-registration", Set.of("connector", "artifacts")),
 
     /**
+     * A different artifact is being registered under a connector id that already has one — same id,
+     * different bytes. A single active artifact is kept per id; selecting among versions is not
+     * supported, so the incoming artifact is refused at register time rather than stored to blow up at
+     * load. {@code connector} is the connector id; {@code existing} is the content hash already
+     * registered; {@code incoming} is the content hash refused.
+     */
+    REGISTRATION_CONFLICT("connector.registration-conflict", Set.of("connector", "existing", "incoming")),
+
+    /**
      * The connector jar or its classpath could not be opened / linked. {@code connector} is the
      * connector id being loaded.
      */

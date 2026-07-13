@@ -21,7 +21,7 @@ final class MalformedRequest {
     /** Refuses the request with {@code reason} unless {@code value} is present; returns it when it is. */
     static <T> T require(T value, String reason) {
         if (value == null) {
-            throw refuse(reason);
+            throw refuse(reason, null);
         }
         return value;
     }
@@ -29,11 +29,19 @@ final class MalformedRequest {
     /** Refuses the request with {@code reason} unless {@code value} is present and non-blank. */
     static void requireText(String value, String reason) {
         if (value == null || value.isBlank()) {
-            throw refuse(reason);
+            throw refuse(reason, null);
         }
     }
 
-    private static CyntexException refuse(String reason) {
-        return new CyntexException(ControlError.MALFORMED_REQUEST, Map.of("reason", reason), null);
+    /**
+     * The coded boundary refusal for {@code reason}, carrying {@code cause}, to throw where a specific
+     * check (e.g. decoding a malformed body field) does not fit {@link #require}/{@link #requireText}.
+     */
+    static CyntexException rejecting(String reason, Throwable cause) {
+        return refuse(reason, cause);
+    }
+
+    private static CyntexException refuse(String reason, Throwable cause) {
+        return new CyntexException(ControlError.MALFORMED_REQUEST, Map.of("reason", reason), cause);
     }
 }

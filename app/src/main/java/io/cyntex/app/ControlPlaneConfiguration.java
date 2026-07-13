@@ -15,6 +15,7 @@ import io.cyntex.control.core.AuditGate;
 import io.cyntex.control.core.BootstrapService;
 import io.cyntex.control.core.ConnectionTestResultQueryService;
 import io.cyntex.control.core.ConnectionTestService;
+import io.cyntex.control.core.ConnectorRegisterService;
 import io.cyntex.control.core.ControlOperations;
 import io.cyntex.control.core.CredentialAuthenticator;
 import io.cyntex.control.core.LoginService;
@@ -204,6 +205,13 @@ class ControlPlaneConfiguration {
     @Bean
     SeedSweepRunner seedSweepRunner(SeedConnectorSweep sweep, ConnectorPluginProperties properties) {
         return new SeedSweepRunner(sweep, properties.getSeedDir());
+    }
+
+    @Bean
+    ConnectorRegisterService connectorRegisterService(ConnectorArtifactRegistrar registrar, AuditGate auditGate) {
+        // The register verb reaches the distribution store through the same registrar the seed sweep uses; it
+        // implements the spi ingestion port, so control-core drives it without depending on the adapters ring.
+        return new ConnectorRegisterService(registrar, auditGate);
     }
 
     @Bean

@@ -107,6 +107,9 @@ connector.not-registered:
 connector.ambiguous-registration:
   message: "Connector '{connector}' resolves to more than one registered artifact: {artifacts}."
   solution: "Keep a single registered artifact per connector id; selecting among connector versions is not supported."
+connector.registration-conflict:
+  message: "Connector '{connector}' is already registered under artifact {existing}; a different artifact {incoming} was refused."
+  solution: "Keep a single registered artifact per connector id; unregister the existing artifact before registering a different one."
 connector.load-failed:
   message: "Connector '{connector}' could not be loaded."
   solution: "Check the connector jar and its dependencies are present and readable."

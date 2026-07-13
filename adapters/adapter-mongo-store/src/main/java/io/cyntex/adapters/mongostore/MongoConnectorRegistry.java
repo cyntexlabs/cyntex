@@ -8,16 +8,14 @@ import com.mongodb.client.model.Filters;
 import io.cyntex.core.common.CyntexException;
 import io.cyntex.spi.store.ConnectorRegistration;
 import io.cyntex.spi.store.ConnectorRegistry;
+import io.cyntex.spi.store.ContentHash;
 import io.cyntex.spi.store.RegistrationOutcome;
 import io.cyntex.spi.store.RegistrationSource;
 import org.bson.Document;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
-import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -123,16 +121,7 @@ public final class MongoConnectorRegistry implements ConnectorRegistry {
 
     /** Lower-hex SHA-256 of the artifact bytes: the content-addressed registration key. */
     static String sha256Hex(byte[] bytes) {
-        return HexFormat.of().formatHex(sha256().digest(bytes));
-    }
-
-    private static MessageDigest sha256() {
-        try {
-            return MessageDigest.getInstance("SHA-256");
-        } catch (NoSuchAlgorithmException e) {
-            // SHA-256 is a mandated JDK algorithm; its absence is a broken runtime, not a user error.
-            throw new IllegalStateException("SHA-256 is required but unavailable", e);
-        }
+        return ContentHash.of(bytes);
     }
 
     private static CyntexException unreadable(String contentHash) {
