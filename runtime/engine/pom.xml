@@ -12,9 +12,11 @@
 
   <artifactId>engine</artifactId>
   <name>Cyntex :: Runtime :: Engine</name>
-  <description>Data-plane execution (the pipeline runtime): the generic adapters that wrap a stateless
-    transform port and a sink writer into Jet processors, and the construction of a pipeline's Jet DAG.
-    Depends on core + spi and the Hazelcast execution substrate only (rule R4); never on an adapter.</description>
+  <description>Data-plane execution (the pipeline runtime): the Jet job lifecycle actuator (submit /
+    suspend / resume / cancel) that maps a pipeline's lifecycle to its Jet job, the generic adapters that
+    wrap a stateless transform port and a sink writer into Jet processors, and the construction of a
+    pipeline's Jet DAG. Depends on core + spi and the Hazelcast execution substrate only (rule R4);
+    never on an adapter.</description>
 
   <dependencies>
     <!-- The resource model the DAG builder reads to compile a pipeline into a Jet job; core ring,
@@ -43,10 +45,17 @@
     </dependency>
 
     <!-- The execution substrate: the member and the Jet engine ship in this one artifact (rule R4:
-         Hazelcast is the one allowed substrate for the runtime ring). Version managed by the bom. -->
+         Hazelcast is the one allowed substrate for the runtime ring); the actuator submits / suspends /
+         resumes / cancels Jet jobs on it. Version managed by the bom. -->
     <dependency>
       <groupId>com.hazelcast</groupId>
       <artifactId>hazelcast</artifactId>
+    </dependency>
+    <!-- The error-code contract for diagnosable job-operation failures (rule R4: core only). -->
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>core-common</artifactId>
+      <version>${revision}</version>
     </dependency>
 
     <dependency>

@@ -5,7 +5,10 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import io.cyntex.core.lifecycle.CasOutcome;
 import io.cyntex.core.lifecycle.CheckpointDoc;
+import io.cyntex.core.lifecycle.DesiredState;
 import io.cyntex.core.lifecycle.EpochCas;
+import io.cyntex.core.lifecycle.Observation;
+import io.cyntex.core.lifecycle.PipelineState;
 import io.cyntex.core.model.Resource;
 import io.cyntex.core.model.SourceResource;
 import io.cyntex.core.model.ViewResource;
@@ -18,10 +21,11 @@ import java.util.Optional;
 import org.junit.jupiter.api.Test;
 
 /**
- * The store port seen through an in-memory implementation: proves the three-store persistence
+ * The store port seen through an in-memory implementation: proves the five-store persistence
  * contract is implementable and usable, and pins the shape it documents — an artifact truth layer
  * (save / get / list of canonical resources), a state store whose only write path is the
- * epoch-fencing compare-and-swap, and a connection catalog store.
+ * epoch-fencing compare-and-swap, a plain-upsert desired-intent store, a plain-upsert per-pipeline
+ * observation store, and a connection catalog store.
  */
 class StorePortTest {
 
@@ -35,12 +39,14 @@ class StorePortTest {
     // --- facade ---
 
     @Test
-    void facadeExposesTheFourStores() {
+    void facadeExposesTheSixStores() {
         StorePort store = new InMemoryStore();
 
         assertThat(store.artifacts()).isNotNull();
         assertThat(store.state()).isNotNull();
         assertThat(store.catalog()).isNotNull();
+        assertThat(store.desired()).isNotNull();
+        assertThat(store.observations()).isNotNull();
         assertThat(store.meta()).isNotNull();
     }
 
@@ -184,6 +190,62 @@ class StorePortTest {
         assertThat(catalog.list()).extracting(ConnectionConfig::id).containsExactlyInAnyOrder("orders-db", "events");
     }
 
+    // --- desired (the plain-upsert desired-intent store) ---
+
+    @Test
+    void desiredSaveThenReadRoundTrips() {
+        DesiredStore desired = new InMemoryStore().desired();
+        DesiredState want = new DesiredState("p1", PipelineState.RUNNING, "rev-abc");
+
+        desired.save(want);
+
+        assertThat(desired.read("p1")).contains(want);
+    }
+
+    @Test
+    void desiredReadAbsentIsEmpty() {
+        assertThat(new InMemoryStore().desired().read("p1")).isEmpty();
+    }
+
+    @Test
+    void desiredSaveUpsertsByPipelineId() {
+        DesiredStore desired = new InMemoryStore().desired();
+        desired.save(new DesiredState("p1", PipelineState.RUNNING, "rev-1"));
+        desired.save(new DesiredState("p1", PipelineState.STOPPED, "rev-2"));
+
+        DesiredState stored = desired.read("p1").orElseThrow();
+        assertThat(stored.targetState()).isEqualTo(PipelineState.STOPPED);
+        assertThat(stored.revision()).isEqualTo("rev-2");
+    }
+
+    // --- observations (the plain-upsert per-pipeline observation store) ---
+
+    @Test
+    void observationSaveThenReadRoundTrips() {
+        ObservationStore observations = new InMemoryStore().observations();
+        Observation obs = new Observation("p1", PipelineState.RUNNING, Map.of("recordCount", 7L), Map.of());
+
+        observations.save(obs);
+
+        assertThat(observations.read("p1")).contains(obs);
+    }
+
+    @Test
+    void observationReadAbsentIsEmpty() {
+        assertThat(new InMemoryStore().observations().read("p1")).isEmpty();
+    }
+
+    @Test
+    void observationSaveUpsertsByPipelineId() {
+        ObservationStore observations = new InMemoryStore().observations();
+        observations.save(new Observation("p1", PipelineState.RUNNING, Map.of("recordCount", 1L), Map.of()));
+        observations.save(new Observation("p1", PipelineState.PAUSED, Map.of("recordCount", 2L), Map.of()));
+
+        Observation stored = observations.read("p1").orElseThrow();
+        assertThat(stored.state()).isEqualTo(PipelineState.PAUSED);
+        assertThat(stored.metrics()).containsEntry("recordCount", 2L);
+    }
+
     // --- meta (the SRS mining-chain coordination store) ---
 
     @Test
@@ -280,7 +342,7 @@ class StorePortTest {
     }
 
     /**
-     * An in-memory store: four maps behind the four sub-ports. The state store applies the real
+     * An in-memory store: six maps behind the six sub-ports. The state store applies the real
      * fencing CAS, so the port composes with the core checkpoint contract, not a re-implementation.
      */
     private static final class InMemoryStore implements StorePort {
@@ -288,6 +350,8 @@ class StorePortTest {
         private final Map<String, Resource> artifacts = new HashMap<>();
         private final Map<String, CheckpointDoc> checkpoints = new HashMap<>();
         private final Map<String, ConnectionConfig> connections = new HashMap<>();
+        private final Map<String, DesiredState> desired = new HashMap<>();
+        private final Map<String, Observation> observations = new HashMap<>();
         private final Map<String, SrsMeta> srsMeta = new HashMap<>();
 
         @Override
@@ -357,6 +421,41 @@ class StorePortTest {
                 @Override
                 public List<ConnectionConfig> list() {
                     return new ArrayList<>(connections.values());
+                }
+            };
+        }
+
+        @Override
+        public DesiredStore desired() {
+            return new DesiredStore() {
+                @Override
+                public void save(DesiredState desiredState) {
+                    desired.put(desiredState.pipelineId(), desiredState);
+                }
+
+                @Override
+                public Optional<DesiredState> read(String pipelineId) {
+                    return Optional.ofNullable(desired.get(pipelineId));
+                }
+
+                @Override
+                public List<String> pipelineIds() {
+                    return List.copyOf(desired.keySet());
+                }
+            };
+        }
+
+        @Override
+        public ObservationStore observations() {
+            return new ObservationStore() {
+                @Override
+                public void save(Observation observation) {
+                    observations.put(observation.pipelineId(), observation);
+                }
+
+                @Override
+                public Optional<Observation> read(String pipelineId) {
+                    return Optional.ofNullable(observations.get(pipelineId));
                 }
             };
         }

@@ -14,6 +14,7 @@ import java.nio.file.attribute.PosixFilePermissions;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -77,9 +78,24 @@ class ReplTest {
         ApplyOutcome applyOutcome = new ApplyOutcome.Unreachable();
         GetOutcome getOutcome = new GetOutcome.Unreachable();
         ListOutcome listOutcome = new ListOutcome.Unreachable();
+        LifecycleOutcome lifecycleOutcome = new LifecycleOutcome.Unreachable();
+        StatusOutcome statusOutcome = new StatusOutcome.Unreachable();
+        MetricsOutcome metricsOutcome = new MetricsOutcome.Unreachable();
+        SnapshotOutcome snapshotOutcome = new SnapshotOutcome.Unreachable();
+        LogsOutcome logsOutcome = new LogsOutcome.Unreachable();
+        /** The states a watch stream feeds, and the line batches a follow stream feeds, in order. */
+        List<String> watchStates = List.of();
+        List<List<RemoteLogLine>> followBatches = List.of();
         final List<String> applyCalls = new ArrayList<>();
         final List<String> getCalls = new ArrayList<>();
         final List<String> listCalls = new ArrayList<>();
+        final List<String> lifecycleCalls = new ArrayList<>();
+        final List<String> statusCalls = new ArrayList<>();
+        final List<String> metricsCalls = new ArrayList<>();
+        final List<String> snapshotCalls = new ArrayList<>();
+        final List<String> logsCalls = new ArrayList<>();
+        final List<String> watchCalls = new ArrayList<>();
+        final List<String> followCalls = new ArrayList<>();
 
         FakeControlPlane(URI... healthy) {
             this.healthy = new LinkedHashSet<>(List.of(healthy));
@@ -119,6 +135,60 @@ class ReplTest {
         public ListOutcome list(URI baseUrl, String credential, String kind) {
             listCalls.add(credential + "@" + baseUrl + "?" + kind);
             return healthy.contains(baseUrl) ? listOutcome : new ListOutcome.Unreachable();
+        }
+
+        @Override
+        public LifecycleOutcome lifecycle(URI baseUrl, String credential, String pipelineId, String verb) {
+            lifecycleCalls.add(credential + "@" + baseUrl + " " + verb + " " + pipelineId);
+            return healthy.contains(baseUrl) ? lifecycleOutcome : new LifecycleOutcome.Unreachable();
+        }
+
+        @Override
+        public StatusOutcome status(URI baseUrl, String credential, String pipelineId) {
+            statusCalls.add(credential + "@" + baseUrl + "/" + pipelineId);
+            return healthy.contains(baseUrl) ? statusOutcome : new StatusOutcome.Unreachable();
+        }
+
+        @Override
+        public MetricsOutcome metrics(URI baseUrl, String credential, String pipelineId) {
+            metricsCalls.add(credential + "@" + baseUrl + "/" + pipelineId);
+            return healthy.contains(baseUrl) ? metricsOutcome : new MetricsOutcome.Unreachable();
+        }
+
+        @Override
+        public SnapshotOutcome snapshot(URI baseUrl, String credential, String pipelineId) {
+            snapshotCalls.add(credential + "@" + baseUrl + "/" + pipelineId);
+            return healthy.contains(baseUrl) ? snapshotOutcome : new SnapshotOutcome.Unreachable();
+        }
+
+        @Override
+        public LogsOutcome logs(URI baseUrl, String credential, String pipelineId) {
+            logsCalls.add(credential + "@" + baseUrl + "/" + pipelineId);
+            return healthy.contains(baseUrl) ? logsOutcome : new LogsOutcome.Unreachable();
+        }
+
+        @Override
+        public void watchStatus(URI baseUrl, String credential, String pipelineId,
+                StatusStream sink, java.util.function.BooleanSupplier stop) {
+            watchCalls.add(credential + "@" + baseUrl + "/" + pipelineId);
+            for (String state : watchStates) {
+                if (stop.getAsBoolean()) {
+                    return;
+                }
+                sink.state(pipelineId, state);
+            }
+        }
+
+        @Override
+        public void followLogs(URI baseUrl, String credential, String pipelineId,
+                LogStream sink, java.util.function.BooleanSupplier stop) {
+            followCalls.add(credential + "@" + baseUrl + "/" + pipelineId);
+            for (List<RemoteLogLine> batch : followBatches) {
+                if (stop.getAsBoolean()) {
+                    return;
+                }
+                sink.lines(pipelineId, batch);
+            }
         }
     }
 
@@ -905,6 +975,285 @@ class ReplTest {
         Harness h = harness();   // offline: get is a connected verb, discoverable rather than unknown
         assertThat(h.repl().dispatch("get x")).isTrue();
         assertThat(h.sink().toString()).contains("requires a connection");
+    }
+
+    // --- pipeline lifecycle verbs route online to POST /api/pipelines/{id}:{verb} ------------------
+
+    @Test
+    void startWhileAuthenticatedRoutesToTheServerAndPrintsTheNewState() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.lifecycleOutcome = new LifecycleOutcome.Accepted("pl1", "RUNNING", "rev-abc");
+        Harness h = onlineSession(Path.of("cyn-work"), client);
+        int mark = h.sink().toString().length();
+        assertThat(h.repl().dispatch("start pl1")).isTrue();
+        assertThat(h.sink().toString().substring(mark)).contains("pl1").contains("running");
+        assertThat(client.lifecycleCalls).containsExactly("jwt-tok@http://node1:7900 start pl1");
+    }
+
+    @Test
+    void theFourLifecycleVerbsEachRouteToTheirOwnServerVerb() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.lifecycleOutcome = new LifecycleOutcome.Accepted("pl1", "RUNNING", "rev-abc");
+        Harness h = onlineSession(Path.of("cyn-work"), client);
+        h.repl().dispatch("start pl1");
+        h.repl().dispatch("pause pl1");
+        h.repl().dispatch("resume pl1");
+        h.repl().dispatch("stop pl1");
+        assertThat(client.lifecycleCalls).containsExactly(
+                "jwt-tok@http://node1:7900 start pl1",
+                "jwt-tok@http://node1:7900 pause pl1",
+                "jwt-tok@http://node1:7900 resume pl1",
+                "jwt-tok@http://node1:7900 stop pl1");
+    }
+
+    @Test
+    void aLifecycleVerbWithoutAPipelineIdIsABenignUsageLineAndCallsNothing() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        Harness h = onlineSession(Path.of("cyn-work"), client);
+        int mark = h.sink().toString().length();
+        assertThat(h.repl().dispatch("start")).isTrue();
+        assertThat(h.sink().toString().substring(mark)).contains("start").contains("missing operand");
+        assertThat(client.lifecycleCalls).isEmpty();
+    }
+
+    @Test
+    void aLifecycleVerbRejectionShowsTheCodeAndMessageAndDoesNotFailOver() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.lifecycleOutcome = new LifecycleOutcome.Rejected(
+                "lifecycle.illegal-transition", "Cannot pause a pipeline that is not running.");
+        Harness h = onlineSession(Path.of("cyn-work"), client);
+        int probesBefore = client.probed.size();
+        int mark = h.sink().toString().length();
+        h.repl().dispatch("pause pl1");
+        String out = h.sink().toString().substring(mark);
+        assertThat(out).contains("lifecycle.illegal-transition").contains("Cannot pause");
+        // a coded refusal is not a transport failure: it must not trigger failover
+        assertThat(out).doesNotContain("reconnected").doesNotContain("connection lost");
+        assertThat(client.probed.size()).isEqualTo(probesBefore);
+    }
+
+    @Test
+    void anUnauthenticatedLifecycleVerbSaysRunLoginAndCallsNothing() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        Harness h = harness(Path.of("cyn-work"), client, new ScriptedPrompter("pw"));
+        h.repl().dispatch("connect node1:7900");   // connected, not authenticated
+        int mark = h.sink().toString().length();
+        assertThat(h.repl().dispatch("start pl1")).isTrue();
+        assertThat(h.sink().toString().substring(mark)).contains("login");
+        assertThat(client.lifecycleCalls).isEmpty();
+    }
+
+    @Test
+    void startWhileOfflineFallsThroughToTheConnectionRequiredNotice() {
+        Harness h = harness();   // offline: start is a connected verb, discoverable rather than unknown
+        assertThat(h.repl().dispatch("start pl1")).isTrue();
+        assertThat(h.sink().toString()).contains("requires a connection");
+    }
+
+    @Test
+    void aLifecycleVerbFailsOverToAHealthyMemberAndRetriesOnceOnTheNewNode() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://n1:7900"), URI.create("http://n2:7900"));
+        client.loginOutcome = new LoginOutcome.Success("jwt-tok");
+        client.lifecycleOutcome = new LifecycleOutcome.Accepted("pl1", "RUNNING", "rev-abc");
+        Harness h = harness(Path.of("cyn-work"), client, new ScriptedPrompter("pw"));
+        h.repl().dispatch("connect n1:7900,n2:7900");   // land n1, members [n1, n2]
+        h.repl().dispatch("login alice");
+        client.setHealthy(URI.create("http://n2:7900"));   // n1 goes down before the request
+        int mark = h.sink().toString().length();
+        h.repl().dispatch("start pl1");
+        String out = h.sink().toString().substring(mark);
+        assertThat(out).contains("reconnected to n2:7900");
+        assertThat(out).contains("pl1").contains("running");
+    }
+
+    // --- observation read verbs route online to GET /api/pipelines/{id}/{face} --------------------
+
+    @Test
+    void statusWhileAuthenticatedRoutesToTheServerAndPrintsTheState() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.statusOutcome = new StatusOutcome.Found("pl1", "RUNNING");
+        Harness h = onlineSession(Path.of("cyn-work"), client);
+        int mark = h.sink().toString().length();
+        assertThat(h.repl().dispatch("status pl1")).isTrue();
+        assertThat(h.sink().toString().substring(mark)).contains("pl1").contains("running");
+        assertThat(client.statusCalls).containsExactly("jwt-tok@http://node1:7900/pl1");
+    }
+
+    @Test
+    void metricsWhileAuthenticatedPrintsEachStat() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.metricsOutcome = new MetricsOutcome.Found("pl1", Map.of("recordCount", 42L, "errorCount", 0L));
+        Harness h = onlineSession(Path.of("cyn-work"), client);
+        int mark = h.sink().toString().length();
+        assertThat(h.repl().dispatch("metrics pl1")).isTrue();
+        String out = h.sink().toString().substring(mark);
+        assertThat(out).contains("recordCount").contains("42").contains("errorCount");
+        assertThat(client.metricsCalls).containsExactly("jwt-tok@http://node1:7900/pl1");
+    }
+
+    @Test
+    void metricsWithNoMetricsPrintsABenignNoMetricsLine() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.metricsOutcome = new MetricsOutcome.Found("pl1", Map.of());
+        Harness h = onlineSession(Path.of("cyn-work"), client);
+        int mark = h.sink().toString().length();
+        h.repl().dispatch("metrics pl1");
+        assertThat(h.sink().toString().substring(mark)).contains("no metrics");
+    }
+
+    @Test
+    void snapshotWhileAuthenticatedPrintsPerTableProgressAndAnUnavailableTotal() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.snapshotOutcome = new SnapshotOutcome.Found("pl1", Map.of(
+                "orders", new RemoteTableSnapshot(10, 100L, 10),
+                "events", new RemoteTableSnapshot(5, null, null)));
+        Harness h = onlineSession(Path.of("cyn-work"), client);
+        int mark = h.sink().toString().length();
+        h.repl().dispatch("snapshot pl1");
+        String out = h.sink().toString().substring(mark);
+        // a table with a total shows its percentage; a table with no total is honest partial data, not 0/100
+        assertThat(out).contains("orders").contains("10/100").contains("10%");
+        assertThat(out).contains("events").contains("5/?");
+    }
+
+    @Test
+    void snapshotWithNoTablesPrintsABenignNoSnapshotLine() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.snapshotOutcome = new SnapshotOutcome.Found("pl1", Map.of());
+        Harness h = onlineSession(Path.of("cyn-work"), client);
+        int mark = h.sink().toString().length();
+        h.repl().dispatch("snapshot pl1");
+        assertThat(h.sink().toString().substring(mark)).contains("no snapshot");
+    }
+
+    @Test
+    void logsWhileAuthenticatedPrintsTheTailOldestToNewest() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.logsOutcome = new LogsOutcome.Found("pl1", List.of(
+                new RemoteLogLine(1_700_000_000_000L, "INFO", "submitted job"),
+                new RemoteLogLine(1_700_000_000_100L, "WARN", "slow tick")));
+        Harness h = onlineSession(Path.of("cyn-work"), client);
+        int mark = h.sink().toString().length();
+        h.repl().dispatch("logs pl1");
+        String out = h.sink().toString().substring(mark);
+        assertThat(out).contains("submitted job").contains("INFO").contains("slow tick").contains("WARN");
+        // oldest to newest
+        assertThat(out.indexOf("submitted job")).isLessThan(out.indexOf("slow tick"));
+    }
+
+    @Test
+    void logsWithNoLinesPrintsABenignNoLogsLine() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.logsOutcome = new LogsOutcome.Found("pl1", List.of());
+        Harness h = onlineSession(Path.of("cyn-work"), client);
+        int mark = h.sink().toString().length();
+        h.repl().dispatch("logs pl1");
+        assertThat(h.sink().toString().substring(mark)).contains("no logs");
+    }
+
+    // --- status --watch / logs --follow stream over the websocket channel ------------------------
+
+    @Test
+    void statusWatchStreamsEachStateToTheOutputInOrder() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.watchStates = List.of("RUNNING", "PAUSED");
+        Harness h = onlineSession(Path.of("cyn-work"), client);
+        int mark = h.sink().toString().length();
+        assertThat(h.repl().dispatch("status pl1 --watch")).isTrue();
+        String out = h.sink().toString().substring(mark);
+        assertThat(out).contains("running").contains("paused");
+        assertThat(out.indexOf("running")).isLessThan(out.indexOf("paused"));
+        assertThat(client.watchCalls).containsExactly("jwt-tok@http://node1:7900/pl1");
+    }
+
+    @Test
+    void logsFollowStreamsEachAppendedLineBatchToTheOutputInOrder() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.followBatches = List.of(
+                List.of(new RemoteLogLine(1_700_000_000_000L, "INFO", "submitted job")),
+                List.of(new RemoteLogLine(1_700_000_000_100L, "WARN", "slow tick")));
+        Harness h = onlineSession(Path.of("cyn-work"), client);
+        int mark = h.sink().toString().length();
+        assertThat(h.repl().dispatch("logs pl1 --follow")).isTrue();
+        String out = h.sink().toString().substring(mark);
+        assertThat(out).contains("submitted job").contains("slow tick");
+        assertThat(out.indexOf("submitted job")).isLessThan(out.indexOf("slow tick"));
+        assertThat(client.followCalls).containsExactly("jwt-tok@http://node1:7900/pl1");
+    }
+
+    @Test
+    void statusWatchWithoutAPipelineIdIsABenignUsageLineAndStreamsNothing() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.watchStates = List.of("RUNNING");
+        Harness h = onlineSession(Path.of("cyn-work"), client);
+        int mark = h.sink().toString().length();
+        assertThat(h.repl().dispatch("status --watch")).isTrue();
+        assertThat(h.sink().toString().substring(mark)).contains("missing operand");
+        assertThat(client.watchCalls).isEmpty();
+    }
+
+    @Test
+    void aReadVerbRejectionShowsTheCodeAndMessageAndDoesNotFailOver() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.statusOutcome = new StatusOutcome.Rejected(
+                "monitor.no-observation", "No observation is available for pipeline pl1.");
+        Harness h = onlineSession(Path.of("cyn-work"), client);
+        int probesBefore = client.probed.size();
+        int mark = h.sink().toString().length();
+        h.repl().dispatch("status pl1");
+        String out = h.sink().toString().substring(mark);
+        assertThat(out).contains("monitor.no-observation").contains("No observation is available");
+        // a coded refusal is not a transport failure: it must not trigger failover
+        assertThat(out).doesNotContain("reconnected").doesNotContain("connection lost");
+        assertThat(client.probed.size()).isEqualTo(probesBefore);
+    }
+
+    @Test
+    void aReadVerbWithoutAPipelineIdIsABenignUsageLineAndCallsNothing() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        Harness h = onlineSession(Path.of("cyn-work"), client);
+        int mark = h.sink().toString().length();
+        assertThat(h.repl().dispatch("status")).isTrue();
+        assertThat(h.sink().toString().substring(mark)).contains("status").contains("missing operand");
+        assertThat(client.statusCalls).isEmpty();
+    }
+
+    @Test
+    void anUnauthenticatedReadVerbSaysRunLoginAndCallsNothing() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        Harness h = harness(Path.of("cyn-work"), client, new ScriptedPrompter("pw"));
+        h.repl().dispatch("connect node1:7900");   // connected, not authenticated
+        int mark = h.sink().toString().length();
+        assertThat(h.repl().dispatch("status pl1")).isTrue();
+        assertThat(h.sink().toString().substring(mark)).contains("login");
+        assertThat(client.statusCalls).isEmpty();
+    }
+
+    @Test
+    void readVerbsWhileOfflineFallThroughToTheConnectionRequiredNotice() {
+        // status is a connected verb offline; metrics, snapshot and logs are too, so all four are
+        // discoverable rather than reported as unknown.
+        for (String verb : List.of("status pl1", "metrics pl1", "snapshot pl1", "logs pl1")) {
+            Harness h = harness();
+            assertThat(h.repl().dispatch(verb)).isTrue();
+            assertThat(h.sink().toString()).contains("requires a connection");
+        }
+    }
+
+    @Test
+    void aReadVerbFailsOverToAHealthyMemberAndRetriesOnceOnTheNewNode() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://n1:7900"), URI.create("http://n2:7900"));
+        client.loginOutcome = new LoginOutcome.Success("jwt-tok");
+        client.statusOutcome = new StatusOutcome.Found("pl1", "RUNNING");
+        Harness h = harness(Path.of("cyn-work"), client, new ScriptedPrompter("pw"));
+        h.repl().dispatch("connect n1:7900,n2:7900");   // land n1, members [n1, n2]
+        h.repl().dispatch("login alice");
+        client.setHealthy(URI.create("http://n2:7900"));   // n1 goes down before the request
+        int mark = h.sink().toString().length();
+        h.repl().dispatch("status pl1");
+        String out = h.sink().toString().substring(mark);
+        assertThat(out).contains("reconnected to n2:7900");
+        assertThat(out).contains("pl1").contains("running");
     }
 
     // --- online verbs fail over on a request the landing node cannot answer ------------------------

@@ -1,0 +1,63 @@
+package io.cyntex.core.logging;
+
+import java.util.ArrayDeque;
+import java.util.Deque;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+
+/**
+ * A bounded, in-memory {@link LogSink}. It keeps at most a fixed number of the most recent lines per
+ * pipeline (oldest evicted first) and tracks at most a fixed number of pipelines (the pipeline that
+ * has gone longest without a new line is dropped whole). Both bounds cap memory so a long-running or
+ * noisy process cannot grow the buffer without limit. All operations are thread-safe: the runtime
+ * appends from its own threads while a control read face tails concurrently.
+ */
+public final class RingBufferLogSink implements LogSink {
+
+    private final int maxLinesPerPipeline;
+    private final Map<String, Deque<LogLine>> byPipeline;
+
+    /**
+     * @param maxPipelines        the most pipelines to retain lines for; the least-recently-appended
+     *                            pipeline is evicted when exceeded
+     * @param maxLinesPerPipeline the most recent lines to retain per pipeline; the oldest is evicted
+     *                            when exceeded
+     */
+    public RingBufferLogSink(int maxPipelines, int maxLinesPerPipeline) {
+        if (maxPipelines < 1 || maxLinesPerPipeline < 1) {
+            throw new IllegalArgumentException("bounds must be positive");
+        }
+        this.maxLinesPerPipeline = maxLinesPerPipeline;
+        this.byPipeline = new LinkedHashMap<>() {
+            @Override
+            protected boolean removeEldestEntry(Map.Entry<String, Deque<LogLine>> eldest) {
+                return size() > maxPipelines;
+            }
+        };
+    }
+
+    @Override
+    public synchronized void append(String pipelineId, LogLine line) {
+        Objects.requireNonNull(pipelineId, "pipelineId");
+        Objects.requireNonNull(line, "line");
+        // Remove then re-insert so this pipeline becomes the most-recently-appended entry (insertion
+        // order is the recency order the cardinality bound evicts against).
+        Deque<LogLine> lines = byPipeline.remove(pipelineId);
+        if (lines == null) {
+            lines = new ArrayDeque<>();
+        }
+        lines.addLast(line);
+        while (lines.size() > maxLinesPerPipeline) {
+            lines.removeFirst();
+        }
+        byPipeline.put(pipelineId, lines);
+    }
+
+    @Override
+    public synchronized List<LogLine> tail(String pipelineId) {
+        Deque<LogLine> lines = byPipeline.get(pipelineId);
+        return lines == null ? List.of() : List.copyOf(lines);
+    }
+}

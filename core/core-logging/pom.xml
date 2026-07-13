@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Core ring logging module. Pure data / pure functions, zero third-party (held to the core ring R1
+  allowlist). Defines the node-local log tail: a small immutable log-line record plus a bounded,
+  in-process sink the pipeline runtime appends to and a control read face tails. The sink is
+  node-local and lives only in memory (latest lines per pipeline, oldest evicted) — it is not a
+  persistent log store and never leaves the process. The framework glue that feeds it (a logging
+  appender reading the pipeline-id attribution slot) lives in the assembly ring, not here.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>io.cyntex</groupId>
+    <artifactId>core</artifactId>
+    <version>${revision}</version>
+  </parent>
+
+  <artifactId>core-logging</artifactId>
+  <name>Cyntex :: Core :: Logging</name>
+  <description>Node-local in-process log tail (log-line record + bounded per-pipeline sink); pure data, zero third-party</description>
+
+  <dependencies>
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.assertj</groupId>
+      <artifactId>assertj-core</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+</project>

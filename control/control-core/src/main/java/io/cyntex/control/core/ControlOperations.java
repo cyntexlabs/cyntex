@@ -36,6 +36,23 @@ public final class ControlOperations {
     // outside the registry. Reading topology mutates nothing, so it is read-scoped and unaudited.
     public static final Operation CLUSTER_MEMBERS = new Operation("cluster.members", Scope.READ, false, null, CLI_POC);
 
+    // pipeline domain: the four lifecycle verbs. Each writes the pipeline's desired state (an intent the
+    // runtime later converges), so all four are write-scoped and audited. There is no rewind verb — a
+    // re-dig is stop then start composed at the surface.
+    public static final Operation PIPELINE_START = new Operation("pipeline.start", Scope.WRITE, true, null, CLI_POC);
+    public static final Operation PIPELINE_STOP = new Operation("pipeline.stop", Scope.WRITE, true, null, CLI_POC);
+    public static final Operation PIPELINE_PAUSE = new Operation("pipeline.pause", Scope.WRITE, true, null, CLI_POC);
+    public static final Operation PIPELINE_RESUME = new Operation("pipeline.resume", Scope.WRITE, true, null, CLI_POC);
+
+    // pipeline observation reads: the four read faces. status/metrics/snapshot are store-backed over the
+    // per-pipeline observation doc (status = lifecycle state, metrics = open stat map, snapshot = per-table
+    // load progress); logs tails the node-local process log output for the pipeline. Each reads and mutates
+    // nothing, so all four are read-scoped and unaudited.
+    public static final Operation PIPELINE_STATUS = new Operation("pipeline.status", Scope.READ, false, null, CLI_POC);
+    public static final Operation PIPELINE_METRICS = new Operation("pipeline.metrics", Scope.READ, false, null, CLI_POC);
+    public static final Operation PIPELINE_SNAPSHOT = new Operation("pipeline.snapshot", Scope.READ, false, null, CLI_POC);
+    public static final Operation PIPELINE_LOGS = new Operation("pipeline.logs", Scope.READ, false, null, CLI_POC);
+
     // security domain: all admin-scoped. The mutating ones are audited; the list queries are not.
     public static final Operation USER_CREATE = new Operation("user.create", Scope.ADMIN, true, null, CLI_POC);
     public static final Operation USER_PASSWD = new Operation("user.passwd", Scope.ADMIN, true, null, CLI_POC);
@@ -50,6 +67,14 @@ public final class ControlOperations {
             ARTIFACT_LIST,
             CONNECTION_TEST,
             CLUSTER_MEMBERS,
+            PIPELINE_START,
+            PIPELINE_STOP,
+            PIPELINE_PAUSE,
+            PIPELINE_RESUME,
+            PIPELINE_STATUS,
+            PIPELINE_METRICS,
+            PIPELINE_SNAPSHOT,
+            PIPELINE_LOGS,
             USER_CREATE,
             USER_PASSWD,
             USER_LIST,

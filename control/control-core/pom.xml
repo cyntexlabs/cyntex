@@ -55,6 +55,21 @@
       <artifactId>core-catalog</artifactId>
       <version>${revision}</version>
     </dependency>
+    <!-- The pipeline lifecycle contract (core ring, R5): the four-verb state machine that validates a
+         transition, and the desired-intent record the lifecycle write verbs persist through the store. -->
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>core-lifecycle</artifactId>
+      <version>${revision}</version>
+    </dependency>
+    <!-- The node-local log tail (core ring, R5): the logs read face reads the in-process log sink
+         directly instead of the store — logs are node-local, not published cross-node like the other
+         observation reads. -->
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>core-logging</artifactId>
+      <version>${revision}</version>
+    </dependency>
 
     <!-- Test only. Production code stays framework-free (no Spring); versions come from the reactor BOM. -->
     <dependency>

@@ -77,6 +77,12 @@ dsl.malformed-yaml:
 lifecycle.illegal-transition:
   message: "Cannot {verb} a pipeline in state {from}."
   solution: "Only certain actions are valid from each state; check the pipeline's current state first."
+lifecycle.incompatible-revision:
+  message: "The pipeline's revision {requested} is not compatible with the latest applied revision {latest}."
+  solution: "Re-apply the pipeline so its revision matches the latest applied one, then retry."
+lifecycle.unknown-pipeline:
+  message: "No pipeline named {pipeline} is applied."
+  solution: "Apply the pipeline before running a lifecycle verb on it, and check the id for typos."
 role.unsupported:
   message: "Unsupported --role value '{role}'."
   solution: "L1 runs the whole platform in one process; use --role=all (the default)."
@@ -140,6 +146,12 @@ control.malformed-request:
 control.unauthenticated:
   message: "This operation requires authentication."
   solution: "Sign in with `login` to obtain a session token, or present a machine token with `--token`."
+engine.no-such-job:
+  message: "Pipeline {pipeline} has no running job to act on."
+  solution: "Start the pipeline before pausing or resuming it, and check the id for typos."
+monitor.no-observation:
+  message: "No observation is available for pipeline {pipeline}."
+  solution: "Check the pipeline id for typos; a freshly started pipeline may take a moment to publish its first observation."
 transform.expression-failed:
   message: "Expression {expr} could not be evaluated for a row: {detail}."
   solution: "Check the expression against the fields and types the row actually carries at runtime."

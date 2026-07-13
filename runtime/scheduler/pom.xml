@@ -13,4 +13,30 @@
   <artifactId>scheduler</artifactId>
   <name>Cyntex :: Runtime :: Scheduler</name>
   <description>Convergence-side controller host (placement / ownership / failover); placeholder, controllers land later</description>
+
+  <dependencies>
+    <!-- The checkpoint + fencing-CAS model and the actual-state serializer the loop drives (rule R4: core only). -->
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>core-lifecycle</artifactId>
+      <version>${revision}</version>
+    </dependency>
+    <!-- The desired-intent and pipeline-state ports the loop reads and converges through (rule R4: spi only). -->
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>spi-store</artifactId>
+      <version>${revision}</version>
+    </dependency>
+
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.assertj</groupId>
+      <artifactId>assertj-core</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
 </project>

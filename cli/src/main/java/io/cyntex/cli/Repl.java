@@ -16,10 +16,12 @@ import java.io.UncheckedIOException;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.TreeMap;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
@@ -42,14 +44,18 @@ final class Repl {
             List.of("help", "exit", "quit", "cd", "pwd", "connect", "disconnect", "login", "logout");
 
     /**
-     * Registry verbs a connected session routes to the server instead of the offline command table. Each
-     * is the CLI projection of an {@code artifact.*} operation ({@code apply} = {@code artifact.apply},
-     * {@code get} = {@code artifact.get}, {@code ls} = {@code artifact.list}). Offline they fall through to
-     * the table, where {@code apply} / {@code get} report "requires a connection" and {@code ls} browses
-     * the local workspace. {@code validate} is not here — it runs the full local stack in either state
-     * until a server validate endpoint exists.
+     * Registry verbs a connected session routes to the server instead of the offline command table. The
+     * artifact verbs ({@code apply} = {@code artifact.apply}, {@code get} = {@code artifact.get},
+     * {@code ls} = {@code artifact.list}), the four pipeline lifecycle verbs ({@code start} / {@code stop}
+     * / {@code pause} / {@code resume} = {@code pipeline.*}), and the three observation read faces
+     * ({@code status} / {@code metrics} / {@code snapshot} = {@code pipeline.status} / {@code pipeline.metrics}
+     * / {@code pipeline.snapshot}). Offline they fall through to the table, where {@code apply} / {@code get},
+     * the lifecycle verbs and the read faces report "requires a connection" and {@code ls} browses the local
+     * workspace. {@code validate} is not here — it runs the full local stack in either state until a server
+     * validate endpoint exists.
      */
-    private static final List<String> ONLINE_VERBS = List.of("apply", "get", "ls");
+    private static final List<String> ONLINE_VERBS = List.of(
+            "apply", "get", "ls", "start", "stop", "pause", "resume", "status", "metrics", "snapshot", "logs");
 
     private final CommandLine commandLine;
 
@@ -64,6 +70,13 @@ final class Repl {
 
     /** The session workspace: the current {@code cd} directory, injected into workspace-aware verbs. */
     private Path workdir;
+
+    /**
+     * Set by the terminal's interrupt handler to stop an in-flight {@code --watch} / {@code --follow}
+     * stream; reset at the start of each stream. Volatile because the interrupt handler runs on another
+     * thread than the stream loop that polls it.
+     */
+    private volatile boolean streamCancelled;
 
     Repl(CommandLine commandLine) {
         this(commandLine, WorkspaceOption.resolve());
@@ -92,6 +105,15 @@ final class Repl {
     /** The current connection state. */
     Session session() {
         return session;
+    }
+
+    /** Requests any in-flight {@code --watch} / {@code --follow} stream to stop; wired to Ctrl-C in {@link #run}. */
+    void cancelStream() {
+        streamCancelled = true;
+    }
+
+    private boolean isStreamCancelled() {
+        return streamCancelled;
     }
 
     /**
@@ -174,6 +196,16 @@ final class Repl {
             Diagnostics.printText(err, CliError.NOT_AUTHENTICATED, Map.of("verb", words.get(0)));
             return;
         }
+        // The two streaming sugars ride the read verbs over the websocket channel: `status --watch` and
+        // `logs --follow`. They are the only dash-options a connected verb accepts, and only on their verb.
+        if (words.get(0).equals("status") && words.contains("--watch")) {
+            statusWatch(words);
+            return;
+        }
+        if (words.get(0).equals("logs") && words.contains("--follow")) {
+            logsFollow(words);
+            return;
+        }
         // The connected verbs take positional operands only; a dash-option (e.g. `-o json`) is not yet
         // supported and must not be silently misread as an id / kind / path.
         for (int i = 1; i < words.size(); i++) {
@@ -187,7 +219,43 @@ final class Repl {
             case "apply" -> applyOnline(words);
             case "get" -> getOnline(words);
             case "ls" -> lsOnline(words);
+            case "start", "stop", "pause", "resume" -> lifecycleOnline(words);
+            case "status" -> statusOnline(words);
+            case "metrics" -> metricsOnline(words);
+            case "snapshot" -> snapshotOnline(words);
+            case "logs" -> logsOnline(words);
             default -> throw new IllegalStateException("not an online verb: " + words.get(0));
+        }
+    }
+
+    /**
+     * {@code <verb> <pipeline-id>} — issues a pipeline lifecycle verb (start / stop / pause / resume) on the
+     * server and prints the pipeline's new desired state ({@code <id>  <state>}). A missing id is a benign
+     * usage line; a coded refusal — an unknown pipeline, a transition the state machine forbids, or a
+     * start/resume at a stale revision — renders its code and message. On a request the landing node cannot
+     * answer, {@link #withFailover} re-lands and retries once. There is no {@code rewind} verb: a re-dig is
+     * the explicit two-step {@code stop} then {@code start}.
+     */
+    private void lifecycleOnline(List<String> words) {
+        String verb = words.get(0);
+        PrintWriter err = commandLine.getErr();
+        if (words.size() < 2 || words.get(1).isBlank()) {
+            err.println(verb + ": missing operand (usage: " + verb + " <pipeline-id>)");
+            err.flush();
+            return;
+        }
+        String id = words.get(1);
+        LifecycleOutcome outcome = withFailover(() ->
+                controlPlane.lifecycle(session.landingNode(), session.credential(), id, verb),
+                o -> o instanceof LifecycleOutcome.Unreachable);
+        PrintWriter out = commandLine.getOut();
+        switch (outcome) {
+            case LifecycleOutcome.Accepted accepted -> {
+                out.println(accepted.pipelineId() + "  " + accepted.targetState().toLowerCase(Locale.ROOT));
+                out.flush();
+            }
+            case LifecycleOutcome.Rejected rejected -> renderRejection(rejected.code(), rejected.message());
+            case LifecycleOutcome.Unreachable ignored -> reportRequestFailed();
         }
     }
 
@@ -286,6 +354,212 @@ final class Repl {
             case ListOutcome.Rejected rejected -> renderRejection(rejected.code(), rejected.message());
             case ListOutcome.Unreachable ignored -> reportRequestFailed();
         }
+    }
+
+    /**
+     * {@code status <pipeline-id>} — reads the pipeline's lifecycle state from the server and prints
+     * {@code <id>  <state>}. A missing id is a benign usage line; a pipeline that has published no
+     * observation is a coded refusal ({@code monitor.no-observation}) rendering its code and message.
+     */
+    private void statusOnline(List<String> words) {
+        String id = readTargetId(words);
+        if (id == null) {
+            return;
+        }
+        StatusOutcome outcome = withFailover(() ->
+                controlPlane.status(session.landingNode(), session.credential(), id),
+                o -> o instanceof StatusOutcome.Unreachable);
+        PrintWriter out = commandLine.getOut();
+        switch (outcome) {
+            case StatusOutcome.Found found -> {
+                out.println(found.pipelineId() + "  " + found.state().toLowerCase(Locale.ROOT));
+                out.flush();
+            }
+            case StatusOutcome.Rejected rejected -> renderRejection(rejected.code(), rejected.message());
+            case StatusOutcome.Unreachable ignored -> reportRequestFailed();
+        }
+    }
+
+    /**
+     * {@code metrics <pipeline-id>} — reads the pipeline's open map of run statistics and prints one
+     * {@code <name>  <value>} line per metric in name order, or a benign {@code no metrics} line when none
+     * are wired yet (unavailable, never faked). A coded refusal renders its code and message.
+     */
+    private void metricsOnline(List<String> words) {
+        String id = readTargetId(words);
+        if (id == null) {
+            return;
+        }
+        MetricsOutcome outcome = withFailover(() ->
+                controlPlane.metrics(session.landingNode(), session.credential(), id),
+                o -> o instanceof MetricsOutcome.Unreachable);
+        PrintWriter out = commandLine.getOut();
+        switch (outcome) {
+            case MetricsOutcome.Found found -> {
+                if (found.metrics().isEmpty()) {
+                    out.println("no metrics");
+                } else {
+                    new TreeMap<>(found.metrics()).forEach((name, value) -> out.println(name + "  " + value));
+                }
+                out.flush();
+            }
+            case MetricsOutcome.Rejected rejected -> renderRejection(rejected.code(), rejected.message());
+            case MetricsOutcome.Unreachable ignored -> reportRequestFailed();
+        }
+    }
+
+    /**
+     * {@code snapshot <pipeline-id>} — reads the pipeline's per-table initial-load progress and prints one
+     * {@code <table>  <rowsDone>/<rowsTotal> (<pct>%)} line per table in name order (a table with no total
+     * shows {@code <rowsDone>/?} — honest partial data), or a benign {@code no snapshot} line when there is
+     * none. A coded refusal renders its code and message.
+     */
+    private void snapshotOnline(List<String> words) {
+        String id = readTargetId(words);
+        if (id == null) {
+            return;
+        }
+        SnapshotOutcome outcome = withFailover(() ->
+                controlPlane.snapshot(session.landingNode(), session.credential(), id),
+                o -> o instanceof SnapshotOutcome.Unreachable);
+        PrintWriter out = commandLine.getOut();
+        switch (outcome) {
+            case SnapshotOutcome.Found found -> {
+                if (found.tables().isEmpty()) {
+                    out.println("no snapshot");
+                } else {
+                    new TreeMap<>(found.tables()).forEach((table, progress) ->
+                            out.println(table + "  " + renderProgress(progress)));
+                }
+                out.flush();
+            }
+            case SnapshotOutcome.Rejected rejected -> renderRejection(rejected.code(), rejected.message());
+            case SnapshotOutcome.Unreachable ignored -> reportRequestFailed();
+        }
+    }
+
+    private void logsOnline(List<String> words) {
+        String id = readTargetId(words);
+        if (id == null) {
+            return;
+        }
+        LogsOutcome outcome = withFailover(() ->
+                controlPlane.logs(session.landingNode(), session.credential(), id),
+                o -> o instanceof LogsOutcome.Unreachable);
+        PrintWriter out = commandLine.getOut();
+        switch (outcome) {
+            case LogsOutcome.Found found -> {
+                if (found.lines().isEmpty()) {
+                    out.println("no logs");
+                } else {
+                    found.lines().forEach(line -> out.println(renderLogLine(line)));
+                }
+                out.flush();
+            }
+            case LogsOutcome.Rejected rejected -> renderRejection(rejected.code(), rejected.message());
+            case LogsOutcome.Unreachable ignored -> reportRequestFailed();
+        }
+    }
+
+    /** One tailed line as {@code <iso-timestamp> <level> <message>}. */
+    private static String renderLogLine(RemoteLogLine line) {
+        return Instant.ofEpochMilli(line.timestampMillis()) + "  " + line.level() + "  " + line.message();
+    }
+
+    /**
+     * {@code status <pipeline-id> --watch} — streams the pipeline's lifecycle state and each subsequent
+     * change over the websocket, printing {@code <id>  <state>} per frame, until the connection ends or the
+     * user interrupts (Ctrl-C). A missing id is a benign usage line. The state stream re-attaches across a
+     * dropped connection; nothing is printed until the pipeline has published an observation.
+     */
+    private void statusWatch(List<String> words) {
+        String id = streamTargetId(words, "--watch");
+        if (id == null) {
+            return;
+        }
+        PrintWriter out = commandLine.getOut();
+        streamCancelled = false;
+        controlPlane.watchStatus(session.landingNode(), session.credential(), id,
+                (pipelineId, state) -> {
+                    out.println(pipelineId + "  " + state.toLowerCase(Locale.ROOT));
+                    out.flush();
+                },
+                this::isStreamCancelled);
+    }
+
+    /**
+     * {@code logs <pipeline-id> --follow} — streams the pipeline's node-local log tail and each newly
+     * appended line over the websocket ({@code tail -f}), until the connection ends or the user interrupts
+     * (Ctrl-C). A missing id is a benign usage line.
+     */
+    private void logsFollow(List<String> words) {
+        String id = streamTargetId(words, "--follow");
+        if (id == null) {
+            return;
+        }
+        PrintWriter out = commandLine.getOut();
+        streamCancelled = false;
+        controlPlane.followLogs(session.landingNode(), session.credential(), id,
+                (pipelineId, lines) -> {
+                    lines.forEach(line -> out.println(renderLogLine(line)));
+                    out.flush();
+                },
+                this::isStreamCancelled);
+    }
+
+    /**
+     * The pipeline id operand for a streaming verb ({@code <verb> <pipeline-id> <flag>}), the {@code flag}
+     * ignored wherever it appears; or {@code null} after a benign line when the id is missing or an
+     * unsupported option is present.
+     */
+    private String streamTargetId(List<String> words, String flag) {
+        PrintWriter err = commandLine.getErr();
+        String id = null;
+        for (int i = 1; i < words.size(); i++) {
+            String word = words.get(i);
+            if (word.equals(flag)) {
+                continue;
+            }
+            if (word.startsWith("-")) {
+                err.println(words.get(0) + ": options are not supported on a connected verb yet");
+                err.flush();
+                return null;
+            }
+            if (id == null) {
+                id = word;
+            }
+        }
+        if (id == null || id.isBlank()) {
+            err.println(words.get(0) + ": missing operand (usage: " + words.get(0) + " <pipeline-id> " + flag + ")");
+            err.flush();
+            return null;
+        }
+        return id;
+    }
+
+    /**
+     * The pipeline id operand shared by the observation read verbs ({@code <verb> <pipeline-id>}), or
+     * {@code null} after a benign usage line when it is missing — a read names exactly one pipeline.
+     */
+    private String readTargetId(List<String> words) {
+        if (words.size() < 2 || words.get(1).isBlank()) {
+            PrintWriter err = commandLine.getErr();
+            err.println(words.get(0) + ": missing operand (usage: " + words.get(0) + " <pipeline-id>)");
+            err.flush();
+            return null;
+        }
+        return words.get(1);
+    }
+
+    /**
+     * One table's snapshot progress: {@code rowsDone/rowsTotal (donePct%)} when the total is known, or
+     * {@code rowsDone/?} when it is unavailable — honest partial data, never faked as a percentage.
+     */
+    private static String renderProgress(RemoteTableSnapshot progress) {
+        if (progress.rowsTotal() != null && progress.donePct() != null) {
+            return progress.rowsDone() + "/" + progress.rowsTotal() + " (" + progress.donePct() + "%)";
+        }
+        return progress.rowsDone() + "/?";
     }
 
     /**
@@ -620,6 +894,10 @@ final class Repl {
                     .terminal(terminal)
                     .completer(CyntexCompleter.forRepl(commandLine, SchemaNavigator.bundled()))
                     .build();
+            // Ctrl-C stops an in-flight watch/follow stream. The line reader saves and restores the signal
+            // handlers around readLine (where Ctrl-C stays "clear the line"), so this handler is active only
+            // while a dispatched verb runs -- exactly when a stream is blocking the loop.
+            terminal.handle(Terminal.Signal.INT, signal -> cancelStream());
             while (true) {
                 String line;
                 try {
