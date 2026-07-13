@@ -31,6 +31,14 @@ public final class ControlOperations {
     // latest persisted result (or a 404 when the connection was never probed), mutates nothing, and is
     // read and unaudited. connection.test / connection.test-result answer "does it connect"; their pair
     // connection.discover-schema / connection.schema answer "what is inside" (the discovered source model).
+
+    // source domain
+    public static final Operation SOURCE_CREATE = new Operation("source.create", Scope.WRITE, true, null, CLI_POC);
+    public static final Operation SOURCE_LIST = new Operation("source.list", Scope.READ, false, null, CLI_POC);
+    public static final Operation SOURCE_GET = new Operation("source.get", Scope.READ, false, null, CLI_POC);
+    public static final Operation SOURCE_UPDATE = new Operation("source.update", Scope.WRITE, true, null, CLI_POC);
+    public static final Operation SOURCE_DELETE = new Operation("source.delete", Scope.WRITE, true, null, CLI_POC);
+
     public static final Operation CONNECTION_TEST = new Operation("connection.test", Scope.WRITE, true, null, CLI_POC);
     public static final Operation CONNECTION_TEST_RESULT =
             new Operation("connection.test-result", Scope.READ, false, null, CLI_POC);
@@ -86,6 +94,11 @@ public final class ControlOperations {
             ARTIFACT_APPLY,
             ARTIFACT_GET,
             ARTIFACT_LIST,
+            SOURCE_CREATE,
+            SOURCE_LIST,
+            SOURCE_GET,
+            SOURCE_UPDATE,
+            SOURCE_DELETE,
             CONNECTION_TEST,
             CONNECTION_TEST_RESULT,
             CONNECTION_DISCOVER_SCHEMA,
