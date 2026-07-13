@@ -1,5 +1,6 @@
 package io.cyntex.app;
 
+import io.cyntex.runtime.scheduler.LifecycleActuator;
 import io.cyntex.runtime.scheduler.ObservationPublisher;
 import io.cyntex.runtime.scheduler.PipelineConverger;
 import io.cyntex.spi.store.StorePort;
@@ -26,8 +27,8 @@ import java.time.Clock;
 class RuntimeConvergenceConfiguration {
 
     @Bean
-    PipelineConverger pipelineConverger(StorePort storePort, Clock clock) {
-        return new PipelineConverger(storePort.desired(), storePort.state(), clock);
+    PipelineConverger pipelineConverger(StorePort storePort, LifecycleActuator lifecycleActuator, Clock clock) {
+        return new PipelineConverger(storePort.desired(), storePort.state(), lifecycleActuator, clock);
     }
 
     @Bean

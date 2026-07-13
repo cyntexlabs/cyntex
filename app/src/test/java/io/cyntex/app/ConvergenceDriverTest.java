@@ -31,7 +31,7 @@ class ConvergenceDriverTest {
     private final InMemoryStateStore state = new InMemoryStateStore();
     private final InMemoryObservationStore observations = new InMemoryObservationStore();
     private final PipelineConverger converger =
-            new PipelineConverger(desired, state, Clock.fixed(T0, ZoneOffset.UTC));
+            new PipelineConverger(desired, state, new NoOpActuator(), Clock.fixed(T0, ZoneOffset.UTC));
     private final ConvergenceDriver driver =
             new ConvergenceDriver(converger, desired, new ObservationPublisher(state, observations));
 

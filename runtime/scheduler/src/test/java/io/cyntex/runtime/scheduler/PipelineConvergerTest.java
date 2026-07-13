@@ -35,8 +35,9 @@ class PipelineConvergerTest {
 
     private final InMemoryDesiredStore desired = new InMemoryDesiredStore();
     private final InMemoryStateStore state = new InMemoryStateStore();
+    private final RecordingActuator actuator = new RecordingActuator();
     private final PipelineConverger converger =
-            new PipelineConverger(desired, state, Clock.fixed(T0, ZoneOffset.UTC));
+            new PipelineConverger(desired, state, actuator, Clock.fixed(T0, ZoneOffset.UTC));
 
     @Test
     @DisplayName("with no desired intent there is nothing to converge and no checkpoint is written")
@@ -168,6 +169,67 @@ class PipelineConvergerTest {
 
         assertThat(result.status()).isEqualTo(NOTHING_TO_DO);
         assertThat(state.read("p1")).isEmpty();
+    }
+
+    @Test
+    @DisplayName("driving a fresh pipeline to RUNNING starts its data-plane job")
+    void startingActuatesStart() {
+        desired.save(new DesiredState("p1", RUNNING, REV));
+
+        converger.converge("p1");
+
+        assertThat(actuator.calls()).containsExactly("start:p1");
+    }
+
+    @Test
+    @DisplayName("pausing a running pipeline suspends its job, and resuming it resumes the job")
+    void pauseThenResumeActuatesSuspendThenResume() {
+        converge(RUNNING);
+        converge(PAUSED);
+        converge(RUNNING);
+
+        assertThat(actuator.calls()).containsExactly("start:p1", "pause:p1", "resume:p1");
+    }
+
+    @Test
+    @DisplayName("stopping a pipeline cancels its job")
+    void stoppingActuatesStop() {
+        converge(RUNNING);
+        converge(STOPPED);
+
+        assertThat(actuator.calls()).containsExactly("start:p1", "stop:p1");
+    }
+
+    @Test
+    @DisplayName("a re-dig — stop then start — cancels the job then submits a fresh one")
+    void rewindActuatesStopThenStart() {
+        converge(RUNNING);
+        converge(STOPPED);
+        converge(RUNNING);
+
+        assertThat(actuator.calls()).containsExactly("start:p1", "stop:p1", "start:p1");
+    }
+
+    @Test
+    @DisplayName("a converge pass that changes no state actuates nothing")
+    void idempotentConvergeActuatesNothing() {
+        converge(RUNNING);
+        actuator.reset();
+
+        converger.converge("p1"); // already RUNNING: no transition, no actuation
+
+        assertThat(actuator.calls()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("marking a pipeline completed stops its job")
+    void markCompletedActuatesStop() {
+        converge(RUNNING);
+        actuator.reset();
+
+        converger.markCompleted("p1");
+
+        assertThat(actuator.calls()).containsExactly("stop:p1");
     }
 
     private void converge(io.cyntex.core.lifecycle.PipelineState target) {

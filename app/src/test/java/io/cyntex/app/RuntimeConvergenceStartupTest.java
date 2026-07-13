@@ -1,5 +1,6 @@
 package io.cyntex.app;
 
+import io.cyntex.runtime.scheduler.LifecycleActuator;
 import io.cyntex.runtime.scheduler.PipelineConverger;
 import io.cyntex.spi.store.StorePort;
 import org.junit.jupiter.api.Test;
@@ -18,6 +19,7 @@ class RuntimeConvergenceStartupTest {
 
     private final ApplicationContextRunner runner = new ApplicationContextRunner()
             .withBean(StorePort.class, InMemoryStorePort::new)
+            .withBean(LifecycleActuator.class, NoOpActuator::new)
             .withBean(Clock.class, Clock::systemUTC)
             .withUserConfiguration(RuntimeConvergenceConfiguration.class);
 
