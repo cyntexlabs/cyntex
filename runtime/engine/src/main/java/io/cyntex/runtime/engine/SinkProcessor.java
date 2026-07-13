@@ -1,5 +1,6 @@
 package io.cyntex.runtime.engine;
 
+import com.hazelcast.function.ComparatorEx;
 import com.hazelcast.function.SupplierEx;
 import com.hazelcast.jet.core.AbstractProcessor;
 import com.hazelcast.jet.core.Inbox;
@@ -10,6 +11,7 @@ import io.cyntex.core.event.Envelope;
 import io.cyntex.spi.sink.SinkWriter;
 import io.cyntex.spi.sink.WriteResult;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -98,6 +100,22 @@ public final class SinkProcessor extends AbstractProcessor {
         SupplierEx<Processor> supplier =
                 () -> new SinkProcessor(writerFactory.get(), DEFAULT_MAX_IN_FLIGHT, DEFAULT_MAX_BATCH_SIZE);
         return ProcessorMetaSupplier.forceTotalParallelismOne(ProcessorSupplier.of(supplier));
+    }
+
+    /**
+     * A meta-supplier for a sink vertex that also advances a durable sink-ack watermark. The ack is carried
+     * as a {@link SinkAckFactory}, not a prebuilt {@link SinkAck}: the durable store it writes is not
+     * serializable, so only the factory travels on the DAG and the store is resolved on the member that runs
+     * the vertex. The vertex is pinned to total parallelism one and keeps a single write in flight, the
+     * order-preserving contract the contiguous-acked-prefix watermark depends on.
+     */
+    public static ProcessorMetaSupplier metaSupplier(SupplierEx<? extends SinkWriter> writerFactory,
+            SinkAckFactory sinkAckFactory, ComparatorEx<String> positionOrder) {
+        Objects.requireNonNull(writerFactory, "writerFactory");
+        Objects.requireNonNull(sinkAckFactory, "sinkAckFactory");
+        Objects.requireNonNull(positionOrder, "positionOrder");
+        return ProcessorMetaSupplier.forceTotalParallelismOne(
+                new AckSinkSupplier(writerFactory, sinkAckFactory, positionOrder));
     }
 
     @Override
@@ -206,5 +224,41 @@ public final class SinkProcessor extends AbstractProcessor {
     /** One outstanding write and the last source position each chain contributed to its batch. */
     private record InFlightBatch(
             CompletableFuture<WriteResult> future, Map<String, String> lastPositionByChain) {
+    }
+
+    /**
+     * Resolves the sink-ack member-side, then supplies the ack-bound sink processors. The factory travels
+     * serialized; only on the member - where {@link ProcessorSupplier#init} hands it the running instance -
+     * is the durable store resolved and the ack bound. The writer is likewise opened per processor on the
+     * member, so nothing but serializable coordinates crosses the wire.
+     */
+    private static final class AckSinkSupplier implements ProcessorSupplier {
+
+        private final SupplierEx<? extends SinkWriter> writerFactory;
+        private final SinkAckFactory sinkAckFactory;
+        private final ComparatorEx<String> positionOrder;
+        private transient SinkAck sinkAck;
+
+        AckSinkSupplier(SupplierEx<? extends SinkWriter> writerFactory,
+                SinkAckFactory sinkAckFactory, ComparatorEx<String> positionOrder) {
+            this.writerFactory = writerFactory;
+            this.sinkAckFactory = sinkAckFactory;
+            this.positionOrder = positionOrder;
+        }
+
+        @Override
+        public void init(Context context) {
+            sinkAck = sinkAckFactory.resolve(context.hazelcastInstance());
+        }
+
+        @Override
+        public Collection<? extends Processor> get(int count) {
+            List<Processor> processors = new ArrayList<>(count);
+            for (int i = 0; i < count; i++) {
+                processors.add(new SinkProcessor(writerFactory.get(), sinkAck, positionOrder,
+                        DEFAULT_MAX_IN_FLIGHT, DEFAULT_MAX_BATCH_SIZE));
+            }
+            return processors;
+        }
     }
 }
