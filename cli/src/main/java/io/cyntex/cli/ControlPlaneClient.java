@@ -2,6 +2,7 @@ package io.cyntex.cli;
 
 import java.net.URI;
 import java.util.List;
+import java.util.function.BooleanSupplier;
 
 /**
  * The CLI's transport seam to a running Cyntex server (rule R6: the CLI reaches services over HTTP
@@ -83,4 +84,21 @@ interface ControlPlaneClient {
      * I/O failure. Never throws.
      */
     LogsOutcome logs(URI baseUrl, String credential, String pipelineId);
+
+    /**
+     * Watches a pipeline's status over a websocket ({@code /api/pipelines/{pipelineId}/status/watch}),
+     * delivering each state — the current one, then each change — to {@code sink} until the stream ends or
+     * {@code stop} signals (a {@code true} return between frames). On a dropped connection after a
+     * successful handshake it re-attaches until stopped; a refused or unreachable handshake ends the watch.
+     * Blocks the caller until it returns. Never throws.
+     */
+    void watchStatus(URI baseUrl, String credential, String pipelineId, StatusStream sink, BooleanSupplier stop);
+
+    /**
+     * Follows a pipeline's node-local logs over a websocket ({@code /api/pipelines/{pipelineId}/logs/follow}),
+     * delivering each batch of newly appended lines to {@code sink} until the stream ends or {@code stop}
+     * signals. On a dropped connection after a successful handshake it re-attaches until stopped; a refused
+     * or unreachable handshake ends the follow. Blocks the caller until it returns. Never throws.
+     */
+    void followLogs(URI baseUrl, String credential, String pipelineId, LogStream sink, BooleanSupplier stop);
 }

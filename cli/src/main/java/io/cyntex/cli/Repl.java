@@ -71,6 +71,13 @@ final class Repl {
     /** The session workspace: the current {@code cd} directory, injected into workspace-aware verbs. */
     private Path workdir;
 
+    /**
+     * Set by the terminal's interrupt handler to stop an in-flight {@code --watch} / {@code --follow}
+     * stream; reset at the start of each stream. Volatile because the interrupt handler runs on another
+     * thread than the stream loop that polls it.
+     */
+    private volatile boolean streamCancelled;
+
     Repl(CommandLine commandLine) {
         this(commandLine, WorkspaceOption.resolve());
     }
@@ -98,6 +105,15 @@ final class Repl {
     /** The current connection state. */
     Session session() {
         return session;
+    }
+
+    /** Requests any in-flight {@code --watch} / {@code --follow} stream to stop; wired to Ctrl-C in {@link #run}. */
+    void cancelStream() {
+        streamCancelled = true;
+    }
+
+    private boolean isStreamCancelled() {
+        return streamCancelled;
     }
 
     /**
@@ -178,6 +194,16 @@ final class Repl {
         PrintWriter err = commandLine.getErr();
         if (!session.isAuthenticated()) {
             Diagnostics.printText(err, CliError.NOT_AUTHENTICATED, Map.of("verb", words.get(0)));
+            return;
+        }
+        // The two streaming sugars ride the read verbs over the websocket channel: `status --watch` and
+        // `logs --follow`. They are the only dash-options a connected verb accepts, and only on their verb.
+        if (words.get(0).equals("status") && words.contains("--watch")) {
+            statusWatch(words);
+            return;
+        }
+        if (words.get(0).equals("logs") && words.contains("--follow")) {
+            logsFollow(words);
             return;
         }
         // The connected verbs take positional operands only; a dash-option (e.g. `-o json`) is not yet
@@ -438,6 +464,77 @@ final class Repl {
     /** One tailed line as {@code <iso-timestamp> <level> <message>}. */
     private static String renderLogLine(RemoteLogLine line) {
         return Instant.ofEpochMilli(line.timestampMillis()) + "  " + line.level() + "  " + line.message();
+    }
+
+    /**
+     * {@code status <pipeline-id> --watch} — streams the pipeline's lifecycle state and each subsequent
+     * change over the websocket, printing {@code <id>  <state>} per frame, until the connection ends or the
+     * user interrupts (Ctrl-C). A missing id is a benign usage line. The state stream re-attaches across a
+     * dropped connection; nothing is printed until the pipeline has published an observation.
+     */
+    private void statusWatch(List<String> words) {
+        String id = streamTargetId(words, "--watch");
+        if (id == null) {
+            return;
+        }
+        PrintWriter out = commandLine.getOut();
+        streamCancelled = false;
+        controlPlane.watchStatus(session.landingNode(), session.credential(), id,
+                (pipelineId, state) -> {
+                    out.println(pipelineId + "  " + state.toLowerCase(Locale.ROOT));
+                    out.flush();
+                },
+                this::isStreamCancelled);
+    }
+
+    /**
+     * {@code logs <pipeline-id> --follow} — streams the pipeline's node-local log tail and each newly
+     * appended line over the websocket ({@code tail -f}), until the connection ends or the user interrupts
+     * (Ctrl-C). A missing id is a benign usage line.
+     */
+    private void logsFollow(List<String> words) {
+        String id = streamTargetId(words, "--follow");
+        if (id == null) {
+            return;
+        }
+        PrintWriter out = commandLine.getOut();
+        streamCancelled = false;
+        controlPlane.followLogs(session.landingNode(), session.credential(), id,
+                (pipelineId, lines) -> {
+                    lines.forEach(line -> out.println(renderLogLine(line)));
+                    out.flush();
+                },
+                this::isStreamCancelled);
+    }
+
+    /**
+     * The pipeline id operand for a streaming verb ({@code <verb> <pipeline-id> <flag>}), the {@code flag}
+     * ignored wherever it appears; or {@code null} after a benign line when the id is missing or an
+     * unsupported option is present.
+     */
+    private String streamTargetId(List<String> words, String flag) {
+        PrintWriter err = commandLine.getErr();
+        String id = null;
+        for (int i = 1; i < words.size(); i++) {
+            String word = words.get(i);
+            if (word.equals(flag)) {
+                continue;
+            }
+            if (word.startsWith("-")) {
+                err.println(words.get(0) + ": options are not supported on a connected verb yet");
+                err.flush();
+                return null;
+            }
+            if (id == null) {
+                id = word;
+            }
+        }
+        if (id == null || id.isBlank()) {
+            err.println(words.get(0) + ": missing operand (usage: " + words.get(0) + " <pipeline-id> " + flag + ")");
+            err.flush();
+            return null;
+        }
+        return id;
     }
 
     /**
@@ -797,6 +894,10 @@ final class Repl {
                     .terminal(terminal)
                     .completer(CyntexCompleter.forRepl(commandLine, SchemaNavigator.bundled()))
                     .build();
+            // Ctrl-C stops an in-flight watch/follow stream. The line reader saves and restores the signal
+            // handlers around readLine (where Ctrl-C stays "clear the line"), so this handler is active only
+            // while a dispatched verb runs -- exactly when a stream is blocking the loop.
+            terminal.handle(Terminal.Signal.INT, signal -> cancelStream());
             while (true) {
                 String line;
                 try {

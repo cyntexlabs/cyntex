@@ -83,6 +83,9 @@ class ReplTest {
         MetricsOutcome metricsOutcome = new MetricsOutcome.Unreachable();
         SnapshotOutcome snapshotOutcome = new SnapshotOutcome.Unreachable();
         LogsOutcome logsOutcome = new LogsOutcome.Unreachable();
+        /** The states a watch stream feeds, and the line batches a follow stream feeds, in order. */
+        List<String> watchStates = List.of();
+        List<List<RemoteLogLine>> followBatches = List.of();
         final List<String> applyCalls = new ArrayList<>();
         final List<String> getCalls = new ArrayList<>();
         final List<String> listCalls = new ArrayList<>();
@@ -91,6 +94,8 @@ class ReplTest {
         final List<String> metricsCalls = new ArrayList<>();
         final List<String> snapshotCalls = new ArrayList<>();
         final List<String> logsCalls = new ArrayList<>();
+        final List<String> watchCalls = new ArrayList<>();
+        final List<String> followCalls = new ArrayList<>();
 
         FakeControlPlane(URI... healthy) {
             this.healthy = new LinkedHashSet<>(List.of(healthy));
@@ -160,6 +165,30 @@ class ReplTest {
         public LogsOutcome logs(URI baseUrl, String credential, String pipelineId) {
             logsCalls.add(credential + "@" + baseUrl + "/" + pipelineId);
             return healthy.contains(baseUrl) ? logsOutcome : new LogsOutcome.Unreachable();
+        }
+
+        @Override
+        public void watchStatus(URI baseUrl, String credential, String pipelineId,
+                StatusStream sink, java.util.function.BooleanSupplier stop) {
+            watchCalls.add(credential + "@" + baseUrl + "/" + pipelineId);
+            for (String state : watchStates) {
+                if (stop.getAsBoolean()) {
+                    return;
+                }
+                sink.state(pipelineId, state);
+            }
+        }
+
+        @Override
+        public void followLogs(URI baseUrl, String credential, String pipelineId,
+                LogStream sink, java.util.function.BooleanSupplier stop) {
+            followCalls.add(credential + "@" + baseUrl + "/" + pipelineId);
+            for (List<RemoteLogLine> batch : followBatches) {
+                if (stop.getAsBoolean()) {
+                    return;
+                }
+                sink.lines(pipelineId, batch);
+            }
         }
     }
 
@@ -1120,6 +1149,47 @@ class ReplTest {
         int mark = h.sink().toString().length();
         h.repl().dispatch("logs pl1");
         assertThat(h.sink().toString().substring(mark)).contains("no logs");
+    }
+
+    // --- status --watch / logs --follow stream over the websocket channel ------------------------
+
+    @Test
+    void statusWatchStreamsEachStateToTheOutputInOrder() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.watchStates = List.of("RUNNING", "PAUSED");
+        Harness h = onlineSession(Path.of("cyn-work"), client);
+        int mark = h.sink().toString().length();
+        assertThat(h.repl().dispatch("status pl1 --watch")).isTrue();
+        String out = h.sink().toString().substring(mark);
+        assertThat(out).contains("running").contains("paused");
+        assertThat(out.indexOf("running")).isLessThan(out.indexOf("paused"));
+        assertThat(client.watchCalls).containsExactly("jwt-tok@http://node1:7900/pl1");
+    }
+
+    @Test
+    void logsFollowStreamsEachAppendedLineBatchToTheOutputInOrder() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.followBatches = List.of(
+                List.of(new RemoteLogLine(1_700_000_000_000L, "INFO", "submitted job")),
+                List.of(new RemoteLogLine(1_700_000_000_100L, "WARN", "slow tick")));
+        Harness h = onlineSession(Path.of("cyn-work"), client);
+        int mark = h.sink().toString().length();
+        assertThat(h.repl().dispatch("logs pl1 --follow")).isTrue();
+        String out = h.sink().toString().substring(mark);
+        assertThat(out).contains("submitted job").contains("slow tick");
+        assertThat(out.indexOf("submitted job")).isLessThan(out.indexOf("slow tick"));
+        assertThat(client.followCalls).containsExactly("jwt-tok@http://node1:7900/pl1");
+    }
+
+    @Test
+    void statusWatchWithoutAPipelineIdIsABenignUsageLineAndStreamsNothing() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.watchStates = List.of("RUNNING");
+        Harness h = onlineSession(Path.of("cyn-work"), client);
+        int mark = h.sink().toString().length();
+        assertThat(h.repl().dispatch("status --watch")).isTrue();
+        assertThat(h.sink().toString().substring(mark)).contains("missing operand");
+        assertThat(client.watchCalls).isEmpty();
     }
 
     @Test

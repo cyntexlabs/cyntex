@@ -8,12 +8,18 @@ import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.net.http.WebSocket;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletionStage;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.function.BooleanSupplier;
+import java.util.function.Consumer;
 
 /**
  * The production {@link ControlPlaneClient}, backed by the JDK HTTP client (no third-party
@@ -344,6 +350,155 @@ final class HttpControlPlaneClient implements ControlPlaneClient {
             return new LogsOutcome.Found(id, parsed);
         }
         return null;
+    }
+
+    // --- streaming reads over a websocket (status --watch / logs --follow) -----------------------
+
+    /** How long to wait after a live connection drops before re-attaching (same landing node in L1). */
+    private static final Duration RECONNECT_BACKOFF = Duration.ofSeconds(1);
+
+    /** How often the blocking stream loop wakes to check the stop signal while waiting. */
+    private static final Duration STOP_POLL = Duration.ofMillis(200);
+
+    @Override
+    public void watchStatus(URI baseUrl, String credential, String pipelineId,
+            StatusStream sink, BooleanSupplier stop) {
+        stream(wsUri(baseUrl, "/api/pipelines/" + pipelineId + "/status/watch"), credential, stop, frame -> {
+            StatusOutcome.Found found = statusFound(frame);
+            if (found != null) {
+                sink.state(found.pipelineId(), found.state());
+            }
+        });
+    }
+
+    @Override
+    public void followLogs(URI baseUrl, String credential, String pipelineId,
+            LogStream sink, BooleanSupplier stop) {
+        stream(wsUri(baseUrl, "/api/pipelines/" + pipelineId + "/logs/follow"), credential, stop, frame -> {
+            LogsOutcome.Found found = logsFound(frame);
+            if (found != null && !found.lines().isEmpty()) {
+                sink.lines(found.pipelineId(), found.lines());
+            }
+        });
+    }
+
+    /**
+     * Opens a websocket to {@code wsUri}, delivering each decoded text frame to {@code onFrame}, and blocks
+     * until {@code stop} signals. A refused or unreachable handshake ends the stream; a live connection that
+     * later drops is re-attached after a short backoff until stopped. Never throws.
+     */
+    private void stream(URI wsUri, String credential, BooleanSupplier stop, Consumer<String> onFrame) {
+        while (!stop.getAsBoolean()) {
+            CountDownLatch closed = new CountDownLatch(1);
+            WebSocket ws;
+            try {
+                ws = client().newWebSocketBuilder()
+                        .header("Authorization", "Bearer " + credential)
+                        .buildAsync(wsUri, new StreamListener(onFrame, closed))
+                        .join();
+            } catch (RuntimeException handshakeFailed) {
+                // join() wraps a refused (401/403) or unreachable handshake in a CompletionException (a
+                // RuntimeException); either way it cannot be streamed, so end the stream.
+                return;
+            }
+            awaitClosedOrStop(closed, stop);
+            ws.abort();
+            if (stop.getAsBoolean()) {
+                return;
+            }
+            // A live connection dropped (not a stop): re-attach after a short backoff.
+            if (!sleepUnlessStopped(RECONNECT_BACKOFF, stop)) {
+                return;
+            }
+        }
+    }
+
+    /** The {@code ws(s)} endpoint for {@code path} against an {@code http(s)} base, tolerating a trailing slash. */
+    static URI wsUri(URI baseUrl, String path) {
+        String base = baseUrl.toString();
+        if (base.endsWith("/")) {
+            base = base.substring(0, base.length() - 1);
+        }
+        String wsBase;
+        if (base.startsWith("https://")) {
+            wsBase = "wss://" + base.substring("https://".length());
+        } else if (base.startsWith("http://")) {
+            wsBase = "ws://" + base.substring("http://".length());
+        } else {
+            wsBase = base;   // already a ws / wss base
+        }
+        return URI.create(wsBase + path);
+    }
+
+    /** Waits until the connection closes or {@code stop} is signalled, whichever comes first. */
+    private static void awaitClosedOrStop(CountDownLatch closed, BooleanSupplier stop) {
+        try {
+            while (!stop.getAsBoolean()) {
+                if (closed.await(STOP_POLL.toMillis(), TimeUnit.MILLISECONDS)) {
+                    return;
+                }
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    /** Sleeps {@code duration} in short chunks; returns {@code false} the moment {@code stop} is signalled. */
+    private static boolean sleepUnlessStopped(Duration duration, BooleanSupplier stop) {
+        long remaining = duration.toMillis();
+        try {
+            while (remaining > 0) {
+                if (stop.getAsBoolean()) {
+                    return false;
+                }
+                long chunk = Math.min(remaining, STOP_POLL.toMillis());
+                Thread.sleep(chunk);
+                remaining -= chunk;
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return false;
+        }
+        return !stop.getAsBoolean();
+    }
+
+    /** A websocket listener that reassembles text frames and hands each complete one to a decoder. */
+    private static final class StreamListener implements WebSocket.Listener {
+        private final Consumer<String> onFrame;
+        private final CountDownLatch closed;
+        private final StringBuilder partial = new StringBuilder();
+
+        StreamListener(Consumer<String> onFrame, CountDownLatch closed) {
+            this.onFrame = onFrame;
+            this.closed = closed;
+        }
+
+        @Override
+        public CompletionStage<?> onText(WebSocket webSocket, CharSequence data, boolean last) {
+            partial.append(data);
+            if (last) {
+                String frame = partial.toString();
+                partial.setLength(0);
+                try {
+                    onFrame.accept(frame);
+                } catch (RuntimeException malformed) {
+                    // A malformed frame is dropped, never crashes the stream.
+                }
+            }
+            webSocket.request(1);
+            return null;
+        }
+
+        @Override
+        public void onError(WebSocket webSocket, Throwable error) {
+            closed.countDown();
+        }
+
+        @Override
+        public CompletionStage<?> onClose(WebSocket webSocket, int statusCode, String reason) {
+            closed.countDown();
+            return null;
+        }
     }
 
     /** A request builder for {@code path} against a base, carrying the timeout and the bearer credential. */

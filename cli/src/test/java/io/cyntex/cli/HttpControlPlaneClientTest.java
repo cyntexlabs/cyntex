@@ -80,6 +80,20 @@ class HttpControlPlaneClientTest {
         assertThat(new HttpControlPlaneClient().isHealthy(URI.create("http://foo:bar"))).isFalse();
     }
 
+    // --- stream endpoint URI: http(s) base -> ws(s) with the path appended ------------------------
+
+    @Test
+    void wsUriSwapsHttpForWsAndAppendsThePath() {
+        assertThat(HttpControlPlaneClient.wsUri(URI.create("http://node1:7900"), "/api/pipelines/pl1/status/watch"))
+                .isEqualTo(URI.create("ws://node1:7900/api/pipelines/pl1/status/watch"));
+    }
+
+    @Test
+    void wsUriSwapsHttpsForWssAndToleratesATrailingSlash() {
+        assertThat(HttpControlPlaneClient.wsUri(URI.create("https://node1:7900/"), "/api/pipelines/pl1/logs/follow"))
+                .isEqualTo(URI.create("wss://node1:7900/api/pipelines/pl1/logs/follow"));
+    }
+
     // --- login: POST /auth/login -----------------------------------------------------------------
 
     /** A server whose {@code /auth/login} records the request body and replies with a fixed status + body. */
