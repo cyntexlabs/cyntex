@@ -1412,6 +1412,29 @@ class ReplTest {
     }
 
     @Test
+    void registerUploadsADirectoryAsYamlWithAnArtifactArrayAndSummary(@TempDir Path workdir) throws Exception {
+        Path dir = Files.createDirectory(workdir.resolve("connectors"));
+        Files.write(dir.resolve("orders.jar"), new byte[] {1});
+        Files.write(dir.resolve("broken.jar"), new byte[] {1, 2, 3});
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.registerOutcomeByLength.put(1, new ConnectorRegisterOutcome.Registered(
+                new RegisteredConnector("orders", "h1", "1.0", true)));
+        client.registerOutcomeByLength.put(3, new ConnectorRegisterOutcome.Rejected(
+                "connector.spec-invalid", "bad spec"));
+        Harness h = onlineSession(workdir, client);
+        int mark = h.sink().toString().length();
+
+        assertThat(h.repl().dispatch("register connectors -o yaml")).isTrue();
+
+        String out = h.sink().toString().substring(mark);
+        assertThat(out).contains("artifacts:").contains("summary:")
+                .contains("artifact:").contains("orders.jar").contains("broken.jar")
+                .contains("connectorId:").contains("orders")
+                .contains("error:").contains("connector.spec-invalid")
+                .contains("total:");
+    }
+
+    @Test
     void registerOfADirectoryWithNoJarsReportsThatNoneWereFound(@TempDir Path workdir) throws Exception {
         Files.createDirectory(workdir.resolve("connectors"));
         FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
