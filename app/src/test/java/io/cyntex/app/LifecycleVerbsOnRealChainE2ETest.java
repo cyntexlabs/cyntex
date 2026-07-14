@@ -1,0 +1,382 @@
+package io.cyntex.app;
+
+import static io.cyntex.core.lifecycle.PipelineState.PAUSED;
+import static io.cyntex.core.lifecycle.PipelineState.RUNNING;
+import static io.cyntex.core.lifecycle.PipelineState.STOPPED;
+import static org.assertj.core.api.Assertions.assertThat;
+
+import com.hazelcast.config.Config;
+import com.hazelcast.config.InMemoryFormat;
+import com.hazelcast.config.RingbufferConfig;
+import com.hazelcast.config.SerializerConfig;
+import com.hazelcast.core.Hazelcast;
+import com.hazelcast.core.HazelcastInstance;
+import com.hazelcast.function.SupplierEx;
+import com.hazelcast.jet.Job;
+import com.hazelcast.jet.core.JobStatus;
+import io.cyntex.adapters.pdk.ConnectorProvisioner;
+import io.cyntex.control.core.PipelineObservationQueryService;
+import io.cyntex.control.core.PipelineStatus;
+import io.cyntex.core.event.Envelope;
+import io.cyntex.core.lifecycle.CheckpointDoc;
+import io.cyntex.core.lifecycle.DesiredState;
+import io.cyntex.core.lifecycle.PipelineState;
+import io.cyntex.core.lifecycle.StateJson;
+import io.cyntex.core.model.FromClause;
+import io.cyntex.core.model.FromRef;
+import io.cyntex.core.model.PipelineResource;
+import io.cyntex.core.model.ReadMode;
+import io.cyntex.core.model.ServeBlock;
+import io.cyntex.core.model.Settings;
+import io.cyntex.core.model.SourceMode;
+import io.cyntex.core.model.SourceResource;
+import io.cyntex.core.model.Step;
+import io.cyntex.core.model.SyncElement;
+import io.cyntex.core.model.TableRef;
+import io.cyntex.core.model.TransformBody;
+import io.cyntex.runtime.engine.Engine;
+import io.cyntex.runtime.scheduler.ObservationPublisher;
+import io.cyntex.runtime.scheduler.PipelineConverger;
+import io.cyntex.runtime.srs.CaptureRunUnit;
+import io.cyntex.runtime.srs.SnapshotBuffer;
+import io.cyntex.runtime.srs.SrsCoordinator;
+import io.cyntex.runtime.srs.SrsItem;
+import io.cyntex.runtime.srs.SrsItemSerializer;
+import io.cyntex.spi.capture.CaptureBatch;
+import io.cyntex.spi.capture.CaptureConfig;
+import io.cyntex.spi.capture.CaptureListener;
+import io.cyntex.spi.capture.CapturePort;
+import io.cyntex.spi.capture.ConnectionReport;
+import io.cyntex.spi.capture.DiscoveredSchema;
+import io.cyntex.spi.capture.Subscription;
+import io.cyntex.spi.sink.SinkWriter;
+import io.cyntex.spi.sink.TargetField;
+import io.cyntex.spi.sink.TargetTable;
+import io.cyntex.spi.sink.WriteResult;
+import io.cyntex.spi.store.DiscoveredSourceModel;
+import io.cyntex.spi.store.SourceField;
+import io.cyntex.spi.store.SourceModel;
+import io.cyntex.spi.store.SourceTable;
+import io.cyntex.spi.store.SrsMetaStore;
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneOffset;
+import java.util.ArrayList;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+
+/**
+ * The four lifecycle verbs (start / pause / resume / stop) driving a real assembled pipeline through the
+ * production converge loop, not a stand-in idle topology. It wires the same chain the {@code --role=all}
+ * process runs -- desired intent -> converge loop -> real {@link EngineLifecycleActuator} over a store-backed
+ * DAG and a real capture run -> Jet job, and converge loop -> observation -> read faces -- over one embedded
+ * member, and drives a data-carrying pipeline through all four verbs.
+ *
+ * <p>This closes the gap the idle-topology lifecycle proof leaves: there the verbs drive a job that moves no
+ * data; here they drive the real capture -> transform -> sink job. At each verb it witnesses the mapped Jet
+ * operation on the live job (RUNNING / SUSPENDED / RUNNING / cancelled), the store-backed read face reporting
+ * the converged state with a strictly increasing fencing epoch, and -- once running -- the seeded rows
+ * actually reaching the sink, so the verbs are shown acting on a real running pipeline and not an empty one.
+ */
+class LifecycleVerbsOnRealChainE2ETest {
+
+    private static final String PIPELINE = "orders-pipe";
+    private static final String SOURCE_ID = "orders_src";
+    private static final String DEST_ID = "orders_dest";
+    private static final String TABLE = "orders";
+    private static final String REV = "rev-1";
+    private static final Instant T0 = Instant.parse("2026-07-15T00:00:00Z");
+
+    private HazelcastInstance member;
+    private InMemoryStorePort store;
+    private ConvergenceDriver driver;
+    private PipelineObservationQueryService readFaces;
+
+    @BeforeEach
+    void startMember() {
+        Config config = new Config();
+        config.setClusterName("lifecycle-real-chain-" + System.nanoTime());
+        config.setProperty("hazelcast.phone.home.enabled", "false");
+        config.setProperty("hazelcast.shutdownhook.enabled", "false");
+        config.getNetworkConfig().getInterfaces().setEnabled(true).addInterface("127.0.0.1");
+        config.getNetworkConfig().getJoin().getAutoDetectionConfig().setEnabled(false);
+        config.getNetworkConfig().getJoin().getMulticastConfig().setEnabled(false);
+        config.getJetConfig().setEnabled(true).setCooperativeThreadCount(2);
+        config.addRingBufferConfig(new RingbufferConfig("srs.*")
+                .setCapacity(16)
+                .setInMemoryFormat(InMemoryFormat.OBJECT)
+                .setTimeToLiveSeconds(0)
+                .setBackupCount(0));
+        config.getSerializationConfig().addSerializerConfig(
+                new SerializerConfig().setImplementation(new SrsItemSerializer()).setTypeClass(SrsItem.class));
+        member = Hazelcast.newHazelcastInstance(config);
+        RecordingSink.reset();
+    }
+
+    @AfterEach
+    void stopMember() {
+        if (member != null) {
+            member.shutdown();
+        }
+    }
+
+    @Test
+    @DisplayName("start -> pause -> resume -> stop drives the real capture->transform->sink Jet job and the read faces reflect every transition")
+    void theFourVerbsDriveTheRealAssembledPipeline() {
+        store = seedPipelineAndSchema();
+        makeMemberCapable(store);
+        FakeSource source = new FakeSource(
+                List.of(read(1), read(2), read(3)),
+                List.of(insert(4), insert(5), insert(6)));
+        wireConvergeChain(source);
+
+        // start: the converger submits the real job; the seeded snapshot + cdc rows reach the sink.
+        desire(RUNNING);
+        Job job = member.getJet().getJob(PIPELINE);
+        assertThat(job).as("start submits the pipeline's Jet job").isNotNull();
+        awaitStatus(job, JobStatus.RUNNING);
+        awaitKeys("1", "2", "3", "4", "5", "6");
+        assertActualState(RUNNING, 1);
+        assertThat(readFaces.status(PIPELINE)).isEqualTo(new PipelineStatus(PIPELINE, RUNNING));
+
+        // pause: the live job suspends and the read face reports PAUSED.
+        desire(PAUSED);
+        awaitStatus(job, JobStatus.SUSPENDED);
+        assertActualState(PAUSED, 2);
+        assertThat(readFaces.status(PIPELINE)).isEqualTo(new PipelineStatus(PIPELINE, PAUSED));
+
+        // resume: the suspended job runs again and the read face reports RUNNING.
+        desire(RUNNING);
+        awaitStatus(job, JobStatus.RUNNING);
+        assertActualState(RUNNING, 3);
+        assertThat(readFaces.status(PIPELINE)).isEqualTo(new PipelineStatus(PIPELINE, RUNNING));
+
+        // stop: the job is cancelled (Jet reports a cancelled job as FAILED) and the read face reports STOPPED.
+        desire(STOPPED);
+        awaitStatus(job, JobStatus.FAILED);
+        assertActualState(STOPPED, 4);
+        assertThat(readFaces.status(PIPELINE)).isEqualTo(new PipelineStatus(PIPELINE, STOPPED));
+    }
+
+    // ---- wiring ------------------------------------------------------------------------
+
+    private void wireConvergeChain(FakeSource source) {
+        SrsCoordinator srsCoordinator = new SrsCoordinator(store.meta());
+        CaptureRunUnit captureRunUnit = new CaptureRunUnit(source, srsCoordinator, store.meta(), member);
+        PipelineCaptureCoordinator coordinator = new StoreBackedPipelineCaptureCoordinator(
+                store, captureRunUnit::start, srsCoordinator,
+                (SnapshotBuffer) member.getUserContext().get(SnapshotBuffer.USER_CONTEXT_KEY));
+        StoreBackedDagSource.SinkWriterBinder recordingSink =
+                (connectorId, settings, writeMode, ddl, target) -> (SupplierEx<SinkWriter>) () -> new RecordingSink(target);
+        DagSource dagSource = new StoreBackedDagSource(store, recordingSink);
+        EngineLifecycleActuator actuator = new EngineLifecycleActuator(new Engine(member), dagSource, coordinator);
+
+        Clock clock = Clock.fixed(T0, ZoneOffset.UTC);
+        PipelineConverger converger = new PipelineConverger(store.desired(), store.state(), actuator, clock);
+        ObservationPublisher publisher = new ObservationPublisher(store.state(), store.observations());
+        driver = new ConvergenceDriver(converger, store.desired(), publisher);
+        readFaces = new PipelineObservationQueryService(store.observations());
+    }
+
+    private InMemoryStorePort seedPipelineAndSchema() {
+        InMemoryArtifactStore artifacts = new InMemoryArtifactStore();
+        artifacts.save(new SourceResource(SOURCE_ID, null, "fake", Map.of("host", "h"), SourceMode.CDC,
+                List.of(TableRef.literal(TABLE)), null, null, null));
+        artifacts.save(new SourceResource(DEST_ID, null, "fake", Map.of("host", "d"), null, null, null, null, null));
+        artifacts.save(new PipelineResource(PIPELINE, null, List.of(SOURCE_ID),
+                List.of(Step.inline("keep_all", FromClause.list(FromRef.literal(SOURCE_ID)),
+                        new TransformBody.Filter("true"), null, null)),
+                null,
+                new ServeBlock.Inline(null, FromRef.literal("keep_all"),
+                        List.of(new SyncElement("sync_1", DEST_ID, null, null, null, null)), null, null),
+                new Settings(null, null, null, null, ReadMode.SNAPSHOT_AND_CDC, "earliest"), null));
+        InMemoryStorePort seeded = new InMemoryStorePort(artifacts);
+        seeded.schemas().save(new DiscoveredSourceModel(SOURCE_ID, "fake", 0L, new SourceModel(List.of(
+                new SourceTable(TABLE,
+                        List.of(new SourceField("id", "INT"), new SourceField("amount", "STRING")),
+                        List.of("id"),
+                        List.of())))));
+        return seeded;
+    }
+
+    private void makeMemberCapable(InMemoryStorePort seeded) {
+        member.getUserContext().put(CaptureRunUnit.SRS_META_USER_CONTEXT_KEY, seeded.meta());
+        ConnectorProvisioner provisioner = connectorId -> {
+            throw new UnsupportedOperationException("not resolved by this lifecycle test");
+        };
+        member.getUserContext().put(PdkSinkWriterFactory.CONNECTOR_PROVISIONER_USER_CONTEXT_KEY, provisioner);
+        member.getUserContext().put(SnapshotBuffer.USER_CONTEXT_KEY, new SnapshotBuffer());
+    }
+
+    /** Saves the pipeline's desired target and runs one reconcile pass, the tick the scheduled driver makes. */
+    private void desire(PipelineState target) {
+        store.desired().save(new DesiredState(PIPELINE, target, REV));
+        driver.reconcile();
+    }
+
+    private void assertActualState(PipelineState expected, long epoch) {
+        CheckpointDoc doc = store.state().read(PIPELINE).orElseThrow();
+        assertThat(doc.stateJson()).isEqualTo(StateJson.of(expected));
+        assertThat(doc.epoch()).as("the fencing epoch advances once per converged transition").isEqualTo(epoch);
+    }
+
+    private void awaitKeys(String... keys) {
+        Set<String> expected = Set.of(keys);
+        awaitCondition(() -> RecordingSink.keys().containsAll(expected),
+                () -> "timed out waiting for keys " + expected + " at the sink, have " + RecordingSink.keys());
+    }
+
+    private static void awaitStatus(Job job, JobStatus expected) {
+        long deadline = System.nanoTime() + Duration.ofSeconds(15).toNanos();
+        JobStatus last = null;
+        while (System.nanoTime() < deadline) {
+            last = job.getStatus();
+            if (last == expected) {
+                return;
+            }
+            sleep(25);
+        }
+        throw new AssertionError("job did not reach " + expected + " within budget; last status was " + last);
+    }
+
+    private static void awaitCondition(java.util.function.BooleanSupplier done, java.util.function.Supplier<String> onTimeout) {
+        long deadline = System.nanoTime() + Duration.ofSeconds(20).toNanos();
+        while (!done.getAsBoolean()) {
+            if (System.nanoTime() > deadline) {
+                throw new AssertionError(onTimeout.get());
+            }
+            sleep(50);
+        }
+    }
+
+    private static void sleep(long millis) {
+        try {
+            Thread.sleep(millis);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new AssertionError("interrupted awaiting a lifecycle condition", e);
+        }
+    }
+
+    private static Envelope read(int id) {
+        return Envelope.read(id, TABLE, Map.of("id", (long) id, "amount", "v" + id), Map.of());
+    }
+
+    private static Envelope insert(int id) {
+        return Envelope.insert(id, TABLE, Map.of("id", (long) id, "amount", "v" + id), Map.of());
+    }
+
+    /** A fake connector: a bounded snapshot batch and a fixed cdc stream driven synchronously when cdc starts. */
+    private static final class FakeSource implements CapturePort {
+
+        private final List<Envelope> snapshotRows;
+        private final List<Envelope> changes;
+
+        FakeSource(List<Envelope> snapshotRows, List<Envelope> changes) {
+            this.snapshotRows = snapshotRows;
+            this.changes = changes;
+        }
+
+        @Override
+        public CaptureBatch snapshot(CaptureConfig config) {
+            return new FakeBatch(snapshotRows);
+        }
+
+        @Override
+        public Subscription cdc(CaptureConfig config, CaptureListener listener) {
+            for (Envelope change : changes) {
+                listener.onEvent(change);
+            }
+            return () -> { };
+        }
+
+        @Override
+        public ConnectionReport testConnection(CaptureConfig config) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public DiscoveredSchema discoverSchema(CaptureConfig config) {
+            throw new UnsupportedOperationException();
+        }
+    }
+
+    /** A bounded snapshot batch over a fixed list of rows. */
+    private static final class FakeBatch implements CaptureBatch {
+
+        private final Iterator<Envelope> rows;
+
+        FakeBatch(List<Envelope> rows) {
+            this.rows = new ArrayList<>(rows).iterator();
+        }
+
+        @Override
+        public boolean hasNext() {
+            return rows.hasNext();
+        }
+
+        @Override
+        public Envelope next() {
+            return rows.next();
+        }
+
+        @Override
+        public void close() {
+        }
+    }
+
+    /**
+     * A sink that records into a JVM-static store keyed on the resolved target's primary-key columns, so the
+     * embedded run can assert which rows the built DAG delivered. Shared with the test thread on one member.
+     */
+    private static final class RecordingSink implements SinkWriter {
+
+        private static final Set<String> KEYS = ConcurrentHashMap.newKeySet();
+        private static final AtomicInteger TOTAL = new AtomicInteger();
+
+        private final List<String> keyColumns;
+
+        RecordingSink(TargetTable target) {
+            this.keyColumns = target.fields().stream()
+                    .filter(TargetField::primaryKey)
+                    .map(TargetField::name)
+                    .toList();
+        }
+
+        static void reset() {
+            KEYS.clear();
+            TOTAL.set(0);
+        }
+
+        static Set<String> keys() {
+            return Set.copyOf(KEYS);
+        }
+
+        @Override
+        public CompletionStage<WriteResult> write(List<Envelope> records) {
+            for (Envelope record : records) {
+                Map<String, Object> row = record.after() != null ? record.after() : record.before();
+                String key = keyColumns.stream().map(column -> String.valueOf(row.get(column)))
+                        .collect(java.util.stream.Collectors.joining("|"));
+                KEYS.add(key);
+                TOTAL.incrementAndGet();
+            }
+            return CompletableFuture.completedFuture(new WriteResult(records.size()));
+        }
+
+        @Override
+        public void close() {
+        }
+    }
+}
