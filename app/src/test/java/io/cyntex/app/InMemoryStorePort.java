@@ -13,19 +13,30 @@ import io.cyntex.spi.store.StateStore;
 import io.cyntex.spi.store.StorePort;
 
 /**
- * In-memory {@link StorePort} for the convergence wiring test: it supplies real desired, state and
- * observation sub-stores (what the converger consumes and the publisher writes); the artifact and
- * catalog sub-stores are not exercised here.
+ * In-memory {@link StorePort} for the assembly-layer tests: it supplies real desired, state and observation
+ * sub-stores (what the converger consumes and the publisher writes), plus a real artifact store and SRS meta
+ * store (what the data-plane capture and topology assembly read). The remaining sub-stores are not exercised
+ * and throw. The no-arg form allocates its own artifact store; the other takes a pre-seeded one.
  */
 final class InMemoryStorePort implements StorePort {
 
     private final InMemoryDesiredStore desired = new InMemoryDesiredStore();
     private final InMemoryStateStore state = new InMemoryStateStore();
     private final InMemoryObservationStore observations = new InMemoryObservationStore();
+    private final InMemoryArtifactStore artifacts;
+    private final InMemorySrsMetaStore meta = new InMemorySrsMetaStore();
+
+    InMemoryStorePort() {
+        this(new InMemoryArtifactStore());
+    }
+
+    InMemoryStorePort(InMemoryArtifactStore artifacts) {
+        this.artifacts = artifacts;
+    }
 
     @Override
     public ArtifactStore artifacts() {
-        throw new UnsupportedOperationException("artifacts are not exercised by the convergence wiring test");
+        return artifacts;
     }
 
     @Override
@@ -41,6 +52,11 @@ final class InMemoryStorePort implements StorePort {
     @Override
     public ObservationStore observations() {
         return observations;
+    }
+
+    @Override
+    public SrsMetaStore meta() {
+        return meta;
     }
 
     @Override
@@ -67,10 +83,5 @@ final class InMemoryStorePort implements StorePort {
     public ConnectionTestResultStore connectionTestResults() {
         throw new UnsupportedOperationException(
                 "connection test results are not exercised by the convergence wiring test");
-    }
-
-    @Override
-    public SrsMetaStore meta() {
-        throw new UnsupportedOperationException("the SRS meta store is not exercised by the convergence wiring test");
     }
 }

@@ -5,6 +5,7 @@ import com.hazelcast.config.InMemoryFormat;
 import com.hazelcast.config.JoinConfig;
 import com.hazelcast.config.RingbufferConfig;
 import com.hazelcast.core.HazelcastInstance;
+import io.cyntex.adapters.pdk.ConnectorProvisioner;
 import io.cyntex.runtime.srs.CaptureRunUnit;
 import io.cyntex.runtime.srs.SrsItem;
 import io.cyntex.runtime.srs.SrsItemSerializer;
@@ -122,7 +123,7 @@ class HazelcastMemberTest {
     void hazelcastMemberBindsTheMetaStoreIntoTheUserContext() {
         SrsMetaStore meta = new SentinelMetaStore();
         HazelcastInstance member = new HazelcastConfiguration()
-                .hazelcastMember(new HazelcastProperties(), meta);
+                .hazelcastMember(new HazelcastProperties(), meta, null);
         try {
             // The read-cursor publisher factory resolves the store member-side from the user context, so the
             // assembly root binds it under the well-known key -- otherwise cursor publishing silently no-ops.
@@ -135,11 +136,43 @@ class HazelcastMemberTest {
     @Test
     void hazelcastMemberLeavesTheUserContextUnboundWhenNoStoreIsConfigured() {
         HazelcastInstance member = new HazelcastConfiguration()
-                .hazelcastMember(new HazelcastProperties(), null);
+                .hazelcastMember(new HazelcastProperties(), null, null);
         try {
             // A run with no store (mongo disabled) binds nothing; the publisher then resolves no store and
             // cursor publishing is a documented no-op rather than a failure.
             assertThat(member.getUserContext()).doesNotContainKey(CaptureRunUnit.SRS_META_USER_CONTEXT_KEY);
+        } finally {
+            member.shutdown();
+        }
+    }
+
+    @Test
+    void hazelcastMemberBindsTheConnectorProvisionerIntoTheUserContext() {
+        ConnectorProvisioner provisioner = connectorId -> {
+            throw new UnsupportedOperationException("resolution is not exercised by this binding test");
+        };
+        HazelcastInstance member = new HazelcastConfiguration()
+                .hazelcastMember(new HazelcastProperties(), null, provisioner);
+        try {
+            // A sink-writer factory carried onto the Jet sink vertex resolves the provisioner member-side from
+            // the user context, so the assembly root binds it under the well-known key -- otherwise the member
+            // is not sink-capable and a sink open fails.
+            assertThat(member.getUserContext().get(PdkSinkWriterFactory.CONNECTOR_PROVISIONER_USER_CONTEXT_KEY))
+                    .isSameAs(provisioner);
+        } finally {
+            member.shutdown();
+        }
+    }
+
+    @Test
+    void hazelcastMemberLeavesTheProvisionerUnboundWhenNoneIsConfigured() {
+        HazelcastInstance member = new HazelcastConfiguration()
+                .hazelcastMember(new HazelcastProperties(), null, null);
+        try {
+            // A run with no provisioner (mongo disabled) binds nothing; the member is then not sink-capable and
+            // a sink open fails loudly rather than silently dropping writes.
+            assertThat(member.getUserContext())
+                    .doesNotContainKey(PdkSinkWriterFactory.CONNECTOR_PROVISIONER_USER_CONTEXT_KEY);
         } finally {
             member.shutdown();
         }

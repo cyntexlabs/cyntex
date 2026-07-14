@@ -7,27 +7,21 @@ import io.cyntex.adapters.transform.MapSpec;
 import io.cyntex.adapters.transform.StatelessTransforms;
 import io.cyntex.core.model.FromRef;
 import io.cyntex.core.model.PipelineResource;
-import io.cyntex.core.model.Resource;
 import io.cyntex.core.model.SourceResource;
 import io.cyntex.core.model.Step;
 import io.cyntex.core.model.SyncElement;
-import io.cyntex.core.model.TableRef;
 import io.cyntex.core.model.TransformBody;
 import io.cyntex.runtime.engine.DagBindings;
 import io.cyntex.runtime.engine.PipelineDagBuilder;
-import io.cyntex.runtime.srs.MiningChainId;
 import io.cyntex.runtime.srs.SrsReadCursorPublisherFactory;
-import io.cyntex.runtime.srs.SrsRingbuffer;
 import io.cyntex.runtime.srs.SrsSourceProcessor;
 import io.cyntex.runtime.srs.StartFrom;
-import io.cyntex.spi.capture.CaptureConfig;
 import io.cyntex.spi.sink.DdlPolicy;
 import io.cyntex.spi.sink.SinkWriter;
 import io.cyntex.spi.sink.WriteMode;
 import io.cyntex.spi.store.ArtifactStore;
 import io.cyntex.spi.store.StorePort;
 import io.cyntex.spi.transform.TransformPort;
-import io.cyntex.core.common.CyntexException;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -43,31 +37,32 @@ import java.util.Objects;
  * resolved connector coordinates and resolves the connector on the member that opens it. The reference and
  * leaf resolution itself runs here, on the assembly side, so nothing store-bound is shipped.
  *
+ * <p>The sink-writer factory is a constructor seam: production binds the PDK factory that resolves the
+ * connector member-side, while a data-flow test can bind a capturing sink so the topology runs without a real
+ * connector. Deriving the source's change-ring identity is delegated to the shared source resolution so the
+ * reader built here and the capture side that fills the ring land on the same ring.
+ *
  * <p>L1 shape: each source reads exactly one table, and a serve.sync element names a source id as its target
  * connection supplier. Start position defaults to the earliest buffered change.
  */
 final class StoreBackedDagSource implements DagSource {
 
     private final StorePort storePort;
+    private final SinkWriterBinder sinkWriterBinder;
 
     StoreBackedDagSource(StorePort storePort) {
+        this(storePort, PdkSinkWriterFactory::new);
+    }
+
+    StoreBackedDagSource(StorePort storePort, SinkWriterBinder sinkWriterBinder) {
         this.storePort = Objects.requireNonNull(storePort, "storePort");
+        this.sinkWriterBinder = Objects.requireNonNull(sinkWriterBinder, "sinkWriterBinder");
     }
 
     @Override
     public DAG dagFor(String pipelineId) {
-        PipelineResource pipeline = loadPipeline(pipelineId);
+        PipelineResource pipeline = StoredArtifacts.requirePipeline(artifacts(), pipelineId);
         return PipelineDagBuilder.build(pipeline, bindings());
-    }
-
-    private PipelineResource loadPipeline(String pipelineId) {
-        Resource resource = artifacts().get(pipelineId).orElseThrow(() -> new CyntexException(
-                ActuationError.PIPELINE_NOT_FOUND, Map.of("pipeline", pipelineId), null));
-        if (!(resource instanceof PipelineResource pipeline)) {
-            throw new CyntexException(ActuationError.NOT_A_PIPELINE,
-                    Map.of("pipeline", pipelineId, "kind", resource.kind()), null);
-        }
-        return pipeline;
     }
 
     /**
@@ -85,18 +80,15 @@ final class StoreBackedDagSource implements DagSource {
 
     /**
      * The source vertex for one source id: it resolves the source's connector, config and single table into
-     * the mining-chain identity and, from it, the per-table change ring the capture side writes. The stream
-     * name projected into each event is the table name. Deriving the same identity the capture side derives
-     * is what points the reader at the ring the writer fills.
+     * the per-table change ring the capture side writes. The stream name projected into each event is the
+     * table name. Resolving the same ring identity the capture side resolves is what points the reader at the
+     * ring the writer fills.
      */
     private ProcessorMetaSupplier sourceVertex(String sourceId) {
-        SourceResource source = loadSource(sourceId);
-        String table = singleTable(source);
-        CaptureConfig config = new CaptureConfig(source.connector(), source.config(), List.of(table));
-        String srsKey = source.srs() != null ? source.srs().key() : null;
-        String ringName = SrsRingbuffer.ringName(MiningChainId.resolve(config, srsKey).value(), table);
+        SourceCaptureResolution resolution =
+                SourceCaptureResolution.of(StoredArtifacts.requireSource(artifacts(), sourceId));
         return SrsSourceProcessor.metaSupplier(
-                ringName, table, StartFrom.earliest(), SrsReadCursorPublisherFactory.NONE);
+                resolution.ringName(), resolution.table(), StartFrom.earliest(), SrsReadCursorPublisherFactory.NONE);
     }
 
     /**
@@ -132,12 +124,12 @@ final class StoreBackedDagSource implements DagSource {
     /**
      * The sink-writer factory for one serve.sync element. The element names a source id as its target
      * connection supplier, so the connector and config come from that source; the write mode and ddl policy
-     * come from the element, defaulting to upsert and fail. The factory carries only these serializable
+     * come from the element, defaulting to upsert and fail. The bound factory carries only these serializable
      * coordinates and opens the connector on the member that runs the sink.
      */
     private SupplierEx<? extends SinkWriter> sinkWriter(SyncElement element) {
-        SourceResource target = loadSource(element.source());
-        return new PdkSinkWriterFactory(
+        SourceResource target = StoredArtifacts.requireSource(artifacts(), element.source());
+        return sinkWriterBinder.bind(
                 target.connector(), target.config(), writeMode(element.writeMode()), ddl(element.ddl()));
     }
 
@@ -151,31 +143,6 @@ final class StoreBackedDagSource implements DagSource {
             return List.of(literal.ref());
         }
         throw new IllegalStateException("regex from: reference is not carried by the linear L1 builder: " + ref);
-    }
-
-    private SourceResource loadSource(String sourceId) {
-        Resource resource = artifacts().get(sourceId).orElseThrow(() -> new IllegalStateException(
-                "source '" + sourceId + "' referenced by a pipeline is not in the store"));
-        if (!(resource instanceof SourceResource source)) {
-            throw new IllegalStateException("resource '" + sourceId
-                    + "' referenced as a source is a '" + resource.kind() + "'");
-        }
-        return source;
-    }
-
-    /** The one table an L1 source reads; a missing, multi-table or regex selector is out of scope here. */
-    private static String singleTable(SourceResource source) {
-        List<TableRef> tables = source.tables();
-        if (tables == null || tables.size() != 1) {
-            throw new IllegalStateException("source '" + source.id() + "' must read exactly one table, declares "
-                    + (tables == null ? 0 : tables.size()));
-        }
-        return switch (tables.get(0)) {
-            case TableRef.Literal literal -> literal.name();
-            case TableRef.Spec spec -> spec.name();
-            case TableRef.Regex regex -> throw new IllegalStateException("source '" + source.id()
-                    + "' selects tables by regex, which the linear L1 builder does not carry: " + regex.pattern());
-        };
     }
 
     private static WriteMode writeMode(io.cyntex.core.model.WriteMode mode) {
@@ -197,5 +164,17 @@ final class StoreBackedDagSource implements DagSource {
 
     private ArtifactStore artifacts() {
         return storePort.artifacts();
+    }
+
+    /**
+     * The seam that binds a serve.sync target's resolved connector coordinates to the sink-writer supplier
+     * shipped onto the DAG. Production binds the PDK factory that resolves the connector member-side; a test
+     * can bind a capturing sink so the topology runs without a real connector.
+     */
+    @FunctionalInterface
+    interface SinkWriterBinder {
+
+        SupplierEx<? extends SinkWriter> bind(
+                String connectorId, Map<String, Object> settings, WriteMode writeMode, DdlPolicy ddl);
     }
 }

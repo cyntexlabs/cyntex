@@ -22,17 +22,28 @@ import java.util.Optional;
  *   <li>{@code cdcSubscription} — the handle that stops the cdc stream, present whenever a tail runs (the
  *       shared-ring writer or the srs-disabled direct stream); closing it stops the capture.</li>
  * </ul>
+ *
+ * <p>The handle is itself {@link AutoCloseable}: closing it tears the running capture down by closing the
+ * cdc subscription it carries. A run that opened no tail (a snapshot-only or srs-disabled run) carries no
+ * subscription, so closing it is a safe no-op. The subscription contract stops the capture with no checked
+ * exception and is idempotent, so this close needs neither a throws clause nor its own guard.
  */
 public record CaptureRun(
         Optional<MiningChainId> chainId,
         boolean merged,
         long snapshotCount,
         Optional<StreamSource<SrsItem>> ringSource,
-        Optional<Subscription> cdcSubscription) {
+        Optional<Subscription> cdcSubscription) implements AutoCloseable {
 
     public CaptureRun {
         Objects.requireNonNull(chainId, "chainId");
         Objects.requireNonNull(ringSource, "ringSource");
         Objects.requireNonNull(cdcSubscription, "cdcSubscription");
+    }
+
+    /** Stops the capture by closing its cdc subscription, or does nothing when the run opened no tail. */
+    @Override
+    public void close() {
+        cdcSubscription.ifPresent(Subscription::close);
     }
 }
