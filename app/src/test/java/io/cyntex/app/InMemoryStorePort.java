@@ -25,6 +25,7 @@ final class InMemoryStorePort implements StorePort {
     private final InMemoryObservationStore observations = new InMemoryObservationStore();
     private final InMemoryArtifactStore artifacts;
     private final InMemorySrsMetaStore meta = new InMemorySrsMetaStore();
+    private final InMemorySchemaStore schemas = new InMemorySchemaStore();
 
     InMemoryStorePort() {
         this(new InMemoryArtifactStore());
@@ -66,7 +67,7 @@ final class InMemoryStorePort implements StorePort {
 
     @Override
     public SchemaStore schemas() {
-        throw new UnsupportedOperationException("schemas are not exercised by the convergence wiring test");
+        return schemas;
     }
 
     @Override

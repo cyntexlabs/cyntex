@@ -19,6 +19,7 @@ import io.cyntex.runtime.srs.SrsSourceProcessor;
 import io.cyntex.runtime.srs.StartFrom;
 import io.cyntex.spi.sink.DdlPolicy;
 import io.cyntex.spi.sink.SinkWriter;
+import io.cyntex.spi.sink.TargetTable;
 import io.cyntex.spi.sink.WriteMode;
 import io.cyntex.spi.store.ArtifactStore;
 import io.cyntex.spi.store.StorePort;
@@ -51,6 +52,7 @@ final class StoreBackedDagSource implements DagSource {
 
     private final StorePort storePort;
     private final SinkWriterBinder sinkWriterBinder;
+    private final TargetModelResolver targetModelResolver;
 
     StoreBackedDagSource(StorePort storePort) {
         this(storePort, PdkSinkWriterFactory::new);
@@ -59,12 +61,14 @@ final class StoreBackedDagSource implements DagSource {
     StoreBackedDagSource(StorePort storePort, SinkWriterBinder sinkWriterBinder) {
         this.storePort = Objects.requireNonNull(storePort, "storePort");
         this.sinkWriterBinder = Objects.requireNonNull(sinkWriterBinder, "sinkWriterBinder");
+        this.targetModelResolver = new TargetModelResolver(this.storePort);
     }
 
     @Override
     public DAG dagFor(String pipelineId) {
         PipelineResource pipeline = StoredArtifacts.requirePipeline(artifacts(), pipelineId);
-        return PipelineDagBuilder.build(pipeline, bindings(), sinkAckBinding(pipeline, pipelineId));
+        TargetTable target = targetModelResolver.resolve(pipeline).orElse(null);
+        return PipelineDagBuilder.build(pipeline, bindings(target), sinkAckBinding(pipeline, pipelineId));
     }
 
     /**
@@ -90,11 +94,11 @@ final class StoreBackedDagSource implements DagSource {
      * builder walks the topology; only the vertex suppliers they return travel onto the DAG, so they may
      * reach the store freely while what they produce stays serializable.
      */
-    private DagBindings bindings() {
+    private DagBindings bindings(TargetTable target) {
         return new DagBindings(
                 this::sourceVertex,
                 StoreBackedDagSource::transformPort,
-                this::sinkWriter,
+                element -> sinkWriter(element, target),
                 StoreBackedDagSource::upstreams);
     }
 
@@ -144,13 +148,15 @@ final class StoreBackedDagSource implements DagSource {
     /**
      * The sink-writer factory for one serve.sync element. The element names a source id as its target
      * connection supplier, so the connector and config come from that source; the write mode and ddl policy
-     * come from the element, defaulting to upsert and fail. The bound factory carries only these serializable
-     * coordinates and opens the connector on the member that runs the sink.
+     * come from the element, defaulting to upsert and fail. The resolved target model - the table the sink
+     * creates and the key an upsert matches on, resolved from the pipeline source's discovered model - travels
+     * with the binding, or is null when no model was discovered. The bound factory carries only these
+     * serializable coordinates and opens the connector on the member that runs the sink.
      */
-    private SupplierEx<? extends SinkWriter> sinkWriter(SyncElement element) {
-        SourceResource target = StoredArtifacts.requireSource(artifacts(), element.source());
+    private SupplierEx<? extends SinkWriter> sinkWriter(SyncElement element, TargetTable target) {
+        SourceResource sink = StoredArtifacts.requireSource(artifacts(), element.source());
         return sinkWriterBinder.bind(
-                target.connector(), target.config(), writeMode(element.writeMode()), ddl(element.ddl()));
+                sink.connector(), sink.config(), writeMode(element.writeMode()), ddl(element.ddl()), target);
     }
 
     /**
@@ -195,6 +201,7 @@ final class StoreBackedDagSource implements DagSource {
     interface SinkWriterBinder {
 
         SupplierEx<? extends SinkWriter> bind(
-                String connectorId, Map<String, Object> settings, WriteMode writeMode, DdlPolicy ddl);
+                String connectorId, Map<String, Object> settings, WriteMode writeMode, DdlPolicy ddl,
+                TargetTable target);
     }
 }

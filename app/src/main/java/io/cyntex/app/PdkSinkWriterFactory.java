@@ -8,6 +8,7 @@ import io.cyntex.adapters.pdk.PdkSinkPort;
 import io.cyntex.spi.sink.DdlPolicy;
 import io.cyntex.spi.sink.SinkConfig;
 import io.cyntex.spi.sink.SinkWriter;
+import io.cyntex.spi.sink.TargetTable;
 import io.cyntex.spi.sink.WriteMode;
 import java.util.Map;
 import java.util.Set;
@@ -39,18 +40,21 @@ final class PdkSinkWriterFactory implements SupplierEx<SinkWriter> {
     private final Map<String, Object> settings;
     private final WriteMode writeMode;
     private final DdlPolicy ddl;
+    private final TargetTable target;
 
-    PdkSinkWriterFactory(String connectorId, Map<String, Object> settings, WriteMode writeMode, DdlPolicy ddl) {
+    PdkSinkWriterFactory(
+            String connectorId, Map<String, Object> settings, WriteMode writeMode, DdlPolicy ddl, TargetTable target) {
         this.connectorId = connectorId;
         this.settings = settings;
         this.writeMode = writeMode;
         this.ddl = ddl;
+        this.target = target;
     }
 
     @Override
     public SinkWriter getEx() {
         ConnectorProvisioner provisioner = provisioner(localMember());
-        return new PdkSinkPort(provisioner).open(new SinkConfig(connectorId, settings, writeMode, ddl));
+        return new PdkSinkPort(provisioner).open(new SinkConfig(connectorId, settings, writeMode, ddl, target));
     }
 
     /** The connector provisioner bound onto the local member, or a bare failure when the member has none. */

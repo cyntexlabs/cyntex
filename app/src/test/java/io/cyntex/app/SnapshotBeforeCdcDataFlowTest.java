@@ -143,7 +143,7 @@ class SnapshotBeforeCdcDataFlowTest {
                 new StoreBackedPipelineCaptureCoordinator(store, captureRunUnit::start, srsCoordinator, snapshotBuffer);
 
         StoreBackedDagSource.SinkWriterBinder capturingSink =
-                (connectorId, settings, writeMode, ddl) -> (SupplierEx<SinkWriter>) CapturingSinkWriter::new;
+                (connectorId, settings, writeMode, ddl, target) -> (SupplierEx<SinkWriter>) CapturingSinkWriter::new;
         DagSource dagSource = new StoreBackedDagSource(store, capturingSink);
         LifecycleActuator actuator = new EngineLifecycleActuator(new Engine(member), dagSource, coordinator);
 

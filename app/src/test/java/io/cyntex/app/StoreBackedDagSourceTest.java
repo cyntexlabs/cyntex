@@ -168,6 +168,7 @@ class StoreBackedDagSourceTest {
     private static final class FakeStorePort implements StorePort {
 
         private final FakeArtifactStore artifacts = new FakeArtifactStore();
+        private final InMemorySchemaStore schemas = new InMemorySchemaStore();
 
         @Override
         public ArtifactStore artifacts() {
@@ -191,7 +192,7 @@ class StoreBackedDagSourceTest {
 
         @Override
         public SchemaStore schemas() {
-            throw new UnsupportedOperationException();
+            return schemas;
         }
 
         @Override
