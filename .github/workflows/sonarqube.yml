@@ -1,0 +1,134 @@
+# SonarQube quality-gate analysis.
+# Runs the SonarScanner against the SonarQube server, waits for the quality gate, and fails
+# the job when the gate is not green. On a pull request it also posts a sticky comment with
+# the gate status, the failing conditions, and a dashboard link, because this SonarQube
+# instance is Community Edition and cannot decorate pull requests itself.
+#
+# Decoupled from the fast build gate (ci.yml) on purpose: this workflow depends on an external
+# server, a secret, and network egress, none of which should be able to block the core build.
+# A fork pull request has no access to secrets, so the guard step skips the analysis cleanly
+# (the job stays green) rather than failing. The same guard means the workflow is a no-op until
+# the SONAR_TOKEN / SONAR_HOST_URL secrets are configured, so adding this file never reddens CI.
+#
+# Secrets (repo Settings -> Secrets and variables -> Actions):
+#   SONAR_TOKEN     a least-privilege project-analysis token (never an admin token)
+#   SONAR_HOST_URL  the server base URL (kept out of the tree so the address is not public)
+#
+# Intended to become a required status check on main once a baseline analysis exists and the
+# New Code definition is set on the server; until then it reports without blocking.
+name: SonarQube
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+# Community Edition keeps a single project state, so concurrent analyses would clobber each
+# other. Serialize them; do not cancel in progress, since a half-finished analysis is worse
+# than a queued one.
+concurrency:
+  group: sonarqube
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  sonarqube:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check secret availability
+        id: guard
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+        run: |
+          set -euo pipefail
+          if [ -z "${SONAR_TOKEN:-}" ] || [ -z "${SONAR_HOST_URL:-}" ]; then
+            echo "SONAR_TOKEN/SONAR_HOST_URL unavailable (fork PR, or secrets not yet configured) - skipping analysis."
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout
+        if: steps.guard.outputs.run == 'true'
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history for accurate new-code dating and SCM blame
+
+      - name: Set up JDK 21
+        if: steps.guard.outputs.run == 'true'
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      # verify runs the reactor (tests + JaCoCo report), then sonar:sonar submits the analysis.
+      # sonar.qualitygate.wait makes the scanner block on the gate and fail this step when it is
+      # not green - that failure is what turns the PR check red. sonar.login carries the token
+      # (the form the SonarQube 9.9 server documents).
+      - name: Build, test and analyze
+        id: analyze
+        if: steps.guard.outputs.run == 'true'
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+        run: |
+          mvn -B verify sonar:sonar \
+            -Dsonar.projectKey=tapstate \
+            -Dsonar.host.url="$SONAR_HOST_URL" \
+            -Dsonar.login="$SONAR_TOKEN" \
+            -Dsonar.qualitygate.wait=true
+
+      # Best-effort PR decoration for Community Edition. Runs even when the analyze step failed
+      # (that is exactly the gate-red case worth commenting on); continue-on-error keeps a comment
+      # glitch from ever flipping a green job to red - the analyze step is the sole gate authority.
+      - name: Comment quality gate on PR
+        if: always() && steps.guard.outputs.run == 'true' && github.event_name == 'pull_request'
+        continue-on-error: true
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -uo pipefail
+          host="${SONAR_HOST_URL%/}"
+          dashboard="$host/dashboard?id=tapstate"
+
+          # The analyze step already waited for the gate, and concurrency serializes runs, so the
+          # latest project status is this run's. Query by project key for simplicity.
+          ps="$(curl -s -u "$SONAR_TOKEN:" "$host/api/qualitygates/project_status?projectKey=tapstate" || true)"
+          status="$(printf '%s' "$ps" | jq -r '.projectStatus.status // "UNKNOWN"' 2>/dev/null || echo UNKNOWN)"
+          details="$(printf '%s' "$ps" | jq -r '.projectStatus.conditions[]? | select(.status=="ERROR") | "- `\(.metricKey)`: \(.actualValue) (fails \(.comparator) \(.errorThreshold))"' 2>/dev/null || true)"
+
+          case "$status" in
+            OK)    emoji="white_check_mark"; verdict="passed" ;;
+            ERROR) emoji="x";                verdict="failed" ;;
+            *)     emoji="warning";          verdict="unknown (see the workflow logs)" ;;
+          esac
+
+          {
+            printf '<!-- sonarqube-gate -->\n'
+            printf '### :%s: SonarQube quality gate: **%s**\n\n' "$emoji" "$verdict"
+            if [ -n "${details:-}" ]; then
+              printf 'Failing conditions:\n%s\n\n' "$details"
+            fi
+            printf '[Open the dashboard](%s)\n\n' "$dashboard"
+            printf '_Community Edition: this comment stands in for native pull-request decoration._\n'
+          } > comment.md
+
+          existing="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments" \
+            --jq '.[] | select(.body | contains("<!-- sonarqube-gate -->")) | .id' 2>/dev/null | head -n1 || true)"
+          if [ -n "$existing" ]; then
+            gh api -X PATCH "repos/${GITHUB_REPOSITORY}/issues/comments/${existing}" -f body="$(cat comment.md)" >/dev/null
+          else
+            gh api -X POST "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments" -f body="$(cat comment.md)" >/dev/null
+          fi
+          echo "Posted quality gate comment (status=${status})."
