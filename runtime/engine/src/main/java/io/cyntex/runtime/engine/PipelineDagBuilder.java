@@ -1,6 +1,7 @@
 package io.cyntex.runtime.engine;
 
 import com.hazelcast.function.FunctionEx;
+import com.hazelcast.function.SupplierEx;
 import com.hazelcast.jet.core.DAG;
 import com.hazelcast.jet.core.Edge;
 import com.hazelcast.jet.core.ProcessorMetaSupplier;
@@ -14,6 +15,7 @@ import io.cyntex.core.model.ServeBlock;
 import io.cyntex.core.model.Step;
 import io.cyntex.core.model.SyncElement;
 import io.cyntex.core.model.TransformBody;
+import io.cyntex.spi.sink.SinkWriter;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -31,6 +33,16 @@ public final class PipelineDagBuilder {
 
     /** Builds the Jet DAG for a validated pipeline against the given leaf and reference bindings. */
     public static DAG build(PipelineResource pipeline, DagBindings bindings) {
+        return build(pipeline, bindings, null);
+    }
+
+    /**
+     * Builds the Jet DAG for a validated pipeline. When {@code sinkAck} is present each serve sink
+     * advances a durable sink-acked watermark through it; when it is null the sinks are the no-ack
+     * variant, so an ack-less run still builds. The topology is identical either way — the ack only
+     * changes which sink vertex the serve block wires.
+     */
+    public static DAG build(PipelineResource pipeline, DagBindings bindings, SinkAckBinding sinkAck) {
         DAG dag = new DAG();
         Map<String, Vertex> byKey = new HashMap<>();
         // Jet rejects two edges that share a source or destination ordinal, so every edge takes the
@@ -62,13 +74,24 @@ public final class PipelineDagBuilder {
             for (int i = 0; i < sync.size(); i++) {
                 SyncElement element = sync.get(i);
                 String name = "serve." + (element.id() != null ? element.id() : i);
-                Vertex vertex = dag.newVertex(name,
-                        SinkProcessor.metaSupplier(bindings.sinkWriters().apply(element)));
+                Vertex vertex = dag.newVertex(name, sinkVertex(bindings.sinkWriters().apply(element), sinkAck));
                 connect(dag, upstream, vertex, outboundOrdinal, inboundOrdinal);
             }
         }
 
         return dag;
+    }
+
+    /**
+     * The sink vertex for one serve.sync element: the ack-bearing sink when a sink-ack binding is present
+     * (advancing a durable watermark), otherwise the no-ack sink. Both wrap the same writer factory in the
+     * one generic sink adapter, pinned to total parallelism one.
+     */
+    private static ProcessorMetaSupplier sinkVertex(
+            SupplierEx<? extends SinkWriter> writerFactory, SinkAckBinding sinkAck) {
+        return sinkAck == null
+                ? SinkProcessor.metaSupplier(writerFactory)
+                : SinkProcessor.metaSupplier(writerFactory, sinkAck.ackFactory(), sinkAck.positionOrder());
     }
 
     /**

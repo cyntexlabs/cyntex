@@ -13,7 +13,6 @@ import io.cyntex.spi.capture.SourcePosition;
 import io.cyntex.spi.store.ArtifactStore;
 import io.cyntex.spi.store.StorePort;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -41,14 +40,6 @@ final class StoreBackedPipelineCaptureCoordinator implements PipelineCaptureCoor
 
     /** The schema version stamped on ring items at L1 (schema evolution is a later increment). */
     private static final long MOCK_SCHEMA_VER = 0L;
-
-    /**
-     * Orders the mock watermark positions {@code w1 < w2 < ...} by numeric suffix. A source position is opaque
-     * and never ordered lexically -- lexical order would rank {@code w10} before {@code w2}. Matched to the
-     * {@code w<n>} token the watermark generator produces.
-     */
-    private static final Comparator<String> MOCK_POSITION_ORDER =
-            Comparator.comparingInt(token -> Integer.parseInt(token.substring(1)));
 
     private final StorePort storePort;
     private final CaptureStarter captureStarter;
@@ -121,7 +112,7 @@ final class StoreBackedPipelineCaptureCoordinator implements PipelineCaptureCoor
                 retention,
                 MOCK_SCHEMA_VER,
                 monotonicWatermark(),
-                MOCK_POSITION_ORDER);
+                MockPositionOrder.INSTANCE);
     }
 
     /** Whether this pipeline currently has a live capture -- a test-visible view of the retained handles. */

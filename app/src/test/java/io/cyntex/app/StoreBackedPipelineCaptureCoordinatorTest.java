@@ -74,6 +74,19 @@ class StoreBackedPipelineCaptureCoordinatorTest {
     }
 
     @Test
+    void theCaptureSpecOrdersByTheOneSharedPositionOrderSoTheSinkCannotDrift() {
+        SourceResource source = cdcSource("orders_src", "orders", null);
+        Settings settings = new Settings(null, null, null, null, ReadMode.CDC_ONLY, "earliest");
+
+        CaptureRunSpec spec = StoreBackedPipelineCaptureCoordinator.deriveSpec(
+                "pipe-1", settings, source, SourceCaptureResolution.of(source));
+
+        // The capture side and the sink-ack side must rank positions through one and the same order; the
+        // spec carries the shared instance so a change to the order cannot leave the two disagreeing.
+        assertThat(spec.positionOrder()).isSameAs(MockPositionOrder.INSTANCE);
+    }
+
+    @Test
     void aSourceWithSrsDisabledDerivesTheDirectTailAndAnExplicitKeyIsCarried() {
         SourceResource source = new SourceResource("orders_src", null, "mysql", Map.of("host", "h"),
                 SourceMode.CDC, List.of(TableRef.literal("orders")), null,

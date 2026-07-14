@@ -13,6 +13,7 @@ import io.cyntex.core.model.SyncElement;
 import io.cyntex.core.model.TransformBody;
 import io.cyntex.runtime.engine.DagBindings;
 import io.cyntex.runtime.engine.PipelineDagBuilder;
+import io.cyntex.runtime.engine.SinkAckBinding;
 import io.cyntex.runtime.srs.SrsReadCursorPublisherFactory;
 import io.cyntex.runtime.srs.SrsSourceProcessor;
 import io.cyntex.runtime.srs.StartFrom;
@@ -22,6 +23,7 @@ import io.cyntex.spi.sink.WriteMode;
 import io.cyntex.spi.store.ArtifactStore;
 import io.cyntex.spi.store.StorePort;
 import io.cyntex.spi.transform.TransformPort;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -62,7 +64,25 @@ final class StoreBackedDagSource implements DagSource {
     @Override
     public DAG dagFor(String pipelineId) {
         PipelineResource pipeline = StoredArtifacts.requirePipeline(artifacts(), pipelineId);
-        return PipelineDagBuilder.build(pipeline, bindings());
+        return PipelineDagBuilder.build(pipeline, bindings(), sinkAckBinding(pipeline, pipelineId));
+    }
+
+    /**
+     * The sink-ack wiring that closes the durable frontier: as a sink confirms writes it advances the
+     * pipeline consumer's durable sink-acked position through this. The sink knows a chain only by the
+     * {@code src} stream name (a table at L1), so the binding carries a table-to-chain map resolved from
+     * every source the pipeline reads, and the sink-side order matches the capture watermark's order so the
+     * two cannot drift. The map is built here, on the assembly side; only serializable coordinates ship.
+     */
+    private SinkAckBinding sinkAckBinding(PipelineResource pipeline, String pipelineId) {
+        Map<String, String> chainIdByTable = new LinkedHashMap<>();
+        for (String sourceId : pipeline.sources()) {
+            SourceCaptureResolution resolution =
+                    SourceCaptureResolution.of(StoredArtifacts.requireSource(artifacts(), sourceId));
+            chainIdByTable.put(resolution.table(), resolution.chainId().value());
+        }
+        return new SinkAckBinding(
+                new StoreBackedSinkAckFactory(chainIdByTable, pipelineId), MockPositionOrder.INSTANCE);
     }
 
     /**
