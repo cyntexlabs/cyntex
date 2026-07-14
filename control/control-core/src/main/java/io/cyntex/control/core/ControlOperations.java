@@ -59,6 +59,8 @@ public final class ControlOperations {
     // whitelist; it is read-scoped and unaudited.
     public static final Operation CONNECTOR_LIST =
             new Operation("connector.list", Scope.READ, false, null, CLI_POC);
+    public static final Operation CONNECTOR_GET =
+            new Operation("connector.get", Scope.READ, false, null, CLI_POC);
 
     // cluster domain: topology is sensitive, so listing members is a registry operation (authenticated
     // like every other verb) rather than an anonymous endpoint — only the process-liveness probe stays
@@ -105,6 +107,7 @@ public final class ControlOperations {
             CONNECTION_SCHEMA,
             CONNECTOR_REGISTER,
             CONNECTOR_LIST,
+            CONNECTOR_GET,
             CLUSTER_MEMBERS,
             PIPELINE_START,
             PIPELINE_STOP,

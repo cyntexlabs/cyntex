@@ -1,10 +1,9 @@
 package io.cyntex.app;
 
 import io.cyntex.control.core.AuditedSourceService;
-import io.cyntex.control.core.ApplyService;
+import io.cyntex.control.core.ConnectorCatalogView;
 import io.cyntex.control.core.SourceRepresentation;
 import io.cyntex.control.core.SourceService;
-import io.cyntex.core.catalog.CyntexCatalog;
 import io.cyntex.core.dsl.DslParser;
 import io.cyntex.core.model.SourceResource;
 import io.cyntex.core.model.canonical.CanonicalWriter;
@@ -32,7 +31,6 @@ import org.testcontainers.utility.DockerImageName;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.lang.reflect.Field;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -75,15 +73,12 @@ class ControlPlaneAssemblyIT {
         int port = start();
         RestClient client = RestClient.create("http://localhost:" + port);
 
-        assertThat(context.getBeansOfType(CyntexCatalog.class)).hasSize(1);
+        assertThat(context.getBeansOfType(ConnectorCatalogView.class)).hasSize(1);
         assertThat(context.getBeansOfType(SourceRepresentation.class)).hasSize(1);
         assertThat(context.getBeansOfType(SourceService.class)).hasSize(1);
         assertThat(context.getBeansOfType(AuditedSourceService.class)).hasSize(1);
         assertThat(context.getBeansOfType(StorePort.class)).hasSize(1);
         assertThat(context.getBeansOfType(ArtifactStore.class)).isEmpty();
-        CyntexCatalog catalog = context.getBean(CyntexCatalog.class);
-        assertThat(field(context.getBean(ApplyService.class), "catalog")).isSameAs(catalog);
-        assertThat(field(context.getBean(SourceService.class), "catalog")).isSameAs(catalog);
 
         // Anonymous: the verb surface is guarded from the first request.
         HttpStatusCode anonymous = client.get().uri("/api/artifacts")
@@ -206,16 +201,6 @@ class ControlPlaneAssemblyIT {
                 "options", Map.of(),
                 "experimental", Map.of(),
                 "clearSecrets", List.of());
-    }
-
-    private static Object field(Object target, String name) {
-        try {
-            Field field = target.getClass().getDeclaredField(name);
-            field.setAccessible(true);
-            return field.get(target);
-        } catch (ReflectiveOperationException error) {
-            throw new AssertionError("missing expected field: " + name, error);
-        }
     }
 
     @Test

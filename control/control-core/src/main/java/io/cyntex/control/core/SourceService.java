@@ -16,17 +16,23 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.function.Supplier;
 
 /** Source-specific CRUD over the canonical artifact truth layer. */
 public final class SourceService {
 
-    private final CyntexCatalog catalog;
+    private final Supplier<CyntexCatalog> catalog;
     private final ArtifactStore store;
     private final SourceRepresentation representation;
     private final CanonicalWriter writer = new CanonicalWriter();
 
     public SourceService(
             CyntexCatalog catalog, ArtifactStore store, SourceRepresentation representation) {
+        this(() -> Objects.requireNonNull(catalog, "catalog"), store, representation);
+    }
+
+    public SourceService(
+            Supplier<CyntexCatalog> catalog, ArtifactStore store, SourceRepresentation representation) {
         this.catalog = Objects.requireNonNull(catalog, "catalog");
         this.store = Objects.requireNonNull(store, "store");
         this.representation = Objects.requireNonNull(representation, "representation");
@@ -58,7 +64,7 @@ public final class SourceService {
 
         SourceResource source = representation.toModel(draft, null);
         candidate.add(source);
-        Workspace.of(candidate, catalog);
+        Workspace.of(candidate, catalog.get());
 
         return switch (store.create(source)) {
             case CREATED -> view(source);
@@ -93,7 +99,7 @@ public final class SourceService {
                 break;
             }
         }
-        Workspace.of(candidate, catalog);
+        Workspace.of(candidate, catalog.get());
 
         return switch (store.replace(id, expectedContentHash, replacement)) {
             case REPLACED -> view(replacement);

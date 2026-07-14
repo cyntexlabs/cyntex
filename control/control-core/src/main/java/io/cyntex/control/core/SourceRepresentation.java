@@ -18,13 +18,18 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.function.Supplier;
 
 /** Maps between the frontend Source projection and the canonical core Source model. */
 public final class SourceRepresentation {
 
-    private final CyntexCatalog catalog;
+    private final Supplier<CyntexCatalog> catalog;
 
     public SourceRepresentation(CyntexCatalog catalog) {
+        this(() -> Objects.requireNonNull(catalog, "catalog"));
+    }
+
+    public SourceRepresentation(Supplier<CyntexCatalog> catalog) {
         this.catalog = Objects.requireNonNull(catalog, "catalog");
     }
 
@@ -88,7 +93,7 @@ public final class SourceRepresentation {
 
     private ConnectorCatalogEntry connector(String connector) {
         try {
-            return catalog.byId(connector);
+            return catalog.get().byId(connector);
         } catch (IllegalArgumentException error) {
             throw malformed("unknown connector: " + connector);
         }

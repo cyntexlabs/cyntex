@@ -140,6 +140,9 @@ connector.class-not-found:
 connector.no-connector-class:
   message: "No connector class found in artifact '{artifact}'."
   solution: "Check the jar is a PDK connector: it must contain a class annotated with @TapConnectorClass."
+connector.not-found:
+  message: "Connector '{connector}' is not present in the online catalog."
+  solution: "Choose a connector returned by `connector.list`, or register it before requesting its form metadata."
 connector.ambiguous-connector-class:
   message: "Artifact '{artifact}' declares more than one connector class: {classes}."
   solution: "Register one connector per artifact; split unrelated connectors into separate jars."

@@ -27,6 +27,7 @@ class ControlOperationsTest {
                         "connection.schema",
                         "connector.register",
                         "connector.list",
+                        "connector.get",
                         "cluster.members",
                         "pipeline.start",
                         "pipeline.stop",
@@ -69,6 +70,7 @@ class ControlOperationsTest {
         // connector.list reads the online catalog view (bundled snapshot union registered rows); it
         // mutates nothing, so it is read.
         assertThat(registry.resolve("connector.list").scope()).isEqualTo(Scope.READ);
+        assertThat(registry.resolve("connector.get").scope()).isEqualTo(Scope.READ);
         // cluster.members reads live topology; it is authenticated like every registry operation, but
         // needs no write or admin privilege.
         assertThat(registry.resolve("cluster.members").scope()).isEqualTo(Scope.READ);
@@ -115,6 +117,7 @@ class ControlOperationsTest {
                 "connection.test-result",
                 "connection.schema",
                 "connector.list",
+                "connector.get",
                 "cluster.members",
                 "user.list",
                 "token.list",
@@ -128,10 +131,10 @@ class ControlOperationsTest {
 
     @Test
     void theRegistryOpensEveryL1OperationOnTheCliFaceAtPoc() {
-        // a scope statement about the registry alone: L1 opens all 29 operations on the CLI face and
+        // a scope statement about the registry alone: L1 opens all 30 operations on the CLI face and
         // clips none of them below POC. Whether each one has a verb behind it is not knowable from here
         // — control-core cannot see the CLI — and is gated where both are visible, in arch-tests.
-        assertThat(registry.exposedOn(Frontend.CLI, Maturity.POC)).hasSize(29);
+        assertThat(registry.exposedOn(Frontend.CLI, Maturity.POC)).hasSize(30);
         assertThat(registry.all()).allSatisfy(op ->
                 assertThat(op.exposure()).as(op.id()).containsEntry(Frontend.CLI, Maturity.POC));
     }

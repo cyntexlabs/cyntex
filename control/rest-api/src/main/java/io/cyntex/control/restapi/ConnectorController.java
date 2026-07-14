@@ -1,11 +1,13 @@
 package io.cyntex.control.restapi;
 
 import io.cyntex.control.core.ConnectorCatalogView;
+import io.cyntex.control.core.ConnectorDetail;
 import io.cyntex.control.core.ConnectorRegisterService;
 import io.cyntex.control.core.ConnectorRegistrationReport;
 import io.cyntex.core.common.CyntexException;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
@@ -68,6 +70,12 @@ class ConnectorController {
     @GetMapping("/connectors")
     ConnectorCatalogList list() {
         return new ConnectorCatalogList(catalogView.summaries());
+    }
+
+    @Verb("connector.get")
+    @GetMapping("/connectors/{id}")
+    ConnectorDetail get(@PathVariable("id") String id) {
+        return catalogView.detail(id);
     }
 
     /** Decodes the base64 artifact, refusing a non-base64 body field at the boundary as a coded 400. */

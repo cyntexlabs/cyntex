@@ -209,11 +209,6 @@ class ControlPlaneConfiguration {
     }
 
     @Bean
-    CyntexCatalog cyntexCatalog(ConnectorCatalogView connectorCatalogView) {
-        return connectorCatalogView.merged();
-    }
-
-    @Bean
     ConnectionTestResultStore connectionTestResultStore(StorePort storePort) {
         return storePort.connectionTestResults();
     }
@@ -341,14 +336,14 @@ class ControlPlaneConfiguration {
     }
 
     @Bean
-    SourceRepresentation sourceRepresentation(CyntexCatalog catalog) {
-        return new SourceRepresentation(catalog);
+    SourceRepresentation sourceRepresentation(ConnectorCatalogView connectorCatalogView) {
+        return new SourceRepresentation(connectorCatalogView::merged);
     }
 
     @Bean
     SourceService sourceService(
-            CyntexCatalog catalog, StorePort storePort, SourceRepresentation representation) {
-        return new SourceService(catalog, storePort.artifacts(), representation);
+            ConnectorCatalogView connectorCatalogView, StorePort storePort, SourceRepresentation representation) {
+        return new SourceService(connectorCatalogView::merged, storePort.artifacts(), representation);
     }
 
     @Bean

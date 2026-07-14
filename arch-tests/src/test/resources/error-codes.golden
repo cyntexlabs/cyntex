@@ -24,6 +24,7 @@ connector.class-not-found
 connector.discover-failed
 connector.load-failed
 connector.no-connector-class
+connector.not-found
 connector.not-registered
 connector.projection-failed
 connector.registration-conflict
