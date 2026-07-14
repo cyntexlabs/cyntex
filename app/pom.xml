@@ -121,6 +121,11 @@
       <artifactId>adapter-mongo-store</artifactId>
       <version>${revision}</version>
     </dependency>
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>adapter-transform</artifactId>
+      <version>${revision}</version>
+    </dependency>
     <!-- The driver-free storage port the assembly root exposes to the service rings (StorePort),
          implemented by the store adapter above; wiring it here keeps the port type off any adapter. -->
     <dependency>

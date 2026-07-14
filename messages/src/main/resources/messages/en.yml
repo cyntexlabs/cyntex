@@ -8,6 +8,12 @@
 #
 # Values are double-quoted single-line scalars; colons, apostrophes and backticks inside the quotes
 # are fine. Keep literal double-quotes out of values (use backticks for inline code).
+actuation.pipeline-not-found:
+  message: "No pipeline artifact `{pipeline}` is stored to run."
+  solution: "Apply the pipeline before starting it, and check the id for typos."
+actuation.not-a-pipeline:
+  message: "Resource `{pipeline}` is a `{kind}`, not a pipeline, so it cannot be run."
+  solution: "Start a pipeline resource; check the id names a pipeline and not another kind of resource."
 boot.hazelcast-unavailable:
   message: "The embedded Hazelcast member could not start."
   solution: "Another process may already be using the member port on loopback; stop it or set a different port, then restart."

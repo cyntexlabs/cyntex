@@ -3,6 +3,8 @@
 # against this file. Adding a code = append it here in the same change set; renaming or
 # removing one = a breaking change to an external contract (review + major version).
 # @Deprecated codes stay listed as tombstones until intentionally retired.
+actuation.not-a-pipeline
+actuation.pipeline-not-found
 boot.hazelcast-unavailable
 capture.start-from-unparsable
 cli.artifact-exists

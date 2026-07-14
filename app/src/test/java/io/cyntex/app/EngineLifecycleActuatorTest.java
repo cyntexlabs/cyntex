@@ -19,10 +19,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * The assembly-layer binding from the lifecycle actuator seam to the Jet execution engine, driven
- * against a real embedded member. It runs a pipeline through start -> pause -> resume -> stop over the
- * placeholder topology, proving each seam verb maps to the matching Jet job operation and that the
- * placeholder source is a runnable, controllable job — the standing-in job the real source -> sink
- * topology replaces when the capture and transform planes merge.
+ * against a real embedded member. It runs a pipeline through start -> pause -> resume -> stop over an
+ * idle stand-in topology, proving each seam verb maps to the matching Jet job operation and that the
+ * idle source is a runnable, controllable job — the same actuator drives the store-backed topology
+ * production runs, by pipeline id alone.
  */
 class EngineLifecycleActuatorTest {
 
@@ -54,7 +54,7 @@ class EngineLifecycleActuatorTest {
     @Test
     @DisplayName("start submits a running job, pause suspends it, resume runs it again, and stop ends it")
     void drivesTheFullJetLifecycle() {
-        LifecycleActuator actuator = new EngineLifecycleActuator(new Engine(member), new PlaceholderDagSource());
+        LifecycleActuator actuator = new EngineLifecycleActuator(new Engine(member), new IdleDagSource());
 
         actuator.start(PIPE);
         Job job = member.getJet().getJob(PIPE);

@@ -68,7 +68,7 @@ class SingleNodeLifecycleE2ETest {
         Clock clock = Clock.fixed(T0, ZoneOffset.UTC);
         storePort = new InMemoryStorePort();
         Engine engine = new Engine(member);
-        EngineLifecycleActuator actuator = new EngineLifecycleActuator(engine, new PlaceholderDagSource());
+        EngineLifecycleActuator actuator = new EngineLifecycleActuator(engine, new IdleDagSource());
         PipelineConverger converger = new PipelineConverger(storePort.desired(), storePort.state(), actuator, clock);
         ObservationPublisher publisher = new ObservationPublisher(storePort.state(), storePort.observations());
         driver = new ConvergenceDriver(converger, storePort.desired(), publisher);

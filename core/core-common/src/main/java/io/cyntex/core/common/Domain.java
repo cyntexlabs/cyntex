@@ -24,6 +24,9 @@ public enum Domain {
     // service assembly root: role selection and startup-fatal failures (app)
     ROLE,
     BOOT,
+    // service assembly root: resolving a pipeline's runnable topology from its stored artifact at
+    // actuation time -- a missing artifact, or one that is not a pipeline (app)
+    ACTUATION,
     // storage connectivity: reaching the backing store and its replica-set requirement (adapters)
     STORE,
     // pdk bridge: loading, level-gating, driving and projecting a connector (adapters)
