@@ -3,6 +3,7 @@ package io.cyntex.cli;
 import java.net.URI;
 import java.util.List;
 import java.util.Map;
+import java.util.function.BooleanSupplier;
 
 /**
  * The CLI's transport seam to a running Cyntex server (rule R6: the CLI reaches services over HTTP
@@ -98,4 +99,61 @@ interface ControlPlaneClient {
      * Never throws.
      */
     ConnectorListOutcome connectorList(URI baseUrl, String credential);
+
+    /**
+     * Issues a pipeline lifecycle verb ({@code start} / {@code stop} / {@code pause} / {@code resume}) via
+     * {@code POST {baseUrl}/api/pipelines/{pipelineId}:{verb}}, authenticated by the bearer
+     * {@code credential}: the pipeline's new desired state on success, a coded rejection when the server
+     * refuses (an unknown pipeline, a forbidden transition, or a stale revision), or unreachable on any I/O
+     * failure. Never throws.
+     */
+    LifecycleOutcome lifecycle(URI baseUrl, String credential, String pipelineId, String verb);
+
+    /**
+     * Reads a pipeline's lifecycle state via {@code GET {baseUrl}/api/pipelines/{pipelineId}/status},
+     * authenticated by the bearer {@code credential}: the state on success, a coded rejection when the
+     * server refuses (a pipeline with no published observation is {@code monitor.no-observation}), or
+     * unreachable on any I/O failure. Never throws.
+     */
+    StatusOutcome status(URI baseUrl, String credential, String pipelineId);
+
+    /**
+     * Reads a pipeline's open map of run statistics via {@code GET {baseUrl}/api/pipelines/{pipelineId}/metrics},
+     * authenticated by the bearer {@code credential}: the metrics on success (empty when no source is wired
+     * yet), a coded rejection when the server refuses, or unreachable on any I/O failure. Never throws.
+     */
+    MetricsOutcome metrics(URI baseUrl, String credential, String pipelineId);
+
+    /**
+     * Reads a pipeline's per-table initial-load progress via
+     * {@code GET {baseUrl}/api/pipelines/{pipelineId}/snapshot}, authenticated by the bearer
+     * {@code credential}: the per-table progress on success (empty outside a snapshot phase), a coded
+     * rejection when the server refuses, or unreachable on any I/O failure. Never throws.
+     */
+    SnapshotOutcome snapshot(URI baseUrl, String credential, String pipelineId);
+
+    /**
+     * Reads a pipeline's recent log lines via {@code GET {baseUrl}/api/pipelines/{pipelineId}/logs},
+     * authenticated by the bearer {@code credential}: the tail on success (empty when the pipeline has
+     * logged nothing on the served node), a coded rejection when the server refuses, or unreachable on any
+     * I/O failure. Never throws.
+     */
+    LogsOutcome logs(URI baseUrl, String credential, String pipelineId);
+
+    /**
+     * Watches a pipeline's status over a websocket ({@code /api/pipelines/{pipelineId}/status/watch}),
+     * delivering each state — the current one, then each change — to {@code sink} until the stream ends or
+     * {@code stop} signals (a {@code true} return between frames). On a dropped connection after a
+     * successful handshake it re-attaches until stopped; a refused or unreachable handshake ends the watch.
+     * Blocks the caller until it returns. Never throws.
+     */
+    void watchStatus(URI baseUrl, String credential, String pipelineId, StatusStream sink, BooleanSupplier stop);
+
+    /**
+     * Follows a pipeline's node-local logs over a websocket ({@code /api/pipelines/{pipelineId}/logs/follow}),
+     * delivering each batch of newly appended lines to {@code sink} until the stream ends or {@code stop}
+     * signals. On a dropped connection after a successful handshake it re-attaches until stopped; a refused
+     * or unreachable handshake ends the follow. Blocks the caller until it returns. Never throws.
+     */
+    void followLogs(URI baseUrl, String credential, String pipelineId, LogStream sink, BooleanSupplier stop);
 }

@@ -7,6 +7,8 @@ import io.cyntex.spi.store.CatalogStore;
 import io.cyntex.spi.store.ConnectionTestResultStore;
 import io.cyntex.spi.store.ConnectorCatalogStore;
 import io.cyntex.spi.store.ConnectorRegistry;
+import io.cyntex.spi.store.DesiredStore;
+import io.cyntex.spi.store.ObservationStore;
 import io.cyntex.spi.store.SchemaStore;
 import io.cyntex.spi.store.SrsMetaStore;
 import io.cyntex.spi.store.StateStore;
@@ -15,14 +17,14 @@ import io.cyntex.spi.store.StorePort;
 import java.util.Objects;
 
 /**
- * The MongoDB implementation of the persistence port: it aggregates the sub-stores — the artifact
- * truth layer, the epoch-fencing pipeline state store, the connection catalog, the discovered
- * source-schema store, the connector distribution registry, the derived connector catalog rows, the
- * latest connection-test result per connection, and the SRS meta store (one durable coordination
- * record per mining chain) — each bound
- * to its own collection (or GridFS bucket) on the verified connection's database. This is the store
- * bridge the assembly root wires into the platform under {@code --role=all}; the app sees only the
- * driver-free {@link StorePort}, so no driver type escapes this module (rule R3).
+ * The MongoDB implementation of the persistence port: it aggregates the ten sub-stores — the artifact
+ * truth layer, the epoch-fencing pipeline state store, the plain-upsert pipeline desired-state store,
+ * the connection catalog, the discovered source-schema store, the connector distribution registry, the
+ * derived connector catalog rows, the latest connection-test result per connection, the plain-upsert
+ * per-pipeline observation store, and the SRS meta store (one durable coordination record per mining
+ * chain) — each bound to its own collection (or GridFS bucket) on the verified connection's database.
+ * This is the store bridge the assembly root wires into the platform under {@code --role=all}; the app
+ * sees only the driver-free {@link StorePort}, so no driver type escapes this module (rule R3).
  */
 public final class MongoStorePort implements StorePort {
 
@@ -30,6 +32,10 @@ public final class MongoStorePort implements StorePort {
     public static final String ARTIFACTS = "artifacts";
     /** The collection holding one epoch-fenced checkpoint per pipeline. */
     public static final String PIPELINE_STATE = "pipeline_state";
+    /** The collection holding one plain-upsert desired-intent doc per pipeline. */
+    public static final String PIPELINE_DESIRED = "pipeline_desired";
+    /** The collection holding one plain-upsert observation doc per pipeline. */
+    public static final String PIPELINE_OBSERVATION = "pipeline_observation";
     /** The collection holding the registered connection configurations. */
     public static final String CONNECTIONS = "connections";
     /** The collection holding one discovered source model per connection. */
@@ -45,15 +51,17 @@ public final class MongoStorePort implements StorePort {
 
     private final ArtifactStore artifacts;
     private final StateStore state;
+    private final DesiredStore desired;
     private final CatalogStore catalog;
     private final SchemaStore schemas;
     private final ConnectorRegistry connectors;
     private final ConnectorCatalogStore connectorCatalog;
     private final ConnectionTestResultStore connectionTestResults;
+    private final ObservationStore observations;
     private final SrsMetaStore meta;
 
     /**
-     * Binds the sub-stores to their own collections on the verified connection's database. The
+     * Binds the ten sub-stores to their own collections on the verified connection's database. The
      * connection must have been verified first (its client opened); the sub-stores share that one
      * client and are closed with it when the connection closes.
      */
@@ -62,12 +70,14 @@ public final class MongoStorePort implements StorePort {
         MongoDatabase database = connection.database();
         this.artifacts = new MongoArtifactStore(connection.client(), database.getCollection(ARTIFACTS));
         this.state = new MongoStateStore(database.getCollection(PIPELINE_STATE));
+        this.desired = new MongoDesiredStore(database.getCollection(PIPELINE_DESIRED));
         this.catalog = new MongoCatalogStore(database.getCollection(CONNECTIONS));
         this.schemas = new MongoSchemaStore(database.getCollection(SOURCE_SCHEMAS));
         this.connectors = new MongoConnectorRegistry(GridFSBuckets.create(database, CONNECTOR_ARTIFACTS));
         this.connectorCatalog = new MongoConnectorCatalogStore(database.getCollection(CONNECTOR_CATALOG));
         this.connectionTestResults =
                 new MongoConnectionTestResultStore(database.getCollection(CONNECTION_TEST_RESULTS));
+        this.observations = new MongoObservationStore(database.getCollection(PIPELINE_OBSERVATION));
         this.meta = new MongoSrsMetaStore(database.getCollection(SRS_META));
     }
 
@@ -79,6 +89,11 @@ public final class MongoStorePort implements StorePort {
     @Override
     public StateStore state() {
         return state;
+    }
+
+    @Override
+    public DesiredStore desired() {
+        return desired;
     }
 
     @Override
@@ -104,6 +119,11 @@ public final class MongoStorePort implements StorePort {
     @Override
     public ConnectionTestResultStore connectionTestResults() {
         return connectionTestResults;
+    }
+
+    @Override
+    public ObservationStore observations() {
+        return observations;
     }
 
     @Override

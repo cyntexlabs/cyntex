@@ -23,6 +23,14 @@ class ControlOperationsTest {
                         "connector.register",
                         "connector.list",
                         "cluster.members",
+                        "pipeline.start",
+                        "pipeline.stop",
+                        "pipeline.pause",
+                        "pipeline.resume",
+                        "pipeline.status",
+                        "pipeline.metrics",
+                        "pipeline.snapshot",
+                        "pipeline.logs",
                         "user.create",
                         "user.passwd",
                         "user.list",
@@ -54,6 +62,15 @@ class ControlOperationsTest {
         // cluster.members reads live topology; it is authenticated like every registry operation, but
         // needs no write or admin privilege.
         assertThat(registry.resolve("cluster.members").scope()).isEqualTo(Scope.READ);
+        // the four pipeline lifecycle verbs write desired state, so they are write-scoped.
+        for (String id : List.of("pipeline.start", "pipeline.stop", "pipeline.pause", "pipeline.resume")) {
+            assertThat(registry.resolve(id).scope()).as(id).isEqualTo(Scope.WRITE);
+        }
+        // the pipeline observation reads (status/metrics/snapshot store-backed, logs node-local) are all
+        // read faces; read-scoped, unaudited.
+        for (String id : List.of("pipeline.status", "pipeline.metrics", "pipeline.snapshot", "pipeline.logs")) {
+            assertThat(registry.resolve(id).scope()).as(id).isEqualTo(Scope.READ);
+        }
         for (String id : List.of("user.create", "user.passwd", "user.list", "token.create", "token.revoke", "token.list")) {
             assertThat(registry.resolve(id).scope()).as(id).isEqualTo(Scope.ADMIN);
         }
@@ -67,6 +84,10 @@ class ControlOperationsTest {
                         "connection.test",
                         "connection.discover-schema",
                         "connector.register",
+                        "pipeline.start",
+                        "pipeline.stop",
+                        "pipeline.pause",
+                        "pipeline.resume",
                         "user.create",
                         "user.passwd",
                         "token.create",
@@ -74,7 +95,8 @@ class ControlOperationsTest {
             assertThat(registry.resolve(id).audited()).as(id).isTrue();
         }
         for (String id : List.of("artifact.get", "artifact.list", "connection.test-result", "connection.schema",
-                "connector.list", "cluster.members", "user.list", "token.list")) {
+                "connector.list", "cluster.members", "pipeline.status", "pipeline.metrics", "pipeline.snapshot",
+                "pipeline.logs", "user.list", "token.list")) {
             assertThat(registry.resolve(id).audited()).as(id).isFalse();
         }
     }
@@ -82,7 +104,7 @@ class ControlOperationsTest {
     @Test
     void everyL1OperationIsOnTheCliPocSurface() {
         assertThat(registry.exposedOn(Frontend.CLI, Maturity.POC))
-                .hasSize(16)
+                .hasSize(24)
                 .allSatisfy(op -> assertThat(op.exposure()).containsEntry(Frontend.CLI, Maturity.POC));
     }
 

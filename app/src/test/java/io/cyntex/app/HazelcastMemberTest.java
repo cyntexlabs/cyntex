@@ -187,6 +187,10 @@ class HazelcastMemberTest {
             throw new UnsupportedOperationException();
         }
 
+        @Override public void advanceSinkAckedSrcpos(String miningChainId, String pipelineId, String srcpos) {
+            throw new UnsupportedOperationException();
+        }
+
         @Override public void advanceSourceReadOffset(String miningChainId, String sourceReadOffset) {
             throw new UnsupportedOperationException();
         }

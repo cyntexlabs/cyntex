@@ -31,6 +31,13 @@
     <jackson.version>2.21.4</jackson.version>
     <snakeyaml.version>2.6</snakeyaml.version>
     <cel.version>0.10.1</cel.version>
+    <!-- GraalVM polyglot + the JavaScript language: the full-power escape-hatch evaluator that runs
+         a js transform's script per event. The community language artifact (js-community) is the
+         UPL-licensed open build (the Oracle GraalVM 'js' artifact carries the GFTC terms, the same
+         license split the hazelcast pin navigates), so the product stays OSS-clean. On a stock JDK the
+         language runs on the Truffle interpreter; only the runtime evaluation adapter draws it (rule
+         R3), never the core or spi rings. -->
+    <graaljs.version>24.1.2</graaljs.version>
     <!-- Spring Boot is the service runtime substrate (assembly root + control ring): Spring Boot 4.1.x
          on Spring Framework 7 (Jakarta EE 11 / Jackson 3 default), running on JDK 21. The version
          (spring.boot.version) is the single source of truth defined in the root POM and inherited here,
@@ -155,6 +162,23 @@
         <groupId>com.google.code.findbugs</groupId>
         <artifactId>jsr305</artifactId>
         <version>3.0.2</version>
+      </dependency>
+      <!-- GraalVM polyglot API + the community JavaScript language: the full-power escape hatch that
+           evaluates a js transform's script per event. Two coordinates move as one version: the
+           polyglot API the adapter compiles against and the js-community language that pulls its own
+           Truffle closure (truffle-api / regex / sdk / icu4j). Locked to adapter-transform by rule R3;
+           the language artifact is the UPL-licensed community build, so no restricted-license artifact
+           enters the graph. -->
+      <dependency>
+        <groupId>org.graalvm.polyglot</groupId>
+        <artifactId>polyglot</artifactId>
+        <version>${graaljs.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>org.graalvm.polyglot</groupId>
+        <artifactId>js-community</artifactId>
+        <version>${graaljs.version}</version>
+        <type>pom</type>
       </dependency>
       <dependency>
         <groupId>com.tngtech.archunit</groupId>

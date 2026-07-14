@@ -27,6 +27,7 @@
   <modules>
     <module>adapter-pdk</module>
     <module>adapter-mongo-store</module>
+    <module>adapter-transform</module>
   </modules>
 
   <dependencyManagement>

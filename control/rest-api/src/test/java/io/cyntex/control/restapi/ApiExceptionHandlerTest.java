@@ -1,6 +1,7 @@
 package io.cyntex.control.restapi;
 
 import io.cyntex.control.core.ControlError;
+import io.cyntex.control.core.MonitorError;
 import io.cyntex.core.common.CyntexErrorCode;
 import io.cyntex.core.common.CyntexException;
 import io.cyntex.core.common.Severity;
@@ -89,6 +90,19 @@ class ApiExceptionHandlerTest {
                 .isEqualTo(HttpStatus.FORBIDDEN);
         assertThat(handler.handle(new CyntexException(ControlError.BOOTSTRAP_FORBIDDEN, Map.of(), null)).getStatusCode())
                 .isEqualTo(HttpStatus.FORBIDDEN);
+    }
+
+    @Test
+    void aReadOfAPipelineWithNoObservationIsNotFound() {
+        // The read faces serve a frontend with no stderr/exit channel, so a missing observation is a coded
+        // 404 (the observation resource does not exist), like an artifact get or a lifecycle verb on an
+        // unknown pipeline — never a bare 500 that hides the reason.
+        ResponseEntity<ApiError> response =
+                handler.handle(new CyntexException(MonitorError.NO_OBSERVATION, Map.of("pipeline", "pl1"), null));
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+        assertThat(response.getBody().code()).isEqualTo("monitor.no-observation");
+        assertThat(response.getBody().message()).isNotBlank().isNotEqualTo("monitor.no-observation");
     }
 
     @Test

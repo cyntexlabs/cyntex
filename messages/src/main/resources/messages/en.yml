@@ -77,6 +77,12 @@ dsl.malformed-yaml:
 lifecycle.illegal-transition:
   message: "Cannot {verb} a pipeline in state {from}."
   solution: "Only certain actions are valid from each state; check the pipeline's current state first."
+lifecycle.incompatible-revision:
+  message: "The pipeline's revision {requested} is not compatible with the latest applied revision {latest}."
+  solution: "Re-apply the pipeline so its revision matches the latest applied one, then retry."
+lifecycle.unknown-pipeline:
+  message: "No pipeline named {pipeline} is applied."
+  solution: "Apply the pipeline before running a lifecycle verb on it, and check the id for typos."
 role.unsupported:
   message: "Unsupported --role value '{role}'."
   solution: "L1 runs the whole platform in one process; use --role=all (the default)."
@@ -167,3 +173,24 @@ control.malformed-request:
 control.unauthenticated:
   message: "This operation requires authentication."
   solution: "Sign in with `login` to obtain a session token, or present a machine token with `--token`."
+engine.no-such-job:
+  message: "Pipeline {pipeline} has no running job to act on."
+  solution: "Start the pipeline before pausing or resuming it, and check the id for typos."
+monitor.no-observation:
+  message: "No observation is available for pipeline {pipeline}."
+  solution: "Check the pipeline id for typos; a freshly started pipeline may take a moment to publish its first observation."
+transform.expression-failed:
+  message: "Expression {expr} could not be evaluated for a row: {detail}."
+  solution: "Check the expression against the fields and types the row actually carries at runtime."
+transform.script-compile-failed:
+  message: "The js transform script could not be compiled: {detail}."
+  solution: "Fix the script so it parses as valid JavaScript."
+transform.script-no-process:
+  message: "The js transform script defines no process(record, ctx) function."
+  solution: "Add a process(record, ctx) function; it is the required entry point of a js transform."
+transform.script-failed:
+  message: "The js transform script raised an error while processing a row: {detail}."
+  solution: "Fix the script so it does not throw for this input, or guard the failing operation."
+transform.script-output-invalid:
+  message: "The js transform script produced output that is not a valid record: {detail}."
+  solution: "Ensure process returns a record (or emits one) whose before, after and schema are objects or null."

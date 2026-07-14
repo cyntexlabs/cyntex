@@ -5,6 +5,9 @@ import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoClients;
 import com.mongodb.client.MongoDatabase;
 import io.cyntex.core.dsl.DslParser;
+import io.cyntex.core.lifecycle.DesiredState;
+import io.cyntex.core.lifecycle.Observation;
+import io.cyntex.core.lifecycle.PipelineState;
 import io.cyntex.spi.store.ConnectionConfig;
 import io.cyntex.spi.store.ConnectionTestItem;
 import io.cyntex.spi.store.ConnectionTestResult;
@@ -29,10 +32,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 /**
  * Witnesses the aggregated store port against a real Mongo replica-set: one write through each of the
  * sub-stores lands in its own distinct, named storage area and reads back through that same sub-store,
- * so the artifact truth layer, the pipeline state store, the connection catalog, the discovered
- * source-schema store, the connector distribution registry, the latest connection-test result per
- * connection and the SRS meta store never share storage. Skipped automatically where Docker is absent,
- * so a Docker-less build
+ * so the artifact truth layer, the pipeline state store, the pipeline desired-state store, the
+ * per-pipeline observation store, the connection catalog, the discovered source-schema store, the
+ * connector distribution registry, the latest connection-test result per connection and the SRS meta
+ * store never share storage. Skipped automatically where Docker is absent, so a Docker-less build
  * stays green.
  */
 @Testcontainers(disabledWithoutDocker = true)
@@ -54,7 +57,7 @@ class MongoStorePortIT {
             """;
 
     @Test
-    void aggregatesTheSevenSubStoresEachOnItsOwnStorage() {
+    void aggregatesTheNineSubStoresEachOnItsOwnStorage() {
         // The Testcontainers Mongo speaks plaintext; TLS is opt-in, so a plaintext URL connects with
         // no flag. TLS wiring itself is covered by MongoConnectionTest.
         String uri = REPLICA_SET.getReplicaSetUrl();
@@ -63,9 +66,11 @@ class MongoStorePortIT {
             connection.verify();
             MongoStorePort port = new MongoStorePort(connection);
 
-            // one write through each of the seven sub-stores
+            // one write through each of the nine sub-stores
             port.artifacts().save(PARSER.parse(ORDERS));
             port.state().create("orders_sync", "{\"phase\":\"snapshot\"}", Instant.parse("2026-07-06T00:00:00Z"));
+            port.desired().save(new DesiredState("orders_sync", PipelineState.RUNNING, "rev-abc"));
+            port.observations().save(new Observation("orders_sync", PipelineState.RUNNING, Map.of(), Map.of()));
             port.catalog().save(new ConnectionConfig("mysql-local", "mysql", Map.of("host", "localhost")));
             port.schemas().save(new DiscoveredSourceModel("mysql-local", "mysql", 1783998000000L, new SourceModel(List.of(
                     new SourceTable("orders", List.of(), List.of(), List.of())))));
@@ -82,6 +87,8 @@ class MongoStorePortIT {
             // each reads back through its own sub-store
             assertThat(port.artifacts().get("orders")).isPresent();
             assertThat(port.state().read("orders_sync")).isPresent();
+            assertThat(port.desired().read("orders_sync")).isPresent();
+            assertThat(port.observations().read("orders_sync")).isPresent();
             assertThat(port.catalog().get("mysql-local")).isPresent();
             assertThat(port.schemas().get("mysql-local")).isPresent();
             assertThat(port.connectors().list()).hasSize(1);
@@ -94,6 +101,8 @@ class MongoStorePortIT {
                 MongoDatabase database = raw.getDatabase(databaseName);
                 assertThat(database.getCollection(MongoStorePort.ARTIFACTS).countDocuments()).isEqualTo(1);
                 assertThat(database.getCollection(MongoStorePort.PIPELINE_STATE).countDocuments()).isEqualTo(1);
+                assertThat(database.getCollection(MongoStorePort.PIPELINE_DESIRED).countDocuments()).isEqualTo(1);
+                assertThat(database.getCollection(MongoStorePort.PIPELINE_OBSERVATION).countDocuments()).isEqualTo(1);
                 assertThat(database.getCollection(MongoStorePort.CONNECTIONS).countDocuments()).isEqualTo(1);
                 assertThat(database.getCollection(MongoStorePort.SOURCE_SCHEMAS).countDocuments()).isEqualTo(1);
                 assertThat(database.getCollection(MongoStorePort.CONNECTOR_ARTIFACTS + ".files").countDocuments())

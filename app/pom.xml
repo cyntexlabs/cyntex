@@ -71,6 +71,20 @@
       <artifactId>core-common</artifactId>
       <version>${revision}</version>
     </dependency>
+    <!-- The node-local log tail: the assembly root owns the one in-process log sink, feeds it from a
+         logging appender it attaches, and exposes it to the logs read face. -->
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>core-logging</artifactId>
+      <version>${revision}</version>
+    </dependency>
+    <!-- The logging implementation (already the runtime backend via the Boot logging starter): the
+         assembly root attaches its own appender to feed the node-local log sink. Version-managed by the
+         platform BOM. -->
+    <dependency>
+      <groupId>ch.qos.logback</groupId>
+      <artifactId>logback-classic</artifactId>
+    </dependency>
     <!-- The control ring's ports the assembly root binds concrete implementations to: the password
          hasher and the session-token signer are framework-free interfaces in the control kernel, and
          their real (library-backed) implementations live here at the assembly point. -->
@@ -121,6 +135,21 @@
       <artifactId>runtime-probe</artifactId>
       <version>${revision}</version>
     </dependency>
+    <!-- The runtime convergence loop the assembly root drives: the app is the one place a runtime-ring
+         module is wired in (rule R7), and the Spring scheduler that ticks it lives here, not in the
+         runtime ring where the framework is banned. -->
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>scheduler</artifactId>
+      <version>${revision}</version>
+    </dependency>
+
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>engine</artifactId>
+      <version>${revision}</version>
+    </dependency>
+
     <!-- The SRS capture runtime the assembly root makes the embedded member capable of: the change-ring
          item serializer registered on the member and the meta-store user-context key bound onto it. -->
     <dependency>
@@ -144,6 +173,14 @@
     <dependency>
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-test</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <!-- Test scope only: the assembly root never ships the CLI, but the single-node integration drives the
+         production CLI websocket client against a real server to prove the client<->server stream round-trip. -->
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>cli</artifactId>
+      <version>${revision}</version>
       <scope>test</scope>
     </dependency>
     <!-- Testcontainers: a throwaway Mongo replica-set to witness that the assembly root exposes a

@@ -46,8 +46,9 @@ public final class Cli implements Runnable {
      * the read loop, not as a one-shot verb.
      */
     static final List<String> CONNECTED_VERBS = List.of(
-            "apply", "get", "run", "export", "diff", "edit", "start", "stop", "status", "logs", "test",
-            "test-result", "discover-schema", "schema", "register", "connectors");
+            "apply", "get", "run", "export", "diff", "edit", "start", "stop", "pause", "resume",
+            "status", "metrics", "snapshot", "logs", "test", "test-result", "discover-schema", "schema",
+            "register", "connectors");
 
     @Spec
     CommandSpec spec;

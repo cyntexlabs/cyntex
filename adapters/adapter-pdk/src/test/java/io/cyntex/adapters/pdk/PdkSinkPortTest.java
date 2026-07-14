@@ -5,6 +5,8 @@ import io.cyntex.core.event.Envelope;
 import io.cyntex.spi.sink.DdlPolicy;
 import io.cyntex.spi.sink.SinkConfig;
 import io.cyntex.spi.sink.SinkWriter;
+import io.cyntex.spi.sink.TargetField;
+import io.cyntex.spi.sink.TargetTable;
 import io.cyntex.spi.sink.WriteMode;
 import io.cyntex.spi.sink.WriteResult;
 import org.junit.jupiter.api.Test;
@@ -34,6 +36,15 @@ class PdkSinkPortTest {
 
     private static SinkConfig config(WriteMode mode, DdlPolicy ddl) {
         return new SinkConfig("demo", Map.of(), mode, ddl);
+    }
+
+    private static SinkConfig configWithTarget(TargetTable target) {
+        return new SinkConfig("demo", Map.of(), WriteMode.UPSERT, DdlPolicy.FAIL, target);
+    }
+
+    private static TargetTable target() {
+        return new TargetTable("t1",
+                List.of(new TargetField("id", "int", true), new TargetField("v", "int", false)));
     }
 
     private static WriteResult await(SinkWriter writer, List<Envelope> records) throws Exception {
@@ -125,6 +136,38 @@ class PdkSinkPortTest {
         try (SinkWriter writer = port.open(config(WriteMode.UPSERT, DdlPolicy.IGNORE))) {
             // The batch carries one row and one schema change; only the row reaches the connector.
             assertThat(await(writer, List.of(insert(1), Envelope.ddl(1L, "t1", Map.of()))).written()).isEqualTo(1);
+        }
+    }
+
+    @Test
+    void theResolvedTargetPrimaryKeyReachesTheConnector(@TempDir Path dir) throws Exception {
+        // The sink reports the primary-key count of the table it is handed; one key column proves the
+        // resolved target model's key reached the connector rather than a bare, keyless table.
+        Path jar = Synthetic.keyCountingSink(dir);
+        PdkSinkPort port = new PdkSinkPort(provisioner(jar, "synthetic.KeyCounting"));
+        try (SinkWriter writer = port.open(configWithTarget(target()))) {
+            assertThat(await(writer, List.of(insert(1))).written()).isEqualTo(1);
+        }
+    }
+
+    @Test
+    void theResolvedTargetColumnsReachTheConnector(@TempDir Path dir) throws Exception {
+        // The sink reports the column count of the table it is handed; both columns prove the resolved
+        // target schema reached the connector.
+        Path jar = Synthetic.fieldCountingSink(dir);
+        PdkSinkPort port = new PdkSinkPort(provisioner(jar, "synthetic.FieldCounting"));
+        try (SinkWriter writer = port.open(configWithTarget(target()))) {
+            assertThat(await(writer, List.of(insert(1))).written()).isEqualTo(2);
+        }
+    }
+
+    @Test
+    void withoutAResolvedTargetTheConnectorGetsABareTableWithNoColumns(@TempDir Path dir) throws Exception {
+        // No resolved target model: the connector is handed a bare table id with no columns, as before.
+        Path jar = Synthetic.fieldCountingSink(dir);
+        PdkSinkPort port = new PdkSinkPort(provisioner(jar, "synthetic.FieldCounting"));
+        try (SinkWriter writer = port.open(config(WriteMode.UPSERT, DdlPolicy.FAIL))) {
+            assertThat(await(writer, List.of(insert(1))).written()).isEqualTo(0);
         }
     }
 }

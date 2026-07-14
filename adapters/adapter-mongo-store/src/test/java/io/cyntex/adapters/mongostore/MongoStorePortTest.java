@@ -20,6 +20,8 @@ class MongoStorePortTest {
         assertThat(List.of(
                 MongoStorePort.ARTIFACTS,
                 MongoStorePort.PIPELINE_STATE,
+                MongoStorePort.PIPELINE_DESIRED,
+                MongoStorePort.PIPELINE_OBSERVATION,
                 MongoStorePort.CONNECTIONS,
                 MongoStorePort.SOURCE_SCHEMAS,
                 MongoStorePort.CONNECTOR_ARTIFACTS,
@@ -27,7 +29,8 @@ class MongoStorePortTest {
                 MongoStorePort.CONNECTION_TEST_RESULTS,
                 MongoStorePort.SRS_META))
                 .doesNotHaveDuplicates()
-                .containsExactly("artifacts", "pipeline_state", "connections", "source_schemas",
-                        "connector_artifacts", "connector_catalog", "connection_test_results", "srs_meta");
+                .containsExactly("artifacts", "pipeline_state", "pipeline_desired", "pipeline_observation",
+                        "connections", "source_schemas", "connector_artifacts", "connector_catalog",
+                        "connection_test_results", "srs_meta");
     }
 }

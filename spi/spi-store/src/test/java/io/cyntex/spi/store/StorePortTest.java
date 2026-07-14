@@ -6,7 +6,10 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import io.cyntex.core.catalog.ConnectorCatalogEntry;
 import io.cyntex.core.lifecycle.CasOutcome;
 import io.cyntex.core.lifecycle.CheckpointDoc;
+import io.cyntex.core.lifecycle.DesiredState;
 import io.cyntex.core.lifecycle.EpochCas;
+import io.cyntex.core.lifecycle.Observation;
+import io.cyntex.core.lifecycle.PipelineState;
 import io.cyntex.core.model.Resource;
 import io.cyntex.core.model.SourceResource;
 import io.cyntex.core.model.ViewResource;
@@ -24,8 +27,10 @@ import org.junit.jupiter.api.Test;
  * The store port seen through an in-memory implementation: proves the persistence contract is
  * implementable and usable, and pins the shape it documents — an artifact truth layer
  * (save / get / list of canonical resources), a state store whose only write path is the
- * epoch-fencing compare-and-swap, a connection catalog store, a discovered source-schema store, a
- * connector distribution registry, the latest connection-test result store, and the SRS meta store.
+ * epoch-fencing compare-and-swap, a plain-upsert desired-intent store, a connection catalog store, a
+ * discovered source-schema store, a connector distribution registry, the derived connector catalog
+ * store, the latest connection-test result store, a plain-upsert per-pipeline observation store, and
+ * the SRS meta store.
  */
 class StorePortTest {
 
@@ -39,17 +44,19 @@ class StorePortTest {
     // --- facade ---
 
     @Test
-    void facadeExposesTheEightStores() {
+    void facadeExposesTheTenStores() {
         StorePort store = new InMemoryStore();
 
         assertThat(store.artifacts()).isNotNull();
         assertThat(store.state()).isNotNull();
+        assertThat(store.desired()).isNotNull();
         assertThat(store.catalog()).isNotNull();
         assertThat(store.schemas()).isNotNull();
         assertThat(store.connectors()).isNotNull();
-        assertThat(store.connectionTestResults()).isNotNull();
-        assertThat(store.meta()).isNotNull();
         assertThat(store.connectorCatalog()).isNotNull();
+        assertThat(store.connectionTestResults()).isNotNull();
+        assertThat(store.observations()).isNotNull();
+        assertThat(store.meta()).isNotNull();
     }
 
     // --- artifacts (the canonical truth layer) ---
@@ -355,6 +362,62 @@ class StorePortTest {
         assertThat(results.find("orders-db")).contains(reTested);
     }
 
+    // --- desired (the plain-upsert desired-intent store) ---
+
+    @Test
+    void desiredSaveThenReadRoundTrips() {
+        DesiredStore desired = new InMemoryStore().desired();
+        DesiredState want = new DesiredState("p1", PipelineState.RUNNING, "rev-abc");
+
+        desired.save(want);
+
+        assertThat(desired.read("p1")).contains(want);
+    }
+
+    @Test
+    void desiredReadAbsentIsEmpty() {
+        assertThat(new InMemoryStore().desired().read("p1")).isEmpty();
+    }
+
+    @Test
+    void desiredSaveUpsertsByPipelineId() {
+        DesiredStore desired = new InMemoryStore().desired();
+        desired.save(new DesiredState("p1", PipelineState.RUNNING, "rev-1"));
+        desired.save(new DesiredState("p1", PipelineState.STOPPED, "rev-2"));
+
+        DesiredState stored = desired.read("p1").orElseThrow();
+        assertThat(stored.targetState()).isEqualTo(PipelineState.STOPPED);
+        assertThat(stored.revision()).isEqualTo("rev-2");
+    }
+
+    // --- observations (the plain-upsert per-pipeline observation store) ---
+
+    @Test
+    void observationSaveThenReadRoundTrips() {
+        ObservationStore observations = new InMemoryStore().observations();
+        Observation obs = new Observation("p1", PipelineState.RUNNING, Map.of("recordCount", 7L), Map.of());
+
+        observations.save(obs);
+
+        assertThat(observations.read("p1")).contains(obs);
+    }
+
+    @Test
+    void observationReadAbsentIsEmpty() {
+        assertThat(new InMemoryStore().observations().read("p1")).isEmpty();
+    }
+
+    @Test
+    void observationSaveUpsertsByPipelineId() {
+        ObservationStore observations = new InMemoryStore().observations();
+        observations.save(new Observation("p1", PipelineState.RUNNING, Map.of("recordCount", 1L), Map.of()));
+        observations.save(new Observation("p1", PipelineState.PAUSED, Map.of("recordCount", 2L), Map.of()));
+
+        Observation stored = observations.read("p1").orElseThrow();
+        assertThat(stored.state()).isEqualTo(PipelineState.PAUSED);
+        assertThat(stored.metrics()).containsEntry("recordCount", 2L);
+    }
+
     // --- meta (the SRS mining-chain coordination store) ---
 
     @Test
@@ -466,6 +529,8 @@ class StorePortTest {
         private final Map<String, byte[]> connectorArtifacts = new HashMap<>();
         private final Map<String, ConnectorCatalogEntry> connectorCatalogRows = new HashMap<>();
         private final Map<String, ConnectionTestResult> testResults = new HashMap<>();
+        private final Map<String, DesiredState> desired = new HashMap<>();
+        private final Map<String, Observation> observations = new HashMap<>();
         private final Map<String, SrsMeta> srsMeta = new HashMap<>();
 
         @Override
@@ -621,6 +686,41 @@ class StorePortTest {
         }
 
         @Override
+        public DesiredStore desired() {
+            return new DesiredStore() {
+                @Override
+                public void save(DesiredState desiredState) {
+                    desired.put(desiredState.pipelineId(), desiredState);
+                }
+
+                @Override
+                public Optional<DesiredState> read(String pipelineId) {
+                    return Optional.ofNullable(desired.get(pipelineId));
+                }
+
+                @Override
+                public List<String> pipelineIds() {
+                    return List.copyOf(desired.keySet());
+                }
+            };
+        }
+
+        @Override
+        public ObservationStore observations() {
+            return new ObservationStore() {
+                @Override
+                public void save(Observation observation) {
+                    observations.put(observation.pipelineId(), observation);
+                }
+
+                @Override
+                public Optional<Observation> read(String pipelineId) {
+                    return Optional.ofNullable(observations.get(pipelineId));
+                }
+            };
+        }
+
+        @Override
         public SrsMetaStore meta() {
             return new SrsMetaStore() {
                 @Override
@@ -683,6 +783,28 @@ class StorePortTest {
                     if (!advanced) {
                         // A reader may advance before the sink first acks: create the entry, acked absent.
                         merged.add(new ConsumerOffset(pipelineId, Map.of(table, lastReadSeq), null));
+                    }
+                    srsMeta.put(miningChainId, new SrsMeta(current.miningChainId(), current.sourceReadOffset(),
+                            merged, current.cdcStartPosition(), current.schemaHistory(), current.retention()));
+                }
+
+                @Override
+                public void advanceSinkAckedSrcpos(String miningChainId, String pipelineId, String srcpos) {
+                    SrsMeta current = require(miningChainId);
+                    List<ConsumerOffset> merged = new ArrayList<>();
+                    boolean advanced = false;
+                    for (ConsumerOffset existing : current.consumerOffsets()) {
+                        if (existing.pipelineId().equals(pipelineId)) {
+                            // Advance the sink-acked position only; the consumer's read cursor is untouched.
+                            merged.add(new ConsumerOffset(pipelineId, existing.perTableSeq(), srcpos));
+                            advanced = true;
+                        } else {
+                            merged.add(existing);
+                        }
+                    }
+                    if (!advanced) {
+                        // A sink may ack before the reader first publishes a cursor: create the entry, cursor empty.
+                        merged.add(new ConsumerOffset(pipelineId, Map.of(), srcpos));
                     }
                     srsMeta.put(miningChainId, new SrsMeta(current.miningChainId(), current.sourceReadOffset(),
                             merged, current.cdcStartPosition(), current.schemaHistory(), current.retention()));

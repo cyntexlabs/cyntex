@@ -421,6 +421,25 @@ class CaptureRunUnitTest {
         }
 
         @Override
+        public void advanceSinkAckedSrcpos(String miningChainId, String pipelineId, String srcpos) {
+            SrsMeta m = require(miningChainId);
+            List<ConsumerOffset> next = new ArrayList<>();
+            ConsumerOffset existing = null;
+            for (ConsumerOffset c : m.consumerOffsets()) {
+                if (c.pipelineId().equals(pipelineId)) {
+                    existing = c;
+                } else {
+                    next.add(c);
+                }
+            }
+            Map<String, Long> perTable = existing == null ? Map.of() : existing.perTableSeq();
+            next.add(new ConsumerOffset(pipelineId, perTable, srcpos));
+            records.put(miningChainId, new SrsMeta(
+                    m.miningChainId(), m.sourceReadOffset(), next, m.cdcStartPosition(),
+                    m.schemaHistory(), m.retention()));
+        }
+
+        @Override
         public void setCdcStartPosition(String miningChainId, String cdcStartPosition) {
             SrsMeta m = require(miningChainId);
             records.put(miningChainId, new SrsMeta(

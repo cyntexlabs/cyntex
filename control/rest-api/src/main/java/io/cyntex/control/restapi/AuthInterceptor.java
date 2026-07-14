@@ -38,13 +38,14 @@ import java.util.Optional;
  */
 final class AuthInterceptor implements HandlerInterceptor {
 
-    private static final String BEARER_PREFIX = "Bearer ";
-
     /**
-     * The request attribute the authenticated subject is stashed under, for a handler that audits its
-     * operation to the caller. Namespaced by this class so it cannot collide with a framework attribute.
+     * Request attribute the interceptor stashes the authenticated caller's subject under, so a handler can
+     * name the real caller when it audits a write. Set only after authentication and authorization pass, so
+     * a handler that reads it runs only for an authorized caller.
      */
-    static final String PRINCIPAL_ATTRIBUTE = AuthInterceptor.class.getName() + ".principal";
+    static final String PRINCIPAL_ATTRIBUTE = "io.cyntex.control.principal";
+
+    private static final String BEARER_PREFIX = "Bearer ";
 
     private final OperationRegistry registry;
     private final CredentialAuthenticator credentials;

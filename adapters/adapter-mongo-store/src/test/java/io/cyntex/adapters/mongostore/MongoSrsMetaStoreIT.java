@@ -129,6 +129,37 @@ class MongoSrsMetaStoreIT {
     }
 
     @Test
+    void advanceSinkAckedSrcposAdvancesTheAckedPositionWithoutClobberingTheReadCursor() {
+        withStore(store -> {
+            store.create(CHAIN, null);
+            // The reader has advanced p1's per-table cursor; the sink then acks a durable position. The read
+            // cursor and the sink-ack are independent writers of one consumer record, so the sink's advance
+            // must leave the read cursor untouched.
+            store.upsertConsumerOffset(CHAIN, new ConsumerOffset("p1", Map.of("orders", 42L), null));
+
+            store.advanceSinkAckedSrcpos(CHAIN, "p1", "gtid:aaa-1:100");
+
+            ConsumerOffset p1 = onlyConsumer(store);
+            assertThat(p1.sinkAckedSrcpos()).isEqualTo("gtid:aaa-1:100");
+            assertThat(p1.perTableSeq()).containsEntry("orders", 42L);
+        });
+    }
+
+    @Test
+    void advanceSinkAckedSrcposCreatesTheConsumerWhenItHasNoneYet() {
+        withStore(store -> {
+            store.create(CHAIN, null);
+            // A sink may ack before the reader publishes any cursor: the deep set creates the consumer entry,
+            // and its read cursor stays empty until a reader writes one.
+            store.advanceSinkAckedSrcpos(CHAIN, "p1", "gtid:aaa-1:7");
+
+            ConsumerOffset p1 = onlyConsumer(store);
+            assertThat(p1.sinkAckedSrcpos()).isEqualTo("gtid:aaa-1:7");
+            assertThat(p1.perTableSeq()).isEmpty();
+        });
+    }
+
+    @Test
     void setCdcStartPositionPersistsTheSeamPosition() {
         withStore(store -> {
             store.create(CHAIN, null);
@@ -164,6 +195,8 @@ class MongoSrsMetaStoreIT {
             assertThatThrownBy(() -> store.upsertConsumerOffset("nope", new ConsumerOffset("p", Map.of(), null)))
                     .isInstanceOf(IllegalStateException.class);
             assertThatThrownBy(() -> store.advanceConsumerReadSeq("nope", "p", "orders", 1L))
+                    .isInstanceOf(IllegalStateException.class);
+            assertThatThrownBy(() -> store.advanceSinkAckedSrcpos("nope", "p", "gtid:aaa-1:1"))
                     .isInstanceOf(IllegalStateException.class);
             assertThatThrownBy(() -> store.setCdcStartPosition("nope", "x"))
                     .isInstanceOf(IllegalStateException.class);

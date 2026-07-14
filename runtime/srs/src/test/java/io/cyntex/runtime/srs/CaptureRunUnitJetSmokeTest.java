@@ -114,8 +114,13 @@ class CaptureRunUnitJetSmokeTest {
             assertThat(run.ringSource()).isPresent();
 
             Pipeline p = Pipeline.create();
+            // Pinned to local parallelism one = the production topology (the ring source is a single reader
+            // and the sink runs total-parallelism-one): a default-parallelism map or list sink would fan the
+            // single ordered change stream across racing instances and the observed list order would no longer
+            // be the read order.
             p.readFrom(run.ringSource().orElseThrow()).withoutTimestamps()
-                    .map(item -> item.after().get("id")).writeTo(Sinks.list(downName));
+                    .map(item -> item.after().get("id")).setLocalParallelism(1)
+                    .writeTo(Sinks.list(downName)).setLocalParallelism(1);
             job = hz.getJet().newJob(p);
             awaitSize(downstream, 5);
 
@@ -157,8 +162,13 @@ class CaptureRunUnitJetSmokeTest {
             assertThat(run.ringSource()).isPresent();
 
             Pipeline p = Pipeline.create();
+            // Pinned to local parallelism one = the production topology (the ring source is a single reader
+            // and the sink runs total-parallelism-one): a default-parallelism map or list sink would fan the
+            // single ordered change stream across racing instances and the observed list order would no longer
+            // be the read order.
             p.readFrom(run.ringSource().orElseThrow()).withoutTimestamps()
-                    .map(item -> item.after().get("id")).writeTo(Sinks.list(downName));
+                    .map(item -> item.after().get("id")).setLocalParallelism(1)
+                    .writeTo(Sinks.list(downName)).setLocalParallelism(1);
             job = hz.getJet().newJob(p);
             awaitSize(downstream, 3);
 
@@ -360,6 +370,25 @@ class CaptureRunUnitJetSmokeTest {
             perTable.put(table, lastReadSeq);
             String ack = existing == null ? null : existing.sinkAckedSrcpos();
             next.add(new ConsumerOffset(pipelineId, perTable, ack));
+            records.put(miningChainId, new SrsMeta(
+                    m.miningChainId(), m.sourceReadOffset(), next, m.cdcStartPosition(),
+                    m.schemaHistory(), m.retention()));
+        }
+
+        @Override
+        public synchronized void advanceSinkAckedSrcpos(String miningChainId, String pipelineId, String srcpos) {
+            SrsMeta m = require(miningChainId);
+            List<ConsumerOffset> next = new ArrayList<>();
+            ConsumerOffset existing = null;
+            for (ConsumerOffset c : m.consumerOffsets()) {
+                if (c.pipelineId().equals(pipelineId)) {
+                    existing = c;
+                } else {
+                    next.add(c);
+                }
+            }
+            Map<String, Long> perTable = existing == null ? Map.of() : existing.perTableSeq();
+            next.add(new ConsumerOffset(pipelineId, perTable, srcpos));
             records.put(miningChainId, new SrsMeta(
                     m.miningChainId(), m.sourceReadOffset(), next, m.cdcStartPosition(),
                     m.schemaHistory(), m.retention()));

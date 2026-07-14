@@ -14,6 +14,9 @@ import io.cyntex.control.core.GeneratedSecret;
 import io.cyntex.control.core.LoginService;
 import io.cyntex.control.core.OperationRegistry;
 import io.cyntex.control.core.PasswordHasher;
+import io.cyntex.control.core.PipelineLifecycleService;
+import io.cyntex.control.core.PipelineLogQueryService;
+import io.cyntex.control.core.PipelineObservationQueryService;
 import io.cyntex.control.core.SchemaDiscoveryService;
 import io.cyntex.control.core.SchemaQueryService;
 import io.cyntex.control.core.Scope;
@@ -23,6 +26,10 @@ import io.cyntex.control.core.TokenSigner;
 import io.cyntex.control.core.VerifiedToken;
 import io.cyntex.core.catalog.CyntexCatalog;
 import io.cyntex.core.dsl.DslParser;
+import io.cyntex.core.lifecycle.DesiredState;
+import io.cyntex.core.lifecycle.Observation;
+import io.cyntex.core.logging.LogSink;
+import io.cyntex.core.logging.RingBufferLogSink;
 import io.cyntex.core.model.Resource;
 import io.cyntex.core.model.canonical.CanonicalWriter;
 import io.cyntex.runtime.probe.ConnectionProbe;
@@ -31,7 +38,9 @@ import io.cyntex.spi.store.AuditRecord;
 import io.cyntex.spi.store.AuditStore;
 import io.cyntex.spi.store.ConnectionTestResult;
 import io.cyntex.spi.store.ConnectionTestResultStore;
+import io.cyntex.spi.store.DesiredStore;
 import io.cyntex.spi.store.DiscoveredSourceModel;
+import io.cyntex.spi.store.ObservationStore;
 import io.cyntex.spi.store.SchemaStore;
 import io.cyntex.spi.store.TokenRecord;
 import io.cyntex.spi.store.TokenStore;
@@ -566,6 +575,50 @@ class AuthTest {
             };
             return new ConnectorCatalogView(CyntexCatalog.load(), store);
         }
+
+        @Bean
+        DesiredStore desiredStore() {
+            return new FakeDesiredStore();
+        }
+
+        @Bean
+        PipelineLifecycleService pipelineLifecycleService(
+                ArtifactQueryService artifacts, DesiredStore desired, AuditGate auditGate) {
+            return new PipelineLifecycleService(artifacts, desired, auditGate);
+        }
+
+        @Bean
+        ObservationStore observationStore() {
+            // No read-face assertion here; the empty store is enough to bring the read controller up so the
+            // full-face bundle boots. The read faces themselves are proven in PipelineObservationApiTest.
+            return new ObservationStore() {
+                @Override
+                public void save(Observation observation) {
+                }
+
+                @Override
+                public Optional<Observation> read(String pipelineId) {
+                    return Optional.empty();
+                }
+            };
+        }
+
+        @Bean
+        PipelineObservationQueryService pipelineObservationQueryService(ObservationStore observations) {
+            return new PipelineObservationQueryService(observations);
+        }
+
+        @Bean
+        LogSink logSink() {
+            // No logs assertion here; an empty node-local sink is enough to bring the logs controller up so
+            // the full-face bundle boots. The logs face is proven in PipelineLogsApiTest.
+            return new RingBufferLogSink(64, 200);
+        }
+
+        @Bean
+        PipelineLogQueryService pipelineLogQueryService(LogSink sink) {
+            return new PipelineLogQueryService(sink);
+        }
     }
 
     // ---- fakes ----
@@ -670,6 +723,26 @@ class AuthTest {
                 return Optional.empty();
             }
             return Optional.of(new VerifiedToken(token.substring(0, bar), Scope.valueOf(token.substring(bar + 1))));
+        }
+    }
+
+    /** An in-memory desired store, last write wins per pipeline id — enough to bring up the lifecycle service. */
+    private static final class FakeDesiredStore implements DesiredStore {
+        private final Map<String, DesiredState> byId = new LinkedHashMap<>();
+
+        @Override
+        public void save(DesiredState desired) {
+            byId.put(desired.pipelineId(), desired);
+        }
+
+        @Override
+        public Optional<DesiredState> read(String pipelineId) {
+            return Optional.ofNullable(byId.get(pipelineId));
+        }
+
+        @Override
+        public List<String> pipelineIds() {
+            return List.copyOf(byId.keySet());
         }
     }
 
