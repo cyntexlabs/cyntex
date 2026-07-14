@@ -20,8 +20,9 @@ import java.util.List;
  * <p>This is the only non-adapter module permitted to depend on the adapters ring (rule R7): the
  * assembly root is where the adapter bridges are bound into the runtime. The store bridge is engaged
  * here — {@link StoreConfiguration} wires a {@code StorePort} from {@link MongoStorePort}; the PDK
- * bridge is still a placeholder marker until its runtime lands. {@link #adapterBridges()} records
- * both, so the wiring surface is referenced only from the assembly root.
+ * bridge is engaged through the control plane, which wires the connector operations (connection test,
+ * schema discovery, registration) onto the PDK adapter. {@link #adapterBridges()} records both, so the
+ * wiring surface is referenced only from the assembly root.
  *
  * <p>The Mongo driver is on the classpath (through the store adapter), but the framework must not
  * stand up its own, unmanaged store client — the only store client is the controlled
@@ -60,7 +61,8 @@ public class Bootstrap {
      * The adapter bridges the assembly root binds into the runtime under {@code --role=all}. The app
      * is the only non-adapter module allowed to depend on the adapters ring (rule R7). The store
      * bridge ({@link MongoStorePort}) is engaged through {@link StoreConfiguration}; the PDK bridge
-     * ({@link PdkAdapter}) is a placeholder marker until its runtime lands.
+     * ({@link PdkAdapter}) is engaged through the control plane, which wires the connector operations onto
+     * the PDK adapter module.
      */
     static List<Class<?>> adapterBridges() {
         return List.of(PdkAdapter.class, MongoStorePort.class);

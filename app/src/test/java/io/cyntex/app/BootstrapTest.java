@@ -51,9 +51,9 @@ class BootstrapTest {
 
     @Test
     void assemblyRootRecordsTheAdapterBridges() {
-        // The Mongo store bridge is now really engaged (StoreConfiguration wires a StorePort bean from
-        // MongoStorePort); the PDK bridge remains a placeholder marker until its runtime lands. Both are
-        // referenced here only from the assembly root — the R7 exemption made real.
+        // The Mongo store bridge is engaged (StoreConfiguration wires a StorePort bean from MongoStorePort)
+        // and the PDK bridge is engaged through the control plane (the connector operations wired onto the
+        // PDK adapter). Both are referenced here only from the assembly root — the R7 exemption made real.
         assertThat(Bootstrap.adapterBridges())
                 .containsExactly(PdkAdapter.class, MongoStorePort.class);
     }
