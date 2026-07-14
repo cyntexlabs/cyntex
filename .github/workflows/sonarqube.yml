@@ -22,6 +22,11 @@ on:
   push:
     branches:
       - main
+    # Release tags analyze main under the release version. The project's New Code definition
+    # is "previous version", so a tagged release creates a version event that resets the
+    # baseline; later analyses then measure new code since the last release.
+    tags:
+      - "v*"
   pull_request:
     branches:
       - main
@@ -83,11 +88,20 @@ jobs:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
         run: |
-          mvn -B verify sonar:sonar \
-            -Dsonar.projectKey=tapstate \
-            -Dsonar.host.url="$SONAR_HOST_URL" \
-            -Dsonar.login="$SONAR_TOKEN" \
+          set -euo pipefail
+          args=(
+            -Dsonar.projectKey=tapstate
+            -Dsonar.host.url="$SONAR_HOST_URL"
+            -Dsonar.login="$SONAR_TOKEN"
             -Dsonar.qualitygate.wait=true
+          )
+          # On a release tag (e.g. v1.2.3) stamp the analysis with the release version (strip the
+          # leading v), so it creates a version event. With the "previous version" New Code
+          # definition, that resets the baseline; other builds keep the pom's default version.
+          if [ "${GITHUB_REF_TYPE:-}" = "tag" ]; then
+            args+=("-Dsonar.projectVersion=${GITHUB_REF_NAME#v}")
+          fi
+          mvn -B verify sonar:sonar "${args[@]}"
 
       # Best-effort PR decoration for Community Edition. Runs even when the analyze step failed
       # (that is exactly the gate-red case worth commenting on); continue-on-error keeps a comment
