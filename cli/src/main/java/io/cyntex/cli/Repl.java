@@ -522,19 +522,24 @@ final class Repl {
     }
 
     /**
-     * {@code register <path> [-o text|json|yaml]} — registers a local connector artifact with the server. It
-     * reads the jar bytes and uploads them; the server introspects the artifact and stores it content-hash
-     * idempotently, then reports what was registered (newly, or an already-registered no-op). A missing
-     * operand or unknown option is a benign usage line; an unreadable path is a benign "cannot read" line; a
-     * coded refusal (a bad artifact, an id conflict) renders its code and message.
+     * {@code register <path> [-o text|json|yaml]} — registers a local connector artifact with the server. A
+     * file path uploads that one jar; a directory path uploads every {@code *.jar} directly under it as a
+     * batch. The server introspects each artifact and stores it content-hash idempotently, then reports what
+     * was registered (newly, or an already-registered no-op). A missing operand or unknown option is a benign
+     * usage line; an unreadable path is a benign "cannot read" line; a coded refusal (a bad artifact, an id
+     * conflict) renders its code and message, and on the machine surfaces an {@code {"error":{...}}} document.
      */
     private void registerOnline(List<String> words) {
         PathAndFormat parsed = parsePathAndFormat(words);
         if (parsed == null) {
             return;
         }
-        PrintWriter err = commandLine.getErr();
         Path artifactPath = workdir.resolve(parsed.path()).normalize();
+        if (Files.isDirectory(artifactPath)) {
+            registerDirectory(artifactPath, parsed.format());
+            return;
+        }
+        PrintWriter err = commandLine.getErr();
         byte[] artifact;
         try {
             artifact = Files.readAllBytes(artifactPath);
@@ -644,14 +649,177 @@ final class Repl {
         out.flush();
     }
 
-    /** A coded refusal as an ordered tree for the machine surfaces: an {@code error} object with code (when present) and message. */
+    /** A coded refusal wrapped as a machine document: {@code {"error":{code?,message}}}. */
     private static Map<String, Object> errorDocument(String code, String message) {
+        Map<String, Object> document = new LinkedHashMap<>();
+        document.put("error", errorObject(code, message));
+        return document;
+    }
+
+    /** The inner error object for the machine surfaces: the code (when present) then the message. */
+    private static Map<String, Object> errorObject(String code, String message) {
         Map<String, Object> error = new LinkedHashMap<>();
         putIfPresent(error, "code", code == null || code.isBlank() ? null : code);
         error.put("message", message);
+        return error;
+    }
+
+    /**
+     * Registers every {@code *.jar} directly under a directory: a case-insensitive, non-recursive scan in
+     * filename order, uploading each artifact and collecting a per-artifact outcome. The batch stops early
+     * once the server is unreachable (there is no point uploading the rest). The collected outcomes render
+     * as a human report, or on the machine surfaces as an {@code {"artifacts":[...],"summary":{...}}} document.
+     */
+    private void registerDirectory(Path directory, OutputFormat format) {
+        PrintWriter err = commandLine.getErr();
+        List<Path> jars;
+        try (var entries = Files.list(directory)) {
+            jars = entries.filter(Files::isRegularFile)
+                    .filter(path -> path.getFileName().toString().toLowerCase(Locale.ROOT).endsWith(".jar"))
+                    .sorted()
+                    .toList();
+        } catch (IOException e) {
+            err.println("register: cannot read " + directory + ": " + e.getMessage());
+            err.flush();
+            return;
+        }
+        List<BatchEntry> outcomes = new ArrayList<>();
+        for (Path jar : jars) {
+            byte[] artifact;
+            try {
+                artifact = Files.readAllBytes(jar);
+            } catch (IOException e) {
+                err.println("register: cannot read " + jar + ": " + e.getMessage());
+                err.flush();
+                return;
+            }
+            ConnectorRegisterOutcome outcome = controlPlane.register(session.landingNode(), session.credential(), artifact);
+            outcomes.add(new BatchEntry(jar.getFileName().toString(), outcome));
+            if (outcome instanceof ConnectorRegisterOutcome.Unreachable) {
+                break;
+            }
+        }
+        renderBatch(directory, outcomes, format);
+    }
+
+    /** One artifact's place in a directory batch: its filename and the server's outcome for it. */
+    private record BatchEntry(String artifact, ConnectorRegisterOutcome outcome) {
+    }
+
+    /** The counts closing a batch report: newly registered, already-present no-ops, coded refusals, unreachable. */
+    private record BatchCounts(int registered, int alreadyRegistered, int rejected, int unreachable) {
+        static BatchCounts of(List<BatchEntry> outcomes) {
+            int registered = 0;
+            int alreadyRegistered = 0;
+            int rejected = 0;
+            int unreachable = 0;
+            for (BatchEntry entry : outcomes) {
+                switch (entry.outcome()) {
+                    case ConnectorRegisterOutcome.Registered r -> {
+                        if (r.connector().newlyRegistered()) {
+                            registered++;
+                        } else {
+                            alreadyRegistered++;
+                        }
+                    }
+                    case ConnectorRegisterOutcome.Rejected ignored -> rejected++;
+                    case ConnectorRegisterOutcome.Unreachable ignored -> unreachable++;
+                }
+            }
+            return new BatchCounts(registered, alreadyRegistered, rejected, unreachable);
+        }
+    }
+
+    /** Renders a directory batch on the chosen surface: a human report, or a machine artifacts/summary document. */
+    private void renderBatch(Path directory, List<BatchEntry> outcomes, OutputFormat format) {
+        if (format == OutputFormat.TEXT) {
+            renderBatchText(directory, outcomes);
+            return;
+        }
+        PrintWriter out = commandLine.getOut();
+        Map<String, Object> document = batchDocument(outcomes);
+        out.println(format == OutputFormat.JSON ? JsonOut.write(document) : YamlOut.write(document));
+        out.flush();
+    }
+
+    /** The human batch report: one line per artifact then a counts summary; an empty scan says so plainly. */
+    private void renderBatchText(Path directory, List<BatchEntry> outcomes) {
+        PrintWriter out = commandLine.getOut();
+        if (outcomes.isEmpty()) {
+            out.println("no connector jars found in " + directory);
+            out.flush();
+            return;
+        }
+        for (BatchEntry entry : outcomes) {
+            out.println(batchLine(entry));
+        }
+        out.println(batchSummary(outcomes));
+        out.flush();
+    }
+
+    /** One human report line for an artifact: its state and identity, or its coded refusal, or unreachable. */
+    private static String batchLine(BatchEntry entry) {
+        return switch (entry.outcome()) {
+            case ConnectorRegisterOutcome.Registered registered -> entry.artifact() + "  "
+                    + (registered.connector().newlyRegistered() ? "registered" : "already registered")
+                    + "  " + registered.connector().connectorId() + "  " + registered.connector().contentHash();
+            case ConnectorRegisterOutcome.Rejected rejected -> entry.artifact() + "  error: " + rejected.code()
+                    + "  " + rejected.message();
+            case ConnectorRegisterOutcome.Unreachable ignored -> entry.artifact() + "  unreachable";
+        };
+    }
+
+    /** The counts line closing a batch report: total attempted and a breakdown by outcome. */
+    private static String batchSummary(List<BatchEntry> outcomes) {
+        BatchCounts counts = BatchCounts.of(outcomes);
+        StringBuilder summary = new StringBuilder()
+                .append(outcomes.size()).append(" artifacts: ")
+                .append(counts.registered()).append(" registered, ")
+                .append(counts.alreadyRegistered()).append(" no-op, ")
+                .append(counts.rejected()).append(" rejected");
+        if (counts.unreachable() > 0) {
+            summary.append(", ").append(counts.unreachable()).append(" unreachable");
+        }
+        return summary.toString();
+    }
+
+    /** A directory batch as a machine document: an ordered {@code artifacts} array and a counts {@code summary}. */
+    private static Map<String, Object> batchDocument(List<BatchEntry> outcomes) {
+        List<Object> artifacts = new ArrayList<>();
+        for (BatchEntry entry : outcomes) {
+            artifacts.add(batchRow(entry));
+        }
+        BatchCounts counts = BatchCounts.of(outcomes);
+        Map<String, Object> summary = new LinkedHashMap<>();
+        summary.put("total", outcomes.size());
+        summary.put("registered", counts.registered());
+        summary.put("alreadyRegistered", counts.alreadyRegistered());
+        summary.put("rejected", counts.rejected());
+        if (counts.unreachable() > 0) {
+            summary.put("unreachable", counts.unreachable());
+        }
         Map<String, Object> document = new LinkedHashMap<>();
-        document.put("error", error);
+        document.put("artifacts", artifacts);
+        document.put("summary", summary);
         return document;
+    }
+
+    /** One artifact row for the machine batch document: the registration fields, or an {@code error} object. */
+    private static Map<String, Object> batchRow(BatchEntry entry) {
+        Map<String, Object> row = new LinkedHashMap<>();
+        row.put("artifact", entry.artifact());
+        switch (entry.outcome()) {
+            case ConnectorRegisterOutcome.Registered registered -> {
+                RegisteredConnector connector = registered.connector();
+                row.put("connectorId", connector.connectorId());
+                row.put("contentHash", connector.contentHash());
+                putIfPresent(row, "pdkApiVersion", connector.pdkApiVersion());
+                row.put("newlyRegistered", connector.newlyRegistered());
+            }
+            case ConnectorRegisterOutcome.Rejected rejected -> row.put("error", errorObject(rejected.code(), rejected.message()));
+            case ConnectorRegisterOutcome.Unreachable ignored -> row.put("error", errorObject(null, "the server is unreachable"));
+        }
+        return row;
     }
 
     /**

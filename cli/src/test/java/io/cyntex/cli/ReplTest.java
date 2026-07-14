@@ -12,6 +12,7 @@ import java.nio.file.Path;
 import java.nio.file.attribute.PosixFileAttributeView;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -83,6 +84,8 @@ class ReplTest {
         ConnectionDiscoverSchemaOutcome discoverSchemaOutcome = new ConnectionDiscoverSchemaOutcome.Unreachable();
         ConnectionSchemaOutcome schemaOutcome = new ConnectionSchemaOutcome.Unreachable();
         ConnectorRegisterOutcome registerOutcome = new ConnectorRegisterOutcome.Unreachable();
+        /** Per-artifact register outcomes keyed by artifact byte length (for batch/directory tests); falls back to {@link #registerOutcome}. */
+        final Map<Integer, ConnectorRegisterOutcome> registerOutcomeByLength = new HashMap<>();
         ConnectorListOutcome connectorListOutcome = new ConnectorListOutcome.Unreachable();
         final List<String> applyCalls = new ArrayList<>();
         final List<String> getCalls = new ArrayList<>();
@@ -163,7 +166,10 @@ class ReplTest {
         @Override
         public ConnectorRegisterOutcome register(URI baseUrl, String credential, byte[] artifact) {
             registerCalls.add(credential + "@" + baseUrl + " x" + artifact.length);
-            return healthy.contains(baseUrl) ? registerOutcome : new ConnectorRegisterOutcome.Unreachable();
+            if (!healthy.contains(baseUrl)) {
+                return new ConnectorRegisterOutcome.Unreachable();
+            }
+            return registerOutcomeByLength.getOrDefault(artifact.length, registerOutcome);
         }
 
         @Override
@@ -1352,6 +1358,88 @@ class ReplTest {
         String out = h.sink().toString().substring(mark);
         assertThat(out).contains("error:").contains("code:").contains("connector.spec-invalid")
                 .contains("message:").contains("The artifact spec is not valid JSON.");
+    }
+
+    @Test
+    void registerUploadsEveryJarInADirectoryAndReportsEachOutcome(@TempDir Path workdir) throws Exception {
+        Path dir = Files.createDirectory(workdir.resolve("connectors"));
+        Files.write(dir.resolve("orders.jar"), new byte[] {1});           // registered
+        Files.write(dir.resolve("billing.jar"), new byte[] {1, 2});       // already registered (no-op)
+        Files.write(dir.resolve("broken.jar"), new byte[] {1, 2, 3});     // rejected
+        Files.write(dir.resolve("notes.txt"), new byte[] {1, 2, 3, 4});   // not a jar: skipped
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.registerOutcomeByLength.put(1, new ConnectorRegisterOutcome.Registered(
+                new RegisteredConnector("orders", "h1", "1.0", true)));
+        client.registerOutcomeByLength.put(2, new ConnectorRegisterOutcome.Registered(
+                new RegisteredConnector("billing", "h2", "1.0", false)));
+        client.registerOutcomeByLength.put(3, new ConnectorRegisterOutcome.Rejected(
+                "connector.spec-invalid", "The artifact spec is not valid JSON."));
+        Harness h = onlineSession(workdir, client);
+        int mark = h.sink().toString().length();
+
+        assertThat(h.repl().dispatch("register connectors")).isTrue();
+
+        String out = h.sink().toString().substring(mark);
+        assertThat(out).contains("orders").contains("billing")
+                .contains("already registered")
+                .contains("connector.spec-invalid")
+                .contains("3 artifacts");
+        // only the three jars were uploaded; the .txt was skipped
+        assertThat(client.registerCalls).hasSize(3);
+    }
+
+    @Test
+    void registerUploadsADirectoryAsJsonWithAnArtifactArrayAndSummary(@TempDir Path workdir) throws Exception {
+        Path dir = Files.createDirectory(workdir.resolve("connectors"));
+        Files.write(dir.resolve("orders.jar"), new byte[] {1});
+        Files.write(dir.resolve("broken.jar"), new byte[] {1, 2, 3});
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.registerOutcomeByLength.put(1, new ConnectorRegisterOutcome.Registered(
+                new RegisteredConnector("orders", "h1", "1.0", true)));
+        client.registerOutcomeByLength.put(3, new ConnectorRegisterOutcome.Rejected(
+                "connector.spec-invalid", "bad spec"));
+        Harness h = onlineSession(workdir, client);
+        int mark = h.sink().toString().length();
+
+        assertThat(h.repl().dispatch("register connectors -o json")).isTrue();
+
+        String out = h.sink().toString().substring(mark);
+        assertThat(out).contains("\"artifacts\"").contains("\"summary\"")
+                .contains("\"artifact\"").contains("orders.jar").contains("broken.jar")
+                .contains("\"connectorId\"").contains("orders")
+                .contains("\"error\"").contains("connector.spec-invalid")
+                .contains("\"total\"");
+    }
+
+    @Test
+    void registerOfADirectoryWithNoJarsReportsThatNoneWereFound(@TempDir Path workdir) throws Exception {
+        Files.createDirectory(workdir.resolve("connectors"));
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        Harness h = onlineSession(workdir, client);
+        int mark = h.sink().toString().length();
+
+        assertThat(h.repl().dispatch("register connectors")).isTrue();
+
+        assertThat(h.sink().toString().substring(mark)).containsIgnoringCase("no connector jars");
+        assertThat(client.registerCalls).isEmpty();
+    }
+
+    @Test
+    void registerOfADirectoryStopsUploadingWhenTheServerBecomesUnreachable(@TempDir Path workdir) throws Exception {
+        Path dir = Files.createDirectory(workdir.resolve("connectors"));
+        Files.write(dir.resolve("a-first.jar"), new byte[] {1});          // registered
+        Files.write(dir.resolve("b-second.jar"), new byte[] {1, 2});      // unreachable -> stop the batch
+        Files.write(dir.resolve("c-third.jar"), new byte[] {1, 2, 3});    // never attempted
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.registerOutcomeByLength.put(1, new ConnectorRegisterOutcome.Registered(
+                new RegisteredConnector("first", "h1", "1.0", true)));
+        client.registerOutcomeByLength.put(2, new ConnectorRegisterOutcome.Unreachable());
+        Harness h = onlineSession(workdir, client);
+
+        assertThat(h.repl().dispatch("register connectors")).isTrue();
+
+        // sorted by name: a-first uploads, b-second is unreachable and breaks, c-third is never attempted
+        assertThat(client.registerCalls).hasSize(2);
     }
 
     @Test
