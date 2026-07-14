@@ -117,11 +117,13 @@ jobs:
         run: |
           set -uo pipefail
           host="${SONAR_HOST_URL%/}"
-          dashboard="$host/dashboard?id=tapstate"
+          dashboard="$host/dashboard?id=tapstate&pullRequest=${PR_NUMBER}"
 
-          # The analyze step already waited for the gate, and concurrency serializes runs, so the
-          # latest project status is this run's. Query by project key for simplicity.
-          ps="$(curl -s -u "$SONAR_TOKEN:" "$host/api/qualitygates/project_status?projectKey=tapstate" || true)"
+          # This instance has the Community Branch Plugin, so the PR is analyzed as a pull request
+          # whose new code is its diff against the base branch. Query the gate in that PR context,
+          # not the main branch (which would read empty). The analyze step already waited for the
+          # gate and concurrency serializes runs, so this status is this run's.
+          ps="$(curl -s -u "$SONAR_TOKEN:" "$host/api/qualitygates/project_status?projectKey=tapstate&pullRequest=${PR_NUMBER}" || true)"
           status="$(printf '%s' "$ps" | jq -r '.projectStatus.status // "UNKNOWN"' 2>/dev/null || echo UNKNOWN)"
           details="$(printf '%s' "$ps" | jq -r '.projectStatus.conditions[]? | select(.status=="ERROR") | "- `\(.metricKey)`: \(.actualValue) (fails \(.comparator) \(.errorThreshold))"' 2>/dev/null || true)"
 
@@ -141,8 +143,8 @@ jobs:
             if [ -n "${details:-}" ]; then
               printf 'Failing conditions:\n%s\n\n' "$details"
             fi
-            printf '[Open the dashboard](%s)\n\n' "$dashboard"
-            printf '_Community Edition: this comment stands in for native pull-request decoration._\n'
+            printf '[Open the pull-request dashboard](%s)\n\n' "$dashboard"
+            printf '_Posted by CI from the SonarQube pull-request quality gate._\n'
           } > comment.md
 
           existing="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments" \
