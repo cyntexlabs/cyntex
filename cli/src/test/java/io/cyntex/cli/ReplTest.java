@@ -1443,6 +1443,38 @@ class ReplTest {
     }
 
     @Test
+    void registerEchoesTheArtifactNameAndSizeBeforeUploading(@TempDir Path workdir) throws Exception {
+        Files.write(workdir.resolve("orders.jar"), new byte[2048]);   // 2 KB
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.registerOutcome = new ConnectorRegisterOutcome.Registered(
+                new RegisteredConnector("orders", "hash-abc", "1.3.5", true));
+        Harness h = onlineSession(workdir, client);
+        int mark = h.sink().toString().length();
+
+        assertThat(h.repl().dispatch("register orders.jar")).isTrue();
+
+        assertThat(h.sink().toString().substring(mark))
+                .containsIgnoringCase("uploading").contains("orders.jar").contains("KB");
+    }
+
+    @Test
+    void registerEchoesEachArtifactBeforeUploadingItInADirectoryBatch(@TempDir Path workdir) throws Exception {
+        Path dir = Files.createDirectory(workdir.resolve("connectors"));
+        Files.write(dir.resolve("orders.jar"), new byte[1024]);
+        Files.write(dir.resolve("billing.jar"), new byte[2048]);
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.registerOutcome = new ConnectorRegisterOutcome.Registered(
+                new RegisteredConnector("c", "h", "1.0", true));
+        Harness h = onlineSession(workdir, client);
+        int mark = h.sink().toString().length();
+
+        assertThat(h.repl().dispatch("register connectors")).isTrue();
+
+        assertThat(h.sink().toString().substring(mark))
+                .contains("uploading orders.jar").contains("uploading billing.jar");
+    }
+
+    @Test
     void registerWhileConnectedButNotAuthenticatedReportsAndDoesNotCallTheServer() {
         // The not-authenticated guard fires before the file is even read, so no file need exist.
         FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));

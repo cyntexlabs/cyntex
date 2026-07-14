@@ -548,6 +548,7 @@ final class Repl {
             err.flush();
             return;
         }
+        echoUploading(artifactPath.getFileName().toString(), artifact.length, parsed.format());
         ConnectorRegisterOutcome outcome = withFailover(() -> controlPlane.register(
                 session.landingNode(), session.credential(), artifact),
                 o -> o instanceof ConnectorRegisterOutcome.Unreachable);
@@ -693,6 +694,7 @@ final class Repl {
                 err.flush();
                 return;
             }
+            echoUploading(jar.getFileName().toString(), artifact.length, format);
             ConnectorRegisterOutcome outcome = controlPlane.register(session.landingNode(), session.credential(), artifact);
             outcomes.add(new BatchEntry(jar.getFileName().toString(), outcome));
             if (outcome instanceof ConnectorRegisterOutcome.Unreachable) {
@@ -820,6 +822,31 @@ final class Repl {
             case ConnectorRegisterOutcome.Unreachable ignored -> row.put("error", errorObject(null, "the server is unreachable"));
         }
         return row;
+    }
+
+    /** In the human surface, announces an upload before it starts (name and size), so a large or bulk upload shows progress; the machine surfaces stay silent so their document is not polluted. */
+    private void echoUploading(String artifact, long bytes, OutputFormat format) {
+        if (format != OutputFormat.TEXT) {
+            return;
+        }
+        PrintWriter err = commandLine.getErr();
+        err.println("uploading " + artifact + " (" + humanSize(bytes) + ")");
+        err.flush();
+    }
+
+    /** A short human byte size: {@code B} under a kibibyte, else one decimal in {@code KB}/{@code MB}/{@code GB}/{@code TB}. */
+    private static String humanSize(long bytes) {
+        if (bytes < 1024) {
+            return bytes + " B";
+        }
+        String[] units = {"KB", "MB", "GB", "TB"};
+        double size = bytes;
+        int unit = -1;
+        do {
+            size /= 1024;
+            unit++;
+        } while (size >= 1024 && unit < units.length - 1);
+        return String.format(Locale.ROOT, "%.1f %s", size, units[unit]);
     }
 
     /**
