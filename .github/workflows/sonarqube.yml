@@ -25,6 +25,9 @@ on:
   pull_request:
     branches:
       - main
+  # Manual trigger, so main can be re-analyzed on demand from the Actions tab after the
+  # server-side quality gate or New Code definition changes, without waiting for a push.
+  workflow_dispatch:
 
 # Community Edition keeps a single project state, so concurrent analyses would clobber each
 # other. Serialize them; do not cancel in progress, since a half-finished analysis is worse
