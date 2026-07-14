@@ -73,6 +73,13 @@
     <plugin.toolchains.version>3.2.0</plugin.toolchains.version>
     <!-- GraalVM native-image build plugin; runs only under the cli module's `native` profile -->
     <plugin.native.version>0.10.6</plugin.native.version>
+    <!-- JaCoCo coverage agent + XML report; feeds SonarQube. JDK 21 compatible. -->
+    <plugin.jacoco.version>0.8.13</plugin.jacoco.version>
+    <!-- SonarScanner for Maven. Invoked explicitly (sonar:sonar) by the SonarQube CI workflow,
+         never bound to a lifecycle phase, so a normal build never contacts a Sonar server.
+         Pinned for reproducibility and to satisfy requirePluginVersions; compatible with the
+         SonarQube 9.9 LTS server. -->
+    <plugin.sonar.version>3.11.0.3922</plugin.sonar.version>
   </properties>
 
   <repositories>
@@ -176,6 +183,16 @@
           <artifactId>spring-boot-maven-plugin</artifactId>
           <version>${spring.boot.version}</version>
         </plugin>
+        <plugin>
+          <groupId>org.jacoco</groupId>
+          <artifactId>jacoco-maven-plugin</artifactId>
+          <version>${plugin.jacoco.version}</version>
+        </plugin>
+        <plugin>
+          <groupId>org.sonarsource.scanner.maven</groupId>
+          <artifactId>sonar-maven-plugin</artifactId>
+          <version>${plugin.sonar.version}</version>
+        </plugin>
       </plugins>
     </pluginManagement>
 
@@ -257,6 +274,32 @@ core artifact.
             <phase>clean</phase>
             <goals>
               <goal>clean</goal>
+            </goals>
+          </execution>
+        </executions>
+      </plugin>
+
+      <!-- Coverage, inherited by every reactor module. prepare-agent sets the argLine that
+           surefire consumes to instrument unit tests; report writes target/site/jacoco/jacoco.xml
+           at prepare-package (strictly after the test phase, so ordering is unambiguous) for
+           SonarQube to auto-detect and aggregate. Modules with no tests emit no execution data
+           and are silently skipped; pom-packaging modules have no prepare-package phase and do
+           nothing. Only unit coverage is wired; integration-test (failsafe) coverage is out of scope. -->
+      <plugin>
+        <groupId>org.jacoco</groupId>
+        <artifactId>jacoco-maven-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>jacoco-prepare-agent</id>
+            <goals>
+              <goal>prepare-agent</goal>
+            </goals>
+          </execution>
+          <execution>
+            <id>jacoco-report</id>
+            <phase>prepare-package</phase>
+            <goals>
+              <goal>report</goal>
             </goals>
           </execution>
         </executions>
