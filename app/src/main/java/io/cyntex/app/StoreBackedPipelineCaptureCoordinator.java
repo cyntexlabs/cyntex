@@ -7,6 +7,7 @@ import io.cyntex.core.model.Settings;
 import io.cyntex.core.model.SourceResource;
 import io.cyntex.runtime.srs.CaptureRun;
 import io.cyntex.runtime.srs.CaptureRunSpec;
+import io.cyntex.runtime.srs.SnapshotBuffer;
 import io.cyntex.runtime.srs.SrsCoordinator;
 import io.cyntex.runtime.srs.StartFrom;
 import io.cyntex.spi.capture.SourcePosition;
@@ -30,8 +31,8 @@ import java.util.function.Supplier;
  * <p>The run spec carries L1 mock collaborators standing in for real connector machinery: a fixed cdc-start
  * token, a monotonic watermark generator, and a position order that ranks those watermark tokens by numeric
  * suffix (never lexically). The watermark token format and the position order are a matched pair. Snapshot
- * rows drain to a no-op pass-through here; routing the snapshot phase through the pipeline's transform chain
- * is a later increment.
+ * rows drain to a shared buffer keyed by the source's change-ring name; the source vertex reading that ring
+ * drains the buffer and emits its rows through the same transform-to-sink chain as cdc, strictly before it.
  */
 final class StoreBackedPipelineCaptureCoordinator implements PipelineCaptureCoordinator {
 
@@ -44,13 +45,16 @@ final class StoreBackedPipelineCaptureCoordinator implements PipelineCaptureCoor
     private final StorePort storePort;
     private final CaptureStarter captureStarter;
     private final SrsCoordinator srsCoordinator;
+    private final SnapshotBuffer snapshotBuffer;
     private final Map<String, List<CaptureRun>> runsByPipeline = new ConcurrentHashMap<>();
 
     StoreBackedPipelineCaptureCoordinator(
-            StorePort storePort, CaptureStarter captureStarter, SrsCoordinator srsCoordinator) {
+            StorePort storePort, CaptureStarter captureStarter, SrsCoordinator srsCoordinator,
+            SnapshotBuffer snapshotBuffer) {
         this.storePort = Objects.requireNonNull(storePort, "storePort");
         this.captureStarter = Objects.requireNonNull(captureStarter, "captureStarter");
         this.srsCoordinator = Objects.requireNonNull(srsCoordinator, "srsCoordinator");
+        this.snapshotBuffer = Objects.requireNonNull(snapshotBuffer, "snapshotBuffer");
     }
 
     @Override
@@ -64,8 +68,9 @@ final class StoreBackedPipelineCaptureCoordinator implements PipelineCaptureCoor
         List<CaptureRun> runs = new ArrayList<>();
         for (String sourceId : pipeline.sources()) {
             SourceResource source = StoredArtifacts.requireSource(artifacts(), sourceId);
-            CaptureRunSpec spec = deriveSpec(pipelineId, pipeline.settings(), source, SourceCaptureResolution.of(source));
-            runs.add(captureStarter.start(spec, NO_OP_PASSTHROUGH));
+            SourceCaptureResolution resolution = SourceCaptureResolution.of(source);
+            CaptureRunSpec spec = deriveSpec(pipelineId, pipeline.settings(), source, resolution);
+            runs.add(captureStarter.start(spec, snapshotPassthrough(resolution.ringName())));
         }
         runsByPipeline.put(pipelineId, runs);
     }
@@ -139,6 +144,14 @@ final class StoreBackedPipelineCaptureCoordinator implements PipelineCaptureCoor
         return storePort.artifacts();
     }
 
-    /** Snapshot rows drain here at L1; routing the snapshot through the transform chain is a later increment. */
-    private static final Consumer<Envelope> NO_OP_PASSTHROUGH = event -> { };
+    /**
+     * The snapshot pass-through for one source: it appends each snapshot row to the shared buffer under the
+     * source's change-ring name. The source vertex reading that ring drains the buffer and emits its rows ahead
+     * of the cdc tail, so the snapshot flows through the same transform-to-sink chain as cdc, strictly before
+     * it. A read mode that runs no snapshot never calls this, so the buffer for that ring stays empty and the
+     * source is a pure tail.
+     */
+    private Consumer<Envelope> snapshotPassthrough(String ringName) {
+        return event -> snapshotBuffer.append(ringName, event);
+    }
 }

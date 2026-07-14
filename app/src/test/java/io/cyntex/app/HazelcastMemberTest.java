@@ -7,6 +7,7 @@ import com.hazelcast.config.RingbufferConfig;
 import com.hazelcast.core.HazelcastInstance;
 import io.cyntex.adapters.pdk.ConnectorProvisioner;
 import io.cyntex.runtime.srs.CaptureRunUnit;
+import io.cyntex.runtime.srs.SnapshotBuffer;
 import io.cyntex.runtime.srs.SrsItem;
 import io.cyntex.runtime.srs.SrsItemSerializer;
 import io.cyntex.spi.store.ConsumerOffset;
@@ -123,7 +124,7 @@ class HazelcastMemberTest {
     void hazelcastMemberBindsTheMetaStoreIntoTheUserContext() {
         SrsMetaStore meta = new SentinelMetaStore();
         HazelcastInstance member = new HazelcastConfiguration()
-                .hazelcastMember(new HazelcastProperties(), meta, null);
+                .hazelcastMember(new HazelcastProperties(), meta, null, null);
         try {
             // The read-cursor publisher factory resolves the store member-side from the user context, so the
             // assembly root binds it under the well-known key -- otherwise cursor publishing silently no-ops.
@@ -136,7 +137,7 @@ class HazelcastMemberTest {
     @Test
     void hazelcastMemberLeavesTheUserContextUnboundWhenNoStoreIsConfigured() {
         HazelcastInstance member = new HazelcastConfiguration()
-                .hazelcastMember(new HazelcastProperties(), null, null);
+                .hazelcastMember(new HazelcastProperties(), null, null, null);
         try {
             // A run with no store (mongo disabled) binds nothing; the publisher then resolves no store and
             // cursor publishing is a documented no-op rather than a failure.
@@ -152,7 +153,7 @@ class HazelcastMemberTest {
             throw new UnsupportedOperationException("resolution is not exercised by this binding test");
         };
         HazelcastInstance member = new HazelcastConfiguration()
-                .hazelcastMember(new HazelcastProperties(), null, provisioner);
+                .hazelcastMember(new HazelcastProperties(), null, provisioner, null);
         try {
             // A sink-writer factory carried onto the Jet sink vertex resolves the provisioner member-side from
             // the user context, so the assembly root binds it under the well-known key -- otherwise the member
@@ -167,12 +168,39 @@ class HazelcastMemberTest {
     @Test
     void hazelcastMemberLeavesTheProvisionerUnboundWhenNoneIsConfigured() {
         HazelcastInstance member = new HazelcastConfiguration()
-                .hazelcastMember(new HazelcastProperties(), null, null);
+                .hazelcastMember(new HazelcastProperties(), null, null, null);
         try {
             // A run with no provisioner (mongo disabled) binds nothing; the member is then not sink-capable and
             // a sink open fails loudly rather than silently dropping writes.
             assertThat(member.getUserContext())
                     .doesNotContainKey(PdkSinkWriterFactory.CONNECTOR_PROVISIONER_USER_CONTEXT_KEY);
+        } finally {
+            member.shutdown();
+        }
+    }
+
+    @Test
+    void hazelcastMemberBindsTheSnapshotBufferIntoTheUserContext() {
+        SnapshotBuffer buffer = new SnapshotBuffer();
+        HazelcastInstance member = new HazelcastConfiguration()
+                .hazelcastMember(new HazelcastProperties(), null, null, buffer);
+        try {
+            // A source vertex resolves the buffer member-side from the user context to emit its ring's snapshot
+            // rows ahead of the cdc tail, so the assembly root binds the same instance under the well-known key.
+            assertThat(member.getUserContext().get(SnapshotBuffer.USER_CONTEXT_KEY)).isSameAs(buffer);
+        } finally {
+            member.shutdown();
+        }
+    }
+
+    @Test
+    void hazelcastMemberLeavesTheSnapshotBufferUnboundWhenNoneIsConfigured() {
+        HazelcastInstance member = new HazelcastConfiguration()
+                .hazelcastMember(new HazelcastProperties(), null, null, null);
+        try {
+            // A run with no buffer (mongo disabled) binds nothing; a source then emits no snapshot ahead of the
+            // tail rather than failing.
+            assertThat(member.getUserContext()).doesNotContainKey(SnapshotBuffer.USER_CONTEXT_KEY);
         } finally {
             member.shutdown();
         }

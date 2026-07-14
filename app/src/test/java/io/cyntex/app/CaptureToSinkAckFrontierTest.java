@@ -26,6 +26,7 @@ import io.cyntex.core.model.TransformBody;
 import io.cyntex.runtime.engine.Engine;
 import io.cyntex.runtime.scheduler.LifecycleActuator;
 import io.cyntex.runtime.srs.CaptureRunUnit;
+import io.cyntex.runtime.srs.SnapshotBuffer;
 import io.cyntex.runtime.srs.SrsCoordinator;
 import io.cyntex.runtime.srs.SrsItem;
 import io.cyntex.runtime.srs.SrsItemSerializer;
@@ -134,11 +135,14 @@ class CaptureToSinkAckFrontierTest {
         };
         member.getUserContext().put(PdkSinkWriterFactory.CONNECTOR_PROVISIONER_USER_CONTEXT_KEY, provisioner);
 
+        SnapshotBuffer snapshotBuffer = new SnapshotBuffer();
+        member.getUserContext().put(SnapshotBuffer.USER_CONTEXT_KEY, snapshotBuffer);
+
         GatedSource gatedSource = new GatedSource();
         SrsCoordinator srsCoordinator = new SrsCoordinator(meta);
         CaptureRunUnit captureRunUnit = new CaptureRunUnit(gatedSource, srsCoordinator, meta, member);
         PipelineCaptureCoordinator coordinator =
-                new StoreBackedPipelineCaptureCoordinator(store, captureRunUnit::start, srsCoordinator);
+                new StoreBackedPipelineCaptureCoordinator(store, captureRunUnit::start, srsCoordinator, snapshotBuffer);
 
         StoreBackedDagSource.SinkWriterBinder capturingSink =
                 (connectorId, settings, writeMode, ddl) -> (SupplierEx<SinkWriter>) CapturingSinkWriter::new;

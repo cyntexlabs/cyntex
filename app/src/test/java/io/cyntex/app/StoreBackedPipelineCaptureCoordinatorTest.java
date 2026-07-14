@@ -11,9 +11,11 @@ import io.cyntex.core.model.SourceResource;
 import io.cyntex.core.model.Srs;
 import io.cyntex.core.model.SyncElement;
 import io.cyntex.core.model.TableRef;
+import io.cyntex.core.event.Envelope;
 import io.cyntex.runtime.srs.CaptureRun;
 import io.cyntex.runtime.srs.CaptureRunSpec;
 import io.cyntex.runtime.srs.MiningChainId;
+import io.cyntex.runtime.srs.SnapshotBuffer;
 import io.cyntex.runtime.srs.SrsCoordinator;
 import io.cyntex.core.model.FromRef;
 import io.cyntex.spi.capture.SourcePosition;
@@ -125,7 +127,7 @@ class StoreBackedPipelineCaptureCoordinatorTest {
             return new CaptureRun(Optional.of(chainId), false, 0L, Optional.empty(), Optional.of(subscription));
         };
         StoreBackedPipelineCaptureCoordinator coordinator =
-                new StoreBackedPipelineCaptureCoordinator(store, starter, srsCoordinator);
+                new StoreBackedPipelineCaptureCoordinator(store, starter, srsCoordinator, new SnapshotBuffer());
 
         coordinator.startCapture("p");
 
@@ -141,13 +143,43 @@ class StoreBackedPipelineCaptureCoordinatorTest {
     }
 
     @Test
+    void startRoutesSnapshotRowsToTheBufferUnderTheSourcesRingName() {
+        InMemoryArtifactStore artifacts = new InMemoryArtifactStore();
+        SourceResource source = cdcSource("orders_src", "orders", null);
+        artifacts.save(source);
+        artifacts.save(pipeline("p", "orders_src"));
+        StorePort store = artifactsOnly(artifacts);
+
+        SnapshotBuffer buffer = new SnapshotBuffer();
+        SrsCoordinator srsCoordinator = new SrsCoordinator(new InMemorySrsMetaStore());
+        // A fake starter drains two snapshot rows to the pass-through, exactly as the real snapshot phase does,
+        // so the routing under test -- pass-through to the buffer keyed by the source's ring name -- is exercised
+        // without a Jet member.
+        CaptureStarter starter = (spec, passthrough) -> {
+            passthrough.accept(Envelope.read(1L, "orders", Map.of("id", 1L), Map.of()));
+            passthrough.accept(Envelope.read(1L, "orders", Map.of("id", 2L), Map.of()));
+            return new CaptureRun(Optional.empty(), false, 2L, Optional.empty(), Optional.empty());
+        };
+        StoreBackedPipelineCaptureCoordinator coordinator =
+                new StoreBackedPipelineCaptureCoordinator(store, starter, srsCoordinator, buffer);
+
+        coordinator.startCapture("p");
+
+        // The snapshot rows land in the buffer under the ring the source resolves to -- the same ring the source
+        // vertex drains member-side, which is what routes the snapshot through the transform chain ahead of cdc.
+        String ringName = SourceCaptureResolution.of(source).ringName();
+        assertThat(buffer.drain(ringName)).extracting(e -> e.after().get("id")).containsExactly(1L, 2L);
+    }
+
+    @Test
     void stopIsANoOpForAPipelineThatWasNeverStarted() {
         StoreBackedPipelineCaptureCoordinator coordinator = new StoreBackedPipelineCaptureCoordinator(
                 artifactsOnly(new InMemoryArtifactStore()),
                 (spec, passthrough) -> {
                     throw new AssertionError("no capture should be started");
                 },
-                new SrsCoordinator(new InMemorySrsMetaStore()));
+                new SrsCoordinator(new InMemorySrsMetaStore()),
+                new SnapshotBuffer());
 
         coordinator.stopCapture("never-started");
 

@@ -154,6 +154,41 @@ class SrsSourceProcessorTest {
     }
 
     @Test
+    void emits_all_buffered_snapshot_rows_before_it_tails_the_ring() throws InterruptedException {
+        // A snapshot buffer bound member-side carries the source's snapshot rows; the ring holds the cdc tail.
+        // The source must drain the whole buffer first, then tail the ring -- snapshot (op r, no position)
+        // strictly before cdc (op i, positioned), the ordering that keeps a stale snapshot from landing after
+        // a newer change. Distinct id ranges make the two streams unmistakable in the observed order.
+        SnapshotBuffer buffer = new SnapshotBuffer();
+        buffer.append("srs.chain.snapfirst", snapshotRow(100));
+        buffer.append("srs.chain.snapfirst", snapshotRow(101));
+        buffer.append("srs.chain.snapfirst", snapshotRow(102));
+        fill("srs.chain.snapfirst", 2);
+        hz.getUserContext().put(SnapshotBuffer.USER_CONTEXT_KEY, buffer);
+
+        List<String> out;
+        try {
+            out = runProjectedToStrings("srs.chain.snapfirst", "orders", "out-snapfirst", 5, 1024);
+        } finally {
+            hz.getUserContext().remove(SnapshotBuffer.USER_CONTEXT_KEY);
+        }
+
+        // The three snapshot rows (no source position) come first, in buffered order, then the two cdc changes.
+        assertThat(out).containsExactly(
+                "orders|null|100", "orders|null|101", "orders|null|102", "orders|w0|0", "orders|w1|1");
+    }
+
+    @Test
+    void tails_the_ring_unchanged_when_no_snapshot_buffer_is_bound() throws InterruptedException {
+        // The cdc-only path: no buffer bound, so the source behaves exactly as before -- pure ring tail.
+        fill("srs.chain.nobuffer", 3);
+
+        List<String> out = runProjectedToStrings("srs.chain.nobuffer", "orders", "out-nobuffer", 3, 1024);
+
+        assertThat(out).containsExactly("orders|w0|0", "orders|w1|1", "orders|w2|2");
+    }
+
+    @Test
     void pins_the_source_vertex_to_a_single_instance_across_the_cluster() throws Exception {
         // One reader per ring is what keeps the change stream in order; a per-member instance would re-lane it.
         // A static resolution check: a total-parallelism-one supplier hands the real supplier to one member and
@@ -205,6 +240,11 @@ class SrsSourceProcessorTest {
     /** A stable, Hazelcast-serializable projection of an envelope: {@code src|srcPos|id}. */
     private static String describe(Envelope event) {
         return event.src() + "|" + event.srcPos() + "|" + event.after().get("id");
+    }
+
+    /** A snapshot read envelope (op r, no source position) on the {@code orders} stream. */
+    private static Envelope snapshotRow(int id) {
+        return Envelope.read(1L, "orders", Map.of("id", id), Map.of());
     }
 
     /** Pre-fills a ring with {@code count} inserts at sequences {@code 0..count-1}, positions {@code w0..}. */

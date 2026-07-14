@@ -6,6 +6,7 @@ import io.cyntex.adapters.pdk.PdkCapturePort;
 import io.cyntex.runtime.engine.Engine;
 import io.cyntex.runtime.scheduler.LifecycleActuator;
 import io.cyntex.runtime.srs.CaptureRunUnit;
+import io.cyntex.runtime.srs.SnapshotBuffer;
 import io.cyntex.runtime.srs.SrsCoordinator;
 import io.cyntex.spi.capture.CapturePort;
 import io.cyntex.spi.store.SrsMetaStore;
@@ -49,6 +50,15 @@ class DataPlaneActuationConfiguration {
     }
 
     @Bean
+    SnapshotBuffer snapshotBuffer() {
+        // The one member-local buffer that carries snapshot rows from the capture coordinator (the writer) to
+        // the source vertices (the readers). It is bound into the member user context so a source resolves it
+        // member-side, and injected into the coordinator so the snapshot pass-through fills it -- the same
+        // instance on both sides, so what the coordinator writes is exactly what a source drains.
+        return new SnapshotBuffer();
+    }
+
+    @Bean
     CaptureRunUnit captureRunUnit(CapturePort capturePort, SrsCoordinator srsCoordinator,
             SrsMetaStore srsMetaStore, HazelcastInstance hazelcastMember) {
         return new CaptureRunUnit(capturePort, srsCoordinator, srsMetaStore, hazelcastMember);
@@ -56,8 +66,10 @@ class DataPlaneActuationConfiguration {
 
     @Bean
     PipelineCaptureCoordinator pipelineCaptureCoordinator(
-            StorePort storePort, CaptureRunUnit captureRunUnit, SrsCoordinator srsCoordinator) {
-        return new StoreBackedPipelineCaptureCoordinator(storePort, captureRunUnit::start, srsCoordinator);
+            StorePort storePort, CaptureRunUnit captureRunUnit, SrsCoordinator srsCoordinator,
+            SnapshotBuffer snapshotBuffer) {
+        return new StoreBackedPipelineCaptureCoordinator(
+                storePort, captureRunUnit::start, srsCoordinator, snapshotBuffer);
     }
 
     @Bean
