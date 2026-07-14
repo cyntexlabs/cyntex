@@ -107,12 +107,33 @@ io.store-unauthorized:
 io.document-unreadable:
   message: "A stored document with id '{id}' could not be read back."
   solution: "The stored document is corrupt or was written by a newer version; inspect or restore it."
+connector.not-registered:
+  message: "No connector '{connector}' is registered."
+  solution: "Register the connector's artifact — or place it in the connector seed directory — before using it."
+connector.ambiguous-registration:
+  message: "Connector '{connector}' resolves to more than one registered artifact: {artifacts}."
+  solution: "Keep a single registered artifact per connector id; selecting among connector versions is not supported."
+connector.registration-conflict:
+  message: "Connector '{connector}' is already registered under artifact {existing}; a different artifact {incoming} was refused."
+  solution: "Keep a single registered artifact per connector id; unregister the existing artifact before registering a different one."
 connector.load-failed:
   message: "Connector '{connector}' could not be loaded."
   solution: "Check the connector jar and its dependencies are present and readable."
 connector.class-not-found:
   message: "Connector '{connector}' entry class '{class}' was not found or is not a connector."
   solution: "Check the connector id resolves to a connector jar that declares this entry class."
+connector.no-connector-class:
+  message: "No connector class found in artifact '{artifact}'."
+  solution: "Check the jar is a PDK connector: it must contain a class annotated with @TapConnectorClass."
+connector.ambiguous-connector-class:
+  message: "Artifact '{artifact}' declares more than one connector class: {classes}."
+  solution: "Register one connector per artifact; split unrelated connectors into separate jars."
+connector.spec-not-found:
+  message: "Connector artifact '{artifact}' names spec '{spec}' but the jar does not contain it."
+  solution: "Check the connector build packages the spec resource named by its @TapConnectorClass annotation."
+connector.spec-invalid:
+  message: "Connector artifact '{artifact}' spec '{spec}' does not identify the connector: {detail}."
+  solution: "Ensure the spec resource is valid JSON and declares the connector id under properties.id."
 connector.api-level-incompatible:
   message: "Connector '{connector}' requires PDK API level {required} but this engine provides level {provided}."
   solution: "Use a connector build compatible with API level {provided}, or upgrade the engine."
@@ -122,6 +143,12 @@ connector.projection-failed:
 connector.capture-failed:
   message: "Connector '{connector}' failed while reading: {detail}."
   solution: "Check the source is reachable and the connection settings are correct."
+connector.discover-failed:
+  message: "Connector '{connector}' could not discover its schema: {detail}."
+  solution: "The connector failed while discovering the source model; check the source is reachable and the connection settings are correct."
+connector.test-failed:
+  message: "Connector '{connector}' could not complete its connection test: {detail}."
+  solution: "The connector failed while testing; check the connection settings and that the target is reachable."
 connector.write-failed:
   message: "Connector '{connector}' failed while writing: {detail}."
   solution: "Check the target is reachable and the connection settings are correct."

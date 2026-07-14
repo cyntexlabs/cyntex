@@ -12,6 +12,7 @@ import java.net.http.WebSocket;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -159,6 +160,288 @@ final class HttpControlPlaneClient implements ControlPlaneClient {
         } catch (IOException | RuntimeException e) {
             return new ListOutcome.Unreachable();
         }
+    }
+
+    @Override
+    public ConnectionTestOutcome test(
+            URI baseUrl, String credential, String id, String connectorId, Map<String, Object> settings) {
+        try {
+            HttpRequest request = authed(baseUrl, "/api/connections:test", credential)
+                    .header("Content-Type", "application/json")
+                    .POST(HttpRequest.BodyPublishers.ofString(
+                            connectionBody(id, connectorId, settings), StandardCharsets.UTF_8))
+                    .build();
+            HttpResponse<String> response =
+                    client().send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            if (response.statusCode() == 200) {
+                ConnectionReport report = connectionReport(response.body());
+                // a 200 that is not a usable report (a proxy / non-Cyntex reply) is treated as unreachable
+                return report == null
+                        ? new ConnectionTestOutcome.Unreachable()
+                        : new ConnectionTestOutcome.Tested(report);
+            }
+            Rejection r = rejection(response.body(), "The server refused the connection test.");
+            return new ConnectionTestOutcome.Rejected(r.code(), r.message());
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return new ConnectionTestOutcome.Unreachable();
+        } catch (IOException | RuntimeException e) {
+            return new ConnectionTestOutcome.Unreachable();
+        }
+    }
+
+    @Override
+    public ConnectionTestResultOutcome testResult(URI baseUrl, String credential, String id) {
+        try {
+            HttpRequest request =
+                    authed(baseUrl, "/api/connections/" + id + "/test-result", credential).GET().build();
+            HttpResponse<String> response =
+                    client().send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            int status = response.statusCode();
+            if (status == 200) {
+                ConnectionReport report = connectionReport(response.body());
+                // a 200 that is not a usable report (a proxy / non-Cyntex reply) is treated as unreachable
+                return report == null
+                        ? new ConnectionTestResultOutcome.Unreachable()
+                        : new ConnectionTestResultOutcome.Found(report);
+            }
+            if (status == 404) {
+                return new ConnectionTestResultOutcome.Absent();
+            }
+            Rejection r = rejection(response.body(), "The server refused the read.");
+            return new ConnectionTestResultOutcome.Rejected(r.code(), r.message());
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return new ConnectionTestResultOutcome.Unreachable();
+        } catch (IOException | RuntimeException e) {
+            return new ConnectionTestResultOutcome.Unreachable();
+        }
+    }
+
+    @Override
+    public ConnectionDiscoverSchemaOutcome discoverSchema(
+            URI baseUrl, String credential, String id, String connectorId, Map<String, Object> settings) {
+        try {
+            HttpRequest request = authed(baseUrl, "/api/connections:discover-schema", credential)
+                    .header("Content-Type", "application/json")
+                    .POST(HttpRequest.BodyPublishers.ofString(
+                            connectionBody(id, connectorId, settings), StandardCharsets.UTF_8))
+                    .build();
+            HttpResponse<String> response =
+                    client().send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            if (response.statusCode() == 200) {
+                ConnectionSchema schema = connectionSchema(response.body());
+                // a 200 that is not a usable model (a proxy / non-Cyntex reply) is treated as unreachable
+                return schema == null
+                        ? new ConnectionDiscoverSchemaOutcome.Unreachable()
+                        : new ConnectionDiscoverSchemaOutcome.Discovered(schema);
+            }
+            Rejection r = rejection(response.body(), "The server refused the schema discovery.");
+            return new ConnectionDiscoverSchemaOutcome.Rejected(r.code(), r.message());
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return new ConnectionDiscoverSchemaOutcome.Unreachable();
+        } catch (IOException | RuntimeException e) {
+            return new ConnectionDiscoverSchemaOutcome.Unreachable();
+        }
+    }
+
+    @Override
+    public ConnectionSchemaOutcome schema(URI baseUrl, String credential, String id) {
+        try {
+            HttpRequest request = authed(baseUrl, "/api/connections/" + id + "/schema", credential).GET().build();
+            HttpResponse<String> response =
+                    client().send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            int status = response.statusCode();
+            if (status == 200) {
+                ConnectionSchema schema = connectionSchema(response.body());
+                // a 200 that is not a usable model (a proxy / non-Cyntex reply) is treated as unreachable
+                return schema == null
+                        ? new ConnectionSchemaOutcome.Unreachable()
+                        : new ConnectionSchemaOutcome.Found(schema);
+            }
+            if (status == 404) {
+                return new ConnectionSchemaOutcome.Absent();
+            }
+            Rejection r = rejection(response.body(), "The server refused the read.");
+            return new ConnectionSchemaOutcome.Rejected(r.code(), r.message());
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return new ConnectionSchemaOutcome.Unreachable();
+        } catch (IOException | RuntimeException e) {
+            return new ConnectionSchemaOutcome.Unreachable();
+        }
+    }
+
+    @Override
+    public ConnectorRegisterOutcome register(URI baseUrl, String credential, byte[] artifact) {
+        try {
+            HttpRequest request = authed(baseUrl, "/api/connectors:register", credential)
+                    .header("Content-Type", "application/json")
+                    .POST(HttpRequest.BodyPublishers.ofString(registerBody(artifact), StandardCharsets.UTF_8))
+                    .build();
+            HttpResponse<String> response =
+                    client().send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            if (response.statusCode() == 200) {
+                RegisteredConnector registered = registeredConnector(response.body());
+                // a 200 that is not a usable registration (a proxy / non-Cyntex reply) is treated as unreachable
+                return registered == null
+                        ? new ConnectorRegisterOutcome.Unreachable()
+                        : new ConnectorRegisterOutcome.Registered(registered);
+            }
+            Rejection r = rejection(response.body(), "The server refused the connector registration.");
+            return new ConnectorRegisterOutcome.Rejected(r.code(), r.message());
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return new ConnectorRegisterOutcome.Unreachable();
+        } catch (IOException | RuntimeException e) {
+            return new ConnectorRegisterOutcome.Unreachable();
+        }
+    }
+
+    @Override
+    public ConnectorListOutcome connectorList(URI baseUrl, String credential) {
+        try {
+            HttpRequest request = authed(baseUrl, "/api/connectors", credential).GET().build();
+            HttpResponse<String> response =
+                    client().send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            if (response.statusCode() == 200) {
+                return new ConnectorListOutcome.Listed(catalogConnectors(response.body()));
+            }
+            Rejection r = rejection(response.body(), "The server refused the read.");
+            return new ConnectorListOutcome.Rejected(r.code(), r.message());
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return new ConnectorListOutcome.Unreachable();
+        } catch (IOException | RuntimeException e) {
+            return new ConnectorListOutcome.Unreachable();
+        }
+    }
+
+    /** The connectors decoded from a 200 body's {@code connectors} array; empty if the shape is unexpected. */
+    private static List<CatalogConnector> catalogConnectors(String body) {
+        List<CatalogConnector> connectors = new ArrayList<>();
+        if (JsonReader.parse(body) instanceof Map<?, ?> map && map.get("connectors") instanceof List<?> list) {
+            for (Object o : list) {
+                if (o instanceof Map<?, ?> m && m.get("id") instanceof String id) {
+                    connectors.add(new CatalogConnector(
+                            id,
+                            stringOrNull(m.get("name")),
+                            stringOrNull(m.get("group")),
+                            stringList(m.get("modes")),
+                            m.get("sink") instanceof Boolean sink && sink,
+                            stringOrNull(m.get("origin"))));
+                }
+            }
+        }
+        return connectors;
+    }
+
+    /** The register request body: {@code {"artifact":"<base64 of the jar bytes>"}}. */
+    private static String registerBody(byte[] artifact) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("artifact", Base64.getEncoder().encodeToString(artifact));
+        return JsonOut.write(body);
+    }
+
+    /** The registration decoded from a 200 body, or {@code null} if the body is not a usable registration. */
+    private static RegisteredConnector registeredConnector(String body) {
+        if (JsonReader.parse(body) instanceof Map<?, ?> m
+                && m.get("connectorId") instanceof String connectorId
+                && m.get("contentHash") instanceof String contentHash) {
+            boolean newlyRegistered = m.get("newlyRegistered") instanceof Boolean b && b;
+            return new RegisteredConnector(connectorId, contentHash, stringOrNull(m.get("pdkApiVersion")), newlyRegistered);
+        }
+        return null;
+    }
+
+    /** The discovered model decoded from a 200 body, or {@code null} if the body is not a usable model. */
+    private static ConnectionSchema connectionSchema(String body) {
+        if (JsonReader.parse(body) instanceof Map<?, ?> m
+                && m.get("connectionId") instanceof String connectionId
+                && m.get("connectorId") instanceof String connectorId
+                && m.get("tables") instanceof List<?> rawTables) {
+            long discoveredAt = m.get("discoveredAt") instanceof Number n ? n.longValue() : 0L;
+            List<ConnectionSchema.Table> tables = new ArrayList<>();
+            for (Object o : rawTables) {
+                // a malformed table entry is skipped, same policy as a malformed check in a test report
+                if (!(o instanceof Map<?, ?> t) || !(t.get("name") instanceof String name)) {
+                    continue;
+                }
+                List<ConnectionSchema.Field> fields = new ArrayList<>();
+                if (t.get("fields") instanceof List<?> rawFields) {
+                    for (Object f : rawFields) {
+                        if (f instanceof Map<?, ?> fm && fm.get("name") instanceof String fieldName) {
+                            fields.add(new ConnectionSchema.Field(fieldName, stringOrNull(fm.get("type"))));
+                        }
+                    }
+                }
+                List<ConnectionSchema.Index> indexes = new ArrayList<>();
+                if (t.get("indexes") instanceof List<?> rawIndexes) {
+                    for (Object i : rawIndexes) {
+                        if (i instanceof Map<?, ?> im && im.get("name") instanceof String indexName) {
+                            indexes.add(new ConnectionSchema.Index(indexName,
+                                    stringList(im.get("fields")),
+                                    im.get("unique") instanceof Boolean unique && unique));
+                        }
+                    }
+                }
+                tables.add(new ConnectionSchema.Table(name, fields, stringList(t.get("primaryKey")), indexes));
+            }
+            return new ConnectionSchema(connectionId, connectorId, tables, discoveredAt);
+        }
+        return null;
+    }
+
+    /** The value's string elements when it is a list, else empty (an absent / malformed optional field). */
+    private static List<String> stringList(Object value) {
+        List<String> strings = new ArrayList<>();
+        if (value instanceof List<?> list) {
+            for (Object element : list) {
+                if (element instanceof String string) {
+                    strings.add(string);
+                }
+            }
+        }
+        return strings;
+    }
+
+    /** The connection-verb request body: {@code {"id":..,"connectorId":..,"settings":{..}}}. */
+    private static String connectionBody(String id, String connectorId, Map<String, Object> settings) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("id", id);
+        body.put("connectorId", connectorId);
+        body.put("settings", settings == null ? Map.of() : settings);
+        return JsonOut.write(body);
+    }
+
+    /** The connection report decoded from a 200 body, or {@code null} if the body is not a usable report. */
+    private static ConnectionReport connectionReport(String body) {
+        if (JsonReader.parse(body) instanceof Map<?, ?> m
+                && m.get("connectionId") instanceof String connectionId
+                && m.get("connectorId") instanceof String connectorId
+                && m.get("outcome") instanceof String outcome) {
+            long testedAt = m.get("testedAt") instanceof Number n ? n.longValue() : 0L;
+            List<ConnectionReport.Check> checks = new ArrayList<>();
+            if (m.get("checks") instanceof List<?> items) {
+                for (Object o : items) {
+                    if (o instanceof Map<?, ?> c
+                            && c.get("name") instanceof String name
+                            && c.get("status") instanceof String status) {
+                        checks.add(new ConnectionReport.Check(name, status,
+                                stringOrNull(c.get("message")), stringOrNull(c.get("reason")),
+                                stringOrNull(c.get("solution")), stringOrNull(c.get("connectorErrorCode"))));
+                    }
+                }
+            }
+            return new ConnectionReport(connectionId, connectorId, outcome, checks, testedAt);
+        }
+        return null;
+    }
+
+    /** The value as a string when it is one, else {@code null} (an absent / JSON-null optional field). */
+    private static String stringOrNull(Object value) {
+        return value instanceof String s ? s : null;
     }
 
     @Override

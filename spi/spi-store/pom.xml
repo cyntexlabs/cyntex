@@ -29,6 +29,12 @@
       <artifactId>core-lifecycle</artifactId>
       <version>${revision}</version>
     </dependency>
+    <!-- The normalized catalog row the derived connector-catalog store persists (rule R2: core only). -->
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>core-catalog</artifactId>
+      <version>${revision}</version>
+    </dependency>
 
     <dependency>
       <groupId>org.junit.jupiter</groupId>

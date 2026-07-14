@@ -9,24 +9,34 @@ import io.cyntex.core.lifecycle.DesiredState;
 import io.cyntex.core.lifecycle.Observation;
 import io.cyntex.core.lifecycle.PipelineState;
 import io.cyntex.spi.store.ConnectionConfig;
+import io.cyntex.spi.store.ConnectionTestItem;
+import io.cyntex.spi.store.ConnectionTestResult;
+import io.cyntex.spi.store.DiscoveredSourceModel;
+import io.cyntex.spi.store.RegistrationSource;
+import io.cyntex.spi.store.SourceModel;
+import io.cyntex.spi.store.SourceTable;
 import org.junit.jupiter.api.Test;
 import org.testcontainers.containers.MongoDBContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.utility.DockerImageName;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * Witnesses the aggregated store port against a real Mongo replica-set: one write through each of the
- * six sub-stores lands in its own distinct, named collection and reads back through that same
- * sub-store, so the artifact truth layer, the pipeline state store, the pipeline desired-state store,
- * the per-pipeline observation store, the connection catalog and the SRS meta store never share
- * storage. Skipped automatically where Docker is absent, so a Docker-less build stays green.
+ * sub-stores lands in its own distinct, named storage area and reads back through that same sub-store,
+ * so the artifact truth layer, the pipeline state store, the pipeline desired-state store, the
+ * per-pipeline observation store, the connection catalog, the discovered source-schema store, the
+ * connector distribution registry, the latest connection-test result per connection and the SRS meta
+ * store never share storage. Skipped automatically where Docker is absent, so a Docker-less build
+ * stays green.
  */
 @Testcontainers(disabledWithoutDocker = true)
 class MongoStorePortIT {
@@ -47,7 +57,7 @@ class MongoStorePortIT {
             """;
 
     @Test
-    void aggregatesTheSixSubStoresEachOnItsOwnCollection() {
+    void aggregatesTheNineSubStoresEachOnItsOwnStorage() {
         // The Testcontainers Mongo speaks plaintext; TLS is opt-in, so a plaintext URL connects with
         // no flag. TLS wiring itself is covered by MongoConnectionTest.
         String uri = REPLICA_SET.getReplicaSetUrl();
@@ -56,12 +66,22 @@ class MongoStorePortIT {
             connection.verify();
             MongoStorePort port = new MongoStorePort(connection);
 
-            // one write through each of the six sub-stores
+            // one write through each of the nine sub-stores
             port.artifacts().save(PARSER.parse(ORDERS));
             port.state().create("orders_sync", "{\"phase\":\"snapshot\"}", Instant.parse("2026-07-06T00:00:00Z"));
             port.desired().save(new DesiredState("orders_sync", PipelineState.RUNNING, "rev-abc"));
             port.observations().save(new Observation("orders_sync", PipelineState.RUNNING, Map.of(), Map.of()));
             port.catalog().save(new ConnectionConfig("mysql-local", "mysql", Map.of("host", "localhost")));
+            port.schemas().save(new DiscoveredSourceModel("mysql-local", "mysql", 1783998000000L, new SourceModel(List.of(
+                    new SourceTable("orders", List.of(), List.of(), List.of())))));
+            port.connectors().register(
+                    "mysql", "1.3.5", RegistrationSource.SEED, "mysql-connector-bytes".getBytes(StandardCharsets.UTF_8));
+            port.connectionTestResults().save(new ConnectionTestResult(
+                    "mysql-local",
+                    "mysql",
+                    ConnectionTestResult.Outcome.PASSED,
+                    List.of(new ConnectionTestItem("Connection", ConnectionTestItem.Status.PASSED, null, null, null, null)),
+                    1783939200000L));
             port.meta().create("orders@mysql-1", "7d");
 
             // each reads back through its own sub-store
@@ -70,9 +90,12 @@ class MongoStorePortIT {
             assertThat(port.desired().read("orders_sync")).isPresent();
             assertThat(port.observations().read("orders_sync")).isPresent();
             assertThat(port.catalog().get("mysql-local")).isPresent();
+            assertThat(port.schemas().get("mysql-local")).isPresent();
+            assertThat(port.connectors().list()).hasSize(1);
+            assertThat(port.connectionTestResults().find("mysql-local")).isPresent();
             assertThat(port.meta().read("orders@mysql-1")).isPresent();
 
-            // and each landed in its own distinct, named collection — no concern shares storage
+            // and each landed in its own distinct, named storage — no concern shares storage
             String databaseName = new ConnectionString(uri).getDatabase();
             try (MongoClient raw = MongoClients.create(uri)) {
                 MongoDatabase database = raw.getDatabase(databaseName);
@@ -81,6 +104,11 @@ class MongoStorePortIT {
                 assertThat(database.getCollection(MongoStorePort.PIPELINE_DESIRED).countDocuments()).isEqualTo(1);
                 assertThat(database.getCollection(MongoStorePort.PIPELINE_OBSERVATION).countDocuments()).isEqualTo(1);
                 assertThat(database.getCollection(MongoStorePort.CONNECTIONS).countDocuments()).isEqualTo(1);
+                assertThat(database.getCollection(MongoStorePort.SOURCE_SCHEMAS).countDocuments()).isEqualTo(1);
+                assertThat(database.getCollection(MongoStorePort.CONNECTOR_ARTIFACTS + ".files").countDocuments())
+                        .isEqualTo(1);
+                assertThat(database.getCollection(MongoStorePort.CONNECTION_TEST_RESULTS).countDocuments())
+                        .isEqualTo(1);
                 assertThat(database.getCollection(MongoStorePort.SRS_META).countDocuments()).isEqualTo(1);
             }
         }

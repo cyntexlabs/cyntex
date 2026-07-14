@@ -4,16 +4,27 @@ import io.cyntex.control.core.ApplyResult;
 import io.cyntex.control.core.ApplyService;
 import io.cyntex.control.core.ArtifactOutcome;
 import io.cyntex.control.core.ArtifactQueryService;
+import io.cyntex.control.core.AuditGate;
+import io.cyntex.control.core.ConnectionTestResultQueryService;
+import io.cyntex.control.core.ConnectionTestService;
 import io.cyntex.control.core.ControlOperations;
 import io.cyntex.control.core.Frontend;
 import io.cyntex.control.core.Maturity;
 import io.cyntex.control.core.Operation;
+import io.cyntex.control.core.SchemaDiscoveryService;
+import io.cyntex.control.core.SchemaQueryService;
 import io.cyntex.control.core.StoredArtifact;
 import io.cyntex.core.catalog.CyntexCatalog;
+import io.cyntex.core.dsl.DslParser;
 import io.cyntex.core.model.Resource;
 import io.cyntex.core.model.canonical.CanonicalWriter;
-import io.cyntex.core.dsl.DslParser;
+import io.cyntex.runtime.probe.ConnectionProbe;
+import io.cyntex.runtime.probe.SchemaDiscoveryProbe;
 import io.cyntex.spi.store.ArtifactStore;
+import io.cyntex.spi.store.ConnectionTestResult;
+import io.cyntex.spi.store.ConnectionTestResultStore;
+import io.cyntex.spi.store.DiscoveredSourceModel;
+import io.cyntex.spi.store.SchemaStore;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -36,6 +47,7 @@ import org.springframework.web.client.RestClient;
 import org.springframework.web.method.HandlerMethod;
 import org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping;
 
+import java.time.Clock;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -50,7 +62,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * The HTTP face over the control verbs: each endpoint is a thin projection of a registered operation
  * onto {@code POST/GET /api/...}, and the endpoint table is a derivation of the registry — no endpoint
  * invents a verb. The apply / get / list verbs round-trip through the (fake-store-backed) control-core
- * services; the connection-test verb is routed but reserved. The context is booted programmatically so
+ * services; the connection-test verb is routed onto its (fake-backed) service. The context is booted programmatically so
  * the module stays on the reactor's JUnit line.
  */
 class ControlApiTest {
@@ -217,17 +229,6 @@ class ControlApiTest {
         assertThat(body).doesNotContainKey("code");
     }
 
-    @Test
-    void connectionTestIsRoutedButNotYetImplemented() {
-        // The R5 synchronous verb is reserved and routed; its probe and result-store land later, so it
-        // answers 501 rather than fabricating a result.
-        HttpStatusCode status = client().post().uri("/api/connections:test")
-                .contentType(MediaType.APPLICATION_JSON).body(Map.of())
-                .exchange((request, response) -> response.getStatusCode());
-
-        assertThat(status).isEqualTo(HttpStatus.NOT_IMPLEMENTED);
-    }
-
     // ---- the anonymous probe lives outside the verb surface ----
 
     @Test
@@ -295,8 +296,11 @@ class ControlApiTest {
                 .as("every projected verb must be a registered, CLI-exposed operation")
                 .isEmpty();
         assertThat(projected)
-                .as("the artifact verbs, the R5 connection-test verb and the topology verb are projected onto HTTP")
-                .contains("artifact.apply", "artifact.get", "artifact.list", "connection.test", "cluster.members");
+                .as("the artifact verbs, the two whitelisted connection verbs with their read-backs, and the "
+                        + "topology verb are projected onto HTTP")
+                .contains("artifact.apply", "artifact.get", "artifact.list", "connection.test",
+                        "connection.test-result", "connection.discover-schema", "connection.schema",
+                        "cluster.members");
     }
 
     private static String describe(HandlerMethod handler) {
@@ -326,12 +330,86 @@ class ControlApiTest {
 
         @Bean
         ApplyService applyService(ArtifactStore store) {
-            return new ApplyService(CyntexCatalog.load(), store);
+            return new ApplyService(CyntexCatalog::load, store);
         }
 
         @Bean
         ArtifactQueryService artifactQueryService(ArtifactStore store) {
             return new ArtifactQueryService(store);
+        }
+
+        // The connection-test controller is imported, so its service must be present for the context to
+        // stand up. Its behaviour is proven in ConnectionApiTest; here it only needs to construct, so the
+        // probe and stores are inert.
+        @Bean
+        ConnectionTestService connectionTestService() {
+            ConnectionProbe probe = config -> {
+                throw new UnsupportedOperationException("connection.test is not exercised in this test");
+            };
+            ConnectionTestResultStore resultStore = new ConnectionTestResultStore() {
+                @Override
+                public void save(ConnectionTestResult result) {
+                }
+
+                @Override
+                public Optional<ConnectionTestResult> find(String connectionId) {
+                    return Optional.empty();
+                }
+            };
+            AuditGate auditGate = new AuditGate(record -> {
+            }, Clock.systemUTC());
+            return new ConnectionTestService(probe, resultStore, auditGate);
+        }
+
+        // The read-back controller is imported too, so its query service must be present for the context to
+        // stand up; its behaviour is proven in ConnectionApiTest, so here it only needs to construct (empty store).
+        @Bean
+        ConnectionTestResultQueryService connectionTestResultQueryService() {
+            return new ConnectionTestResultQueryService(new ConnectionTestResultStore() {
+                @Override
+                public void save(ConnectionTestResult result) {
+                }
+
+                @Override
+                public Optional<ConnectionTestResult> find(String connectionId) {
+                    return Optional.empty();
+                }
+            });
+        }
+
+        // The discover-schema controller methods are bundled with the same controller, so their services
+        // must be present for the context to stand up; their behaviour is proven in ConnectionApiTest, so
+        // here they only need to construct (inert probe, empty store).
+        @Bean
+        SchemaDiscoveryService schemaDiscoveryService() {
+            SchemaDiscoveryProbe probe = config -> {
+                throw new UnsupportedOperationException("connection.discover-schema is not exercised in this test");
+            };
+            return new SchemaDiscoveryService(probe, new SchemaStore() {
+                @Override
+                public void save(DiscoveredSourceModel discovered) {
+                }
+
+                @Override
+                public Optional<DiscoveredSourceModel> get(String connectionId) {
+                    return Optional.empty();
+                }
+            }, new AuditGate(record -> {
+            }, Clock.systemUTC()), Clock.systemUTC());
+        }
+
+        @Bean
+        SchemaQueryService schemaQueryService() {
+            return new SchemaQueryService(new SchemaStore() {
+                @Override
+                public void save(DiscoveredSourceModel discovered) {
+                }
+
+                @Override
+                public Optional<DiscoveredSourceModel> get(String connectionId) {
+                    return Optional.empty();
+                }
+            });
         }
     }
 

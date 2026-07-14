@@ -156,4 +156,16 @@ class CatalogEntryReaderTest {
                 .containsEntry(SourceMode.CDC, ModeSource.DERIVED)
                 .containsEntry(SourceMode.SNAPSHOT, ModeSource.DERIVED);
     }
+
+    @Test
+    void toTreeThenFromTreeRoundTripsAnEntryUnchanged() {
+        // The writer/reader pair is the catalog product's serde; a full-fidelity round-trip (config,
+        // options, visibleWhen, provenance and sink included) is what lets a registered row persist and
+        // reload without drift.
+        ConnectorCatalogEntry original = CatalogEntryReader.read(MYSQL_ENTRY);
+
+        ConnectorCatalogEntry roundTripped = CatalogEntryReader.fromTree(CatalogEntryWriter.toTree(original));
+
+        assertThat(roundTripped).isEqualTo(original);
+    }
 }

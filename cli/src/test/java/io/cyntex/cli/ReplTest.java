@@ -12,6 +12,7 @@ import java.nio.file.Path;
 import java.nio.file.attribute.PosixFileAttributeView;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -78,6 +79,14 @@ class ReplTest {
         ApplyOutcome applyOutcome = new ApplyOutcome.Unreachable();
         GetOutcome getOutcome = new GetOutcome.Unreachable();
         ListOutcome listOutcome = new ListOutcome.Unreachable();
+        ConnectionTestOutcome testOutcome = new ConnectionTestOutcome.Unreachable();
+        ConnectionTestResultOutcome testResultOutcome = new ConnectionTestResultOutcome.Unreachable();
+        ConnectionDiscoverSchemaOutcome discoverSchemaOutcome = new ConnectionDiscoverSchemaOutcome.Unreachable();
+        ConnectionSchemaOutcome schemaOutcome = new ConnectionSchemaOutcome.Unreachable();
+        ConnectorRegisterOutcome registerOutcome = new ConnectorRegisterOutcome.Unreachable();
+        /** Per-artifact register outcomes keyed by artifact byte length (for batch/directory tests); falls back to {@link #registerOutcome}. */
+        final Map<Integer, ConnectorRegisterOutcome> registerOutcomeByLength = new HashMap<>();
+        ConnectorListOutcome connectorListOutcome = new ConnectorListOutcome.Unreachable();
         LifecycleOutcome lifecycleOutcome = new LifecycleOutcome.Unreachable();
         StatusOutcome statusOutcome = new StatusOutcome.Unreachable();
         MetricsOutcome metricsOutcome = new MetricsOutcome.Unreachable();
@@ -89,6 +98,12 @@ class ReplTest {
         final List<String> applyCalls = new ArrayList<>();
         final List<String> getCalls = new ArrayList<>();
         final List<String> listCalls = new ArrayList<>();
+        final List<String> testCalls = new ArrayList<>();
+        final List<String> testResultCalls = new ArrayList<>();
+        final List<String> discoverSchemaCalls = new ArrayList<>();
+        final List<String> schemaCalls = new ArrayList<>();
+        final List<String> registerCalls = new ArrayList<>();
+        final List<String> connectorListCalls = new ArrayList<>();
         final List<String> lifecycleCalls = new ArrayList<>();
         final List<String> statusCalls = new ArrayList<>();
         final List<String> metricsCalls = new ArrayList<>();
@@ -135,6 +150,47 @@ class ReplTest {
         public ListOutcome list(URI baseUrl, String credential, String kind) {
             listCalls.add(credential + "@" + baseUrl + "?" + kind);
             return healthy.contains(baseUrl) ? listOutcome : new ListOutcome.Unreachable();
+        }
+
+        @Override
+        public ConnectionTestOutcome test(
+                URI baseUrl, String credential, String id, String connectorId, Map<String, Object> settings) {
+            testCalls.add(credential + "@" + baseUrl + "/" + id + "[" + connectorId + " " + settings + "]");
+            return healthy.contains(baseUrl) ? testOutcome : new ConnectionTestOutcome.Unreachable();
+        }
+
+        @Override
+        public ConnectionTestResultOutcome testResult(URI baseUrl, String credential, String id) {
+            testResultCalls.add(credential + "@" + baseUrl + "/" + id);
+            return healthy.contains(baseUrl) ? testResultOutcome : new ConnectionTestResultOutcome.Unreachable();
+        }
+
+        @Override
+        public ConnectionDiscoverSchemaOutcome discoverSchema(
+                URI baseUrl, String credential, String id, String connectorId, Map<String, Object> settings) {
+            discoverSchemaCalls.add(credential + "@" + baseUrl + "/" + id + "[" + connectorId + " " + settings + "]");
+            return healthy.contains(baseUrl) ? discoverSchemaOutcome : new ConnectionDiscoverSchemaOutcome.Unreachable();
+        }
+
+        @Override
+        public ConnectionSchemaOutcome schema(URI baseUrl, String credential, String id) {
+            schemaCalls.add(credential + "@" + baseUrl + "/" + id);
+            return healthy.contains(baseUrl) ? schemaOutcome : new ConnectionSchemaOutcome.Unreachable();
+        }
+
+        @Override
+        public ConnectorRegisterOutcome register(URI baseUrl, String credential, byte[] artifact) {
+            registerCalls.add(credential + "@" + baseUrl + " x" + artifact.length);
+            if (!healthy.contains(baseUrl)) {
+                return new ConnectorRegisterOutcome.Unreachable();
+            }
+            return registerOutcomeByLength.getOrDefault(artifact.length, registerOutcome);
+        }
+
+        @Override
+        public ConnectorListOutcome connectorList(URI baseUrl, String credential) {
+            connectorListCalls.add(credential + "@" + baseUrl);
+            return healthy.contains(baseUrl) ? connectorListOutcome : new ConnectorListOutcome.Unreachable();
         }
 
         @Override
@@ -839,6 +895,916 @@ class ReplTest {
         Harness h = onlineSession(Path.of("cyn-work"), client);
         h.repl().dispatch("ls source");
         assertThat(client.listCalls).containsExactly("jwt-tok@http://node1:7900?source");
+    }
+
+    // --- online verb: `connectors` lists the online catalog view (registered rows included) --------
+
+    @Test
+    void connectorsWhileAuthenticatedListsTheOnlineCatalogWithOriginTags() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.connectorListOutcome = new ConnectorListOutcome.Listed(List.of(
+                new CatalogConnector("mysql", "MySQL", "database", List.of("snapshot", "cdc"), true, "bundled"),
+                new CatalogConnector("acme", "Acme", "database", List.of("snapshot"), false, "registered")));
+        Harness h = onlineSession(Path.of("cyn-work"), client);
+        int mark = h.sink().toString().length();
+        assertThat(h.repl().dispatch("connectors")).isTrue();
+        String out = h.sink().toString().substring(mark);
+        assertThat(out).contains("mysql").contains("acme")
+                .contains("bundled").contains("registered").contains("snapshot");
+        assertThat(client.connectorListCalls).containsExactly("jwt-tok@http://node1:7900");
+    }
+
+    @Test
+    void connectorsWithJsonOutputEmitsTheMachineForm() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.connectorListOutcome = new ConnectorListOutcome.Listed(List.of(
+                new CatalogConnector("acme", "Acme", "database", List.of("snapshot"), false, "registered")));
+        Harness h = onlineSession(Path.of("cyn-work"), client);
+        int mark = h.sink().toString().length();
+        assertThat(h.repl().dispatch("connectors -o json")).isTrue();
+        String out = h.sink().toString().substring(mark);
+        assertThat(out).contains("connectors").contains("acme").contains("origin").contains("registered");
+    }
+
+    @Test
+    void connectorsRenderingAServerRejectionShowsTheCodeAndMessage() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.connectorListOutcome = new ConnectorListOutcome.Rejected("control.forbidden", "You lack the grade.");
+        Harness h = onlineSession(Path.of("cyn-work"), client);
+        h.repl().dispatch("connectors");
+        assertThat(h.sink().toString()).contains("control.forbidden").contains("You lack the grade.");
+    }
+
+    @Test
+    void connectorsRejectsAStrayOperandWithAUsageLine() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        Harness h = onlineSession(Path.of("cyn-work"), client);
+        int mark = h.sink().toString().length();
+        h.repl().dispatch("connectors nope");
+        assertThat(h.sink().toString().substring(mark)).contains("connectors:").contains("takes no operand");
+        assertThat(client.connectorListCalls).isEmpty();
+    }
+
+    // --- connection test: `test <id>` sources the stored connection, then probes it and renders the report ---
+
+    /** A stored source connection whose canonical form carries the connector id and its connection config. */
+    private static GetOutcome.Found storedConnection() {
+        return new GetOutcome.Found(new RemoteArtifact("my-mongo", "source",
+                "kind: source\nid: my-mongo\nconnector: mongodb\nconfig:\n  host: db.internal\n  username: cdc\n"));
+    }
+
+    private static ConnectionTestOutcome.Tested passedReport() {
+        return new ConnectionTestOutcome.Tested(new ConnectionReport("my-mongo", "mongodb", "PASSED",
+                List.of(new ConnectionReport.Check("ping", "PASSED", null, null, null, null),
+                        new ConnectionReport.Check("version", "WARNING", "server is old", null, null, null)),
+                1752000000000L));
+    }
+
+    @Test
+    void testFetchesTheStoredConnectionThenProbesItAndRendersTheReport() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.getOutcome = storedConnection();
+        client.testOutcome = passedReport();
+        Harness h = onlineSession(Path.of("cyn-work"), client);
+        int mark = h.sink().toString().length();
+
+        assertThat(h.repl().dispatch("test my-mongo")).isTrue();
+
+        String out = h.sink().toString().substring(mark);
+        // the report renders the overall outcome, the connection + connector, and each check
+        assertThat(out).contains("PASSED").contains("my-mongo").contains("mongodb");
+        assertThat(out).contains("ping").contains("version").contains("WARNING").contains("server is old");
+        // server-as-truth: it fetched the stored connection first, then posted the probe with the parsed
+        // connector + settings under the session credential
+        assertThat(client.getCalls).containsExactly("jwt-tok@http://node1:7900/my-mongo");
+        assertThat(client.testCalls).containsExactly(
+                "jwt-tok@http://node1:7900/my-mongo[mongodb {host=db.internal, username=cdc}]");
+    }
+
+    @Test
+    void testRendersTheReportAsJsonWithTheOutputFlag() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.getOutcome = storedConnection();
+        client.testOutcome = passedReport();
+        Harness h = onlineSession(Path.of("cyn-work"), client);
+        int mark = h.sink().toString().length();
+
+        assertThat(h.repl().dispatch("test my-mongo -o json")).isTrue();
+
+        String out = h.sink().toString().substring(mark);
+        assertThat(out).contains("\"connectionId\"").contains("\"my-mongo\"")
+                .contains("\"outcome\"").contains("\"PASSED\"").contains("\"ping\"");
+    }
+
+    @Test
+    void testRendersTheReportAsYamlWithTheOutputFlag() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.getOutcome = storedConnection();
+        client.testOutcome = passedReport();
+        Harness h = onlineSession(Path.of("cyn-work"), client);
+        int mark = h.sink().toString().length();
+
+        assertThat(h.repl().dispatch("test my-mongo -o yaml")).isTrue();
+
+        String out = h.sink().toString().substring(mark);
+        assertThat(out).contains("connectionId: my-mongo").contains("outcome: PASSED").contains("name: ping");
+    }
+
+    @Test
+    void testOnANonSourceIdReportsNotATestableConnectionAndDoesNotProbe() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.getOutcome = new GetOutcome.Found(
+                new RemoteArtifact("kfk2my", "pipeline", "kind: pipeline\nid: kfk2my\n"));
+        Harness h = onlineSession(Path.of("cyn-work"), client);
+        int mark = h.sink().toString().length();
+
+        assertThat(h.repl().dispatch("test kfk2my")).isTrue();
+
+        String out = h.sink().toString().substring(mark);
+        assertThat(out).contains("kfk2my").containsIgnoringCase("not a testable connection").contains("pipeline");
+        assertThat(client.testCalls).isEmpty();   // a non-connection is never probed
+    }
+
+    @Test
+    void testForAMissingConnectionReportsNotFoundAndDoesNotProbe() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.getOutcome = new GetOutcome.Absent();
+        Harness h = onlineSession(Path.of("cyn-work"), client);
+
+        h.repl().dispatch("test nope");
+
+        assertThat(h.sink().toString()).contains("not found").contains("nope");
+        assertThat(client.testCalls).isEmpty();
+    }
+
+    @Test
+    void testWithNoIdReportsMissingOperandAndDoesNotCallTheServer() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        Harness h = onlineSession(Path.of("cyn-work"), client);
+        int mark = h.sink().toString().length();
+
+        assertThat(h.repl().dispatch("test")).isTrue();
+
+        assertThat(h.sink().toString().substring(mark)).contains("test:").contains("missing operand");
+        assertThat(client.getCalls).isEmpty();
+        assertThat(client.testCalls).isEmpty();
+    }
+
+    @Test
+    void testWhileConnectedButNotAuthenticatedReportsAndDoesNotCallTheServer() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        Harness h = harness(Path.of("cyn-work"), client, new ScriptedPrompter());
+        h.repl().dispatch("connect node1:7900");   // connected, never logged in
+
+        assertThat(h.repl().dispatch("test x")).isTrue();
+
+        assertThat(h.sink().toString()).contains("cli.not-authenticated").contains("test");
+        assertThat(client.getCalls).isEmpty();
+        assertThat(client.testCalls).isEmpty();
+    }
+
+    @Test
+    void testRenderingAServerRejectionShowsTheCodeAndMessage() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.getOutcome = storedConnection();
+        client.testOutcome = new ConnectionTestOutcome.Rejected("control.forbidden", "You lack the grade.");
+        Harness h = onlineSession(Path.of("cyn-work"), client);
+
+        h.repl().dispatch("test my-mongo");
+
+        assertThat(h.sink().toString()).contains("control.forbidden").contains("You lack the grade.");
+    }
+
+    @Test
+    void testOfflineReportsThatAConnectionIsRequired() {
+        Harness h = harness(Path.of("cyn-work"));
+
+        assertThat(h.repl().dispatch("test my-mongo")).isTrue();
+
+        assertThat(h.sink().toString()).contains("requires a connection").contains("test");
+    }
+
+    // --- connection test result: `test-result <id>` reads back the connection's latest stored result ---
+
+    /** A stored FAILED result carrying full per-check diagnostics — the read peer returns whatever last ran. */
+    private static ConnectionTestResultOutcome.Found storedResult() {
+        return new ConnectionTestResultOutcome.Found(new ConnectionReport("my-mongo", "mongodb", "FAILED",
+                List.of(new ConnectionReport.Check("Login", "FAILED", "auth failed", "SCRAM rejected",
+                        "check the password", "11000")),
+                1752000000000L));
+    }
+
+    @Test
+    void testResultReadsBackTheStoredReportWithoutRunningAProbe() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.testResultOutcome = storedResult();
+        Harness h = onlineSession(Path.of("cyn-work"), client);
+        int mark = h.sink().toString().length();
+
+        assertThat(h.repl().dispatch("test-result my-mongo")).isTrue();
+
+        String out = h.sink().toString().substring(mark);
+        // the report renders the last outcome, the connection + connector, and each check with its diagnostics
+        assertThat(out).contains("FAILED").contains("my-mongo").contains("mongodb")
+                .contains("Login").contains("auth failed");
+        // it read the result under the session credential from the current landing node — no probe, no fetch
+        assertThat(client.testResultCalls).containsExactly("jwt-tok@http://node1:7900/my-mongo");
+        assertThat(client.testCalls).isEmpty();
+        assertThat(client.getCalls).isEmpty();
+    }
+
+    @Test
+    void testResultRendersTheStoredReportAsJsonWithTheOutputFlag() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.testResultOutcome = storedResult();
+        Harness h = onlineSession(Path.of("cyn-work"), client);
+        int mark = h.sink().toString().length();
+
+        assertThat(h.repl().dispatch("test-result my-mongo -o json")).isTrue();
+
+        String out = h.sink().toString().substring(mark);
+        assertThat(out).contains("\"connectionId\"").contains("\"my-mongo\"")
+                .contains("\"outcome\"").contains("\"FAILED\"").contains("\"Login\"")
+                .contains("\"connectorErrorCode\"").contains("\"11000\"");
+    }
+
+    @Test
+    void testResultForANeverTestedConnectionReportsNotTestedYet() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.testResultOutcome = new ConnectionTestResultOutcome.Absent();
+        Harness h = onlineSession(Path.of("cyn-work"), client);
+        int mark = h.sink().toString().length();
+
+        assertThat(h.repl().dispatch("test-result my-mongo")).isTrue();
+
+        // never-tested is a benign line, not a coded error nor a rendered report
+        assertThat(h.sink().toString().substring(mark)).contains("my-mongo").containsIgnoringCase("not been tested");
+    }
+
+    @Test
+    void testResultWithNoIdReportsMissingOperandAndDoesNotCallTheServer() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        Harness h = onlineSession(Path.of("cyn-work"), client);
+        int mark = h.sink().toString().length();
+
+        assertThat(h.repl().dispatch("test-result")).isTrue();
+
+        assertThat(h.sink().toString().substring(mark)).contains("test-result:").contains("missing operand");
+        assertThat(client.testResultCalls).isEmpty();
+    }
+
+    @Test
+    void testResultWhileConnectedButNotAuthenticatedReportsAndDoesNotCallTheServer() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        Harness h = harness(Path.of("cyn-work"), client, new ScriptedPrompter());
+        h.repl().dispatch("connect node1:7900");   // connected, never logged in
+
+        assertThat(h.repl().dispatch("test-result x")).isTrue();
+
+        // the not-authenticated state is a coded cli.* diagnostic naming the verb, not a bare string
+        assertThat(h.sink().toString()).contains("cli.not-authenticated").contains("test-result");
+        assertThat(client.testResultCalls).isEmpty();
+    }
+
+    @Test
+    void testResultRenderingAServerRejectionShowsTheCodeAndMessage() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.testResultOutcome =
+                new ConnectionTestResultOutcome.Rejected("control.forbidden", "You lack the grade.");
+        Harness h = onlineSession(Path.of("cyn-work"), client);
+
+        h.repl().dispatch("test-result my-mongo");
+
+        assertThat(h.sink().toString()).contains("control.forbidden").contains("You lack the grade.");
+    }
+
+    @Test
+    void testResultOfflineReportsThatAConnectionIsRequired() {
+        Harness h = harness(Path.of("cyn-work"));
+
+        assertThat(h.repl().dispatch("test-result my-mongo")).isTrue();
+
+        assertThat(h.sink().toString()).contains("requires a connection").contains("test-result");
+    }
+
+    // --- schema discovery: `discover-schema <id>` discovers a stored connection's source model ---
+
+    /** A discovered two-table model the schema verbs render — orders (with pk + index) and customers. */
+    private static ConnectionSchema discoveredSchema() {
+        return new ConnectionSchema("my-mongo", "mongodb",
+                List.of(
+                        new ConnectionSchema.Table("orders",
+                                List.of(new ConnectionSchema.Field("id", "bigint"),
+                                        new ConnectionSchema.Field("note", null)),
+                                List.of("id"),
+                                List.of(new ConnectionSchema.Index("pk_orders", List.of("id"), true))),
+                        new ConnectionSchema.Table("customers",
+                                List.of(new ConnectionSchema.Field("email", "varchar")),
+                                List.of("email"),
+                                List.of())),
+                1752000000000L);
+    }
+
+    @Test
+    void discoverSchemaFetchesTheStoredConnectionThenDiscoversAndRendersTheTables() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.getOutcome = storedConnection();
+        client.discoverSchemaOutcome = new ConnectionDiscoverSchemaOutcome.Discovered(discoveredSchema());
+        Harness h = onlineSession(Path.of("cyn-work"), client);
+        int mark = h.sink().toString().length();
+
+        assertThat(h.repl().dispatch("discover-schema my-mongo")).isTrue();
+
+        String out = h.sink().toString().substring(mark);
+        // the summary renders the connection + connector and one line per discovered table
+        assertThat(out).contains("my-mongo").contains("mongodb")
+                .contains("orders").contains("customers").contains("2 tables");
+        // server-as-truth: it fetched the stored connection first, then posted the discovery with the
+        // parsed connector + settings under the session credential
+        assertThat(client.getCalls).containsExactly("jwt-tok@http://node1:7900/my-mongo");
+        assertThat(client.discoverSchemaCalls).containsExactly(
+                "jwt-tok@http://node1:7900/my-mongo[mongodb {host=db.internal, username=cdc}]");
+    }
+
+    @Test
+    void discoverSchemaRendersTheModelAsJsonWithTheOutputFlag() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.getOutcome = storedConnection();
+        client.discoverSchemaOutcome = new ConnectionDiscoverSchemaOutcome.Discovered(discoveredSchema());
+        Harness h = onlineSession(Path.of("cyn-work"), client);
+        int mark = h.sink().toString().length();
+
+        assertThat(h.repl().dispatch("discover-schema my-mongo -o json")).isTrue();
+
+        String out = h.sink().toString().substring(mark);
+        assertThat(out).contains("\"connectionId\"").contains("\"my-mongo\"")
+                .contains("\"tables\"").contains("\"orders\"").contains("\"primaryKey\"")
+                .contains("\"discoveredAt\"");
+    }
+
+    @Test
+    void discoverSchemaOnANonSourceIdReportsNotDiscoverableAndDoesNotDiscover() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.getOutcome = new GetOutcome.Found(
+                new RemoteArtifact("kfk2my", "pipeline", "kind: pipeline\nid: kfk2my\n"));
+        Harness h = onlineSession(Path.of("cyn-work"), client);
+        int mark = h.sink().toString().length();
+
+        assertThat(h.repl().dispatch("discover-schema kfk2my")).isTrue();
+
+        String out = h.sink().toString().substring(mark);
+        assertThat(out).contains("kfk2my").containsIgnoringCase("not a discoverable connection").contains("pipeline");
+        assertThat(client.discoverSchemaCalls).isEmpty();
+    }
+
+    @Test
+    void discoverSchemaWithNoIdReportsMissingOperandAndDoesNotCallTheServer() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        Harness h = onlineSession(Path.of("cyn-work"), client);
+        int mark = h.sink().toString().length();
+
+        assertThat(h.repl().dispatch("discover-schema")).isTrue();
+
+        assertThat(h.sink().toString().substring(mark)).contains("discover-schema:").contains("missing operand");
+        assertThat(client.getCalls).isEmpty();
+        assertThat(client.discoverSchemaCalls).isEmpty();
+    }
+
+    @Test
+    void discoverSchemaRenderingAServerRejectionShowsTheCodeAndMessage() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.getOutcome = storedConnection();
+        client.discoverSchemaOutcome =
+                new ConnectionDiscoverSchemaOutcome.Rejected("control.forbidden", "You lack the grade.");
+        Harness h = onlineSession(Path.of("cyn-work"), client);
+
+        h.repl().dispatch("discover-schema my-mongo");
+
+        assertThat(h.sink().toString()).contains("control.forbidden").contains("You lack the grade.");
+    }
+
+    @Test
+    void discoverSchemaOfflineReportsThatAConnectionIsRequired() {
+        Harness h = harness(Path.of("cyn-work"));
+
+        assertThat(h.repl().dispatch("discover-schema my-mongo")).isTrue();
+
+        assertThat(h.sink().toString()).contains("requires a connection").contains("discover-schema");
+    }
+
+    // --- register: `register <path>` uploads a local artifact to the server -----------------------
+
+    @Test
+    void registerUploadsALocalArtifactAndRendersTheRegistration(@TempDir Path workdir) throws Exception {
+        Files.write(workdir.resolve("orders.jar"), new byte[] {1, 2, 3, 4});
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.registerOutcome = new ConnectorRegisterOutcome.Registered(
+                new RegisteredConnector("orders", "hash-abc", "1.3.5", true));
+        Harness h = onlineSession(workdir, client);
+        int mark = h.sink().toString().length();
+
+        assertThat(h.repl().dispatch("register orders.jar")).isTrue();
+
+        String out = h.sink().toString().substring(mark);
+        assertThat(out).contains("registered").contains("orders").contains("hash-abc");
+        // the artifact bytes (4) travel to the current landing node under the session credential
+        assertThat(client.registerCalls).containsExactly("jwt-tok@http://node1:7900 x4");
+    }
+
+    @Test
+    void registerRendersAnAlreadyRegisteredArtifactAsANoOp(@TempDir Path workdir) throws Exception {
+        Files.write(workdir.resolve("orders.jar"), new byte[] {1, 2, 3});
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.registerOutcome = new ConnectorRegisterOutcome.Registered(
+                new RegisteredConnector("orders", "hash-abc", "1.3.5", false));
+        Harness h = onlineSession(workdir, client);
+        int mark = h.sink().toString().length();
+
+        assertThat(h.repl().dispatch("register orders.jar")).isTrue();
+
+        assertThat(h.sink().toString().substring(mark)).contains("already registered").contains("orders");
+    }
+
+    @Test
+    void registerRendersTheRegistrationAsJsonWithTheOutputFlag(@TempDir Path workdir) throws Exception {
+        Files.write(workdir.resolve("orders.jar"), new byte[] {1, 2, 3, 4});
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.registerOutcome = new ConnectorRegisterOutcome.Registered(
+                new RegisteredConnector("orders", "hash-abc", "1.3.5", true));
+        Harness h = onlineSession(workdir, client);
+        int mark = h.sink().toString().length();
+
+        assertThat(h.repl().dispatch("register orders.jar -o json")).isTrue();
+
+        String out = h.sink().toString().substring(mark);
+        assertThat(out).contains("\"connectorId\"").contains("\"orders\"")
+                .contains("\"contentHash\"").contains("\"newlyRegistered\"");
+    }
+
+    @Test
+    void registerRendersTheRegistrationAsYamlWithTheOutputFlag(@TempDir Path workdir) throws Exception {
+        Files.write(workdir.resolve("orders.jar"), new byte[] {1, 2, 3, 4});
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.registerOutcome = new ConnectorRegisterOutcome.Registered(
+                new RegisteredConnector("orders", "hash-abc", "1.3.5", true));
+        Harness h = onlineSession(workdir, client);
+        int mark = h.sink().toString().length();
+
+        assertThat(h.repl().dispatch("register orders.jar -o yaml")).isTrue();
+
+        String out = h.sink().toString().substring(mark);
+        assertThat(out).contains("connectorId:").contains("orders")
+                .contains("contentHash:").contains("hash-abc")
+                .contains("newlyRegistered:");
+    }
+
+    @Test
+    void registerForAMissingFileReportsCannotReadAndDoesNotCallTheServer(@TempDir Path workdir) {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        Harness h = onlineSession(workdir, client);
+        int mark = h.sink().toString().length();
+
+        assertThat(h.repl().dispatch("register nope.jar")).isTrue();
+
+        assertThat(h.sink().toString().substring(mark)).contains("register:").containsIgnoringCase("cannot read");
+        assertThat(client.registerCalls).isEmpty();
+    }
+
+    @Test
+    void registerWithNoOperandReportsMissingOperandAndDoesNotCallTheServer(@TempDir Path workdir) {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        Harness h = onlineSession(workdir, client);
+        int mark = h.sink().toString().length();
+
+        assertThat(h.repl().dispatch("register")).isTrue();
+
+        assertThat(h.sink().toString().substring(mark)).contains("register:").contains("missing operand");
+        assertThat(client.registerCalls).isEmpty();
+    }
+
+    @Test
+    void registerRenderingAServerRejectionShowsTheCodeAndMessage(@TempDir Path workdir) throws Exception {
+        Files.write(workdir.resolve("orders.jar"), new byte[] {1, 2, 3, 4});
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.registerOutcome = new ConnectorRegisterOutcome.Rejected(
+                "connector.registration-conflict", "A different artifact already holds that id.");
+        Harness h = onlineSession(workdir, client);
+
+        h.repl().dispatch("register orders.jar");
+
+        assertThat(h.sink().toString())
+                .contains("connector.registration-conflict").contains("A different artifact already holds that id.");
+    }
+
+    @Test
+    void registerRenderingAServerRejectionAsJsonEmitsAStructuredErrorDocument(@TempDir Path workdir) throws Exception {
+        Files.write(workdir.resolve("orders.jar"), new byte[] {1, 2, 3, 4});
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.registerOutcome = new ConnectorRegisterOutcome.Rejected(
+                "connector.registration-conflict", "A different artifact already holds that id.");
+        Harness h = onlineSession(workdir, client);
+        int mark = h.sink().toString().length();
+
+        assertThat(h.repl().dispatch("register orders.jar -o json")).isTrue();
+
+        String out = h.sink().toString().substring(mark);
+        assertThat(out).contains("\"error\"")
+                .contains("\"code\"").contains("connector.registration-conflict")
+                .contains("\"message\"").contains("A different artifact already holds that id.");
+    }
+
+    @Test
+    void registerRenderingAServerRejectionAsYamlEmitsAStructuredErrorDocument(@TempDir Path workdir) throws Exception {
+        Files.write(workdir.resolve("orders.jar"), new byte[] {1, 2, 3, 4});
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.registerOutcome = new ConnectorRegisterOutcome.Rejected(
+                "connector.spec-invalid", "The artifact spec is not valid JSON.");
+        Harness h = onlineSession(workdir, client);
+        int mark = h.sink().toString().length();
+
+        assertThat(h.repl().dispatch("register orders.jar -o yaml")).isTrue();
+
+        String out = h.sink().toString().substring(mark);
+        assertThat(out).contains("error:").contains("code:").contains("connector.spec-invalid")
+                .contains("message:").contains("The artifact spec is not valid JSON.");
+    }
+
+    @Test
+    void registerUploadsEveryJarInADirectoryAndReportsEachOutcome(@TempDir Path workdir) throws Exception {
+        Path dir = Files.createDirectory(workdir.resolve("connectors"));
+        Files.write(dir.resolve("orders.jar"), new byte[] {1});           // registered
+        Files.write(dir.resolve("billing.jar"), new byte[] {1, 2});       // already registered (no-op)
+        Files.write(dir.resolve("broken.jar"), new byte[] {1, 2, 3});     // rejected
+        Files.write(dir.resolve("notes.txt"), new byte[] {1, 2, 3, 4});   // not a jar: skipped
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.registerOutcomeByLength.put(1, new ConnectorRegisterOutcome.Registered(
+                new RegisteredConnector("orders", "h1", "1.0", true)));
+        client.registerOutcomeByLength.put(2, new ConnectorRegisterOutcome.Registered(
+                new RegisteredConnector("billing", "h2", "1.0", false)));
+        client.registerOutcomeByLength.put(3, new ConnectorRegisterOutcome.Rejected(
+                "connector.spec-invalid", "The artifact spec is not valid JSON."));
+        Harness h = onlineSession(workdir, client);
+        int mark = h.sink().toString().length();
+
+        assertThat(h.repl().dispatch("register connectors")).isTrue();
+
+        String out = h.sink().toString().substring(mark);
+        assertThat(out).contains("orders").contains("billing")
+                .contains("already registered")
+                .contains("connector.spec-invalid")
+                .contains("3 artifacts");
+        // only the three jars were uploaded; the .txt was skipped
+        assertThat(client.registerCalls).hasSize(3);
+    }
+
+    @Test
+    void registerUploadsADirectoryAsJsonWithAnArtifactArrayAndSummary(@TempDir Path workdir) throws Exception {
+        Path dir = Files.createDirectory(workdir.resolve("connectors"));
+        Files.write(dir.resolve("orders.jar"), new byte[] {1});
+        Files.write(dir.resolve("broken.jar"), new byte[] {1, 2, 3});
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.registerOutcomeByLength.put(1, new ConnectorRegisterOutcome.Registered(
+                new RegisteredConnector("orders", "h1", "1.0", true)));
+        client.registerOutcomeByLength.put(3, new ConnectorRegisterOutcome.Rejected(
+                "connector.spec-invalid", "bad spec"));
+        Harness h = onlineSession(workdir, client);
+        int mark = h.sink().toString().length();
+
+        assertThat(h.repl().dispatch("register connectors -o json")).isTrue();
+
+        String out = h.sink().toString().substring(mark);
+        assertThat(out).contains("\"artifacts\"").contains("\"summary\"")
+                .contains("\"artifact\"").contains("orders.jar").contains("broken.jar")
+                .contains("\"connectorId\"").contains("orders")
+                .contains("\"error\"").contains("connector.spec-invalid")
+                .contains("\"total\"");
+    }
+
+    @Test
+    void registerUploadsADirectoryAsYamlWithAnArtifactArrayAndSummary(@TempDir Path workdir) throws Exception {
+        Path dir = Files.createDirectory(workdir.resolve("connectors"));
+        Files.write(dir.resolve("orders.jar"), new byte[] {1});
+        Files.write(dir.resolve("broken.jar"), new byte[] {1, 2, 3});
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.registerOutcomeByLength.put(1, new ConnectorRegisterOutcome.Registered(
+                new RegisteredConnector("orders", "h1", "1.0", true)));
+        client.registerOutcomeByLength.put(3, new ConnectorRegisterOutcome.Rejected(
+                "connector.spec-invalid", "bad spec"));
+        Harness h = onlineSession(workdir, client);
+        int mark = h.sink().toString().length();
+
+        assertThat(h.repl().dispatch("register connectors -o yaml")).isTrue();
+
+        String out = h.sink().toString().substring(mark);
+        assertThat(out).contains("artifacts:").contains("summary:")
+                .contains("artifact:").contains("orders.jar").contains("broken.jar")
+                .contains("connectorId:").contains("orders")
+                .contains("error:").contains("connector.spec-invalid")
+                .contains("total:");
+    }
+
+    @Test
+    void registerOfADirectoryWithNoJarsReportsThatNoneWereFound(@TempDir Path workdir) throws Exception {
+        Files.createDirectory(workdir.resolve("connectors"));
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        Harness h = onlineSession(workdir, client);
+        int mark = h.sink().toString().length();
+
+        assertThat(h.repl().dispatch("register connectors")).isTrue();
+
+        assertThat(h.sink().toString().substring(mark)).containsIgnoringCase("no connector jars");
+        assertThat(client.registerCalls).isEmpty();
+    }
+
+    @Test
+    void registerOfADirectoryStopsAndTakesTheSessionOfflineWhenTheServerIsUnreachable(@TempDir Path workdir) throws Exception {
+        Path dir = Files.createDirectory(workdir.resolve("connectors"));
+        Files.write(dir.resolve("a-first.jar"), new byte[] {1});
+        Files.write(dir.resolve("b-second.jar"), new byte[] {1, 2});
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        Harness h = onlineSession(workdir, client);
+        client.setHealthy();   // the server is now down: no member is reachable
+        int mark = h.sink().toString().length();
+
+        assertThat(h.repl().dispatch("register connectors")).isTrue();
+
+        // a-first is attempted, fails over to no healthy member, and the batch stops before b-second
+        assertThat(client.registerCalls).hasSize(1);
+        assertThat(h.repl().session().isConnected()).isFalse();   // failover took the session offline
+        String out = h.sink().toString().substring(mark);
+        assertThat(out).containsIgnoringCase("connection lost")
+                .containsIgnoringCase("not attempted");           // the un-tried jar is signalled, not dropped silently
+    }
+
+    @Test
+    void registerContinuesPastAnUnreadableJarInADirectoryAndReportsIt(@TempDir Path workdir) throws Exception {
+        Path dir = Files.createDirectory(workdir.resolve("connectors"));
+        Files.write(dir.resolve("a-open.jar"), new byte[] {1});
+        Path locked = dir.resolve("b-locked.jar");
+        Files.write(locked, new byte[] {1, 2});
+        Files.write(dir.resolve("c-open.jar"), new byte[] {1, 2, 3});
+        assumeTrue(Files.getFileAttributeView(locked, PosixFileAttributeView.class) != null,
+                "POSIX permissions required");
+        Files.setPosixFilePermissions(locked, PosixFilePermissions.fromString("---------"));
+        assumeTrue(!Files.isReadable(locked), "permission enforcement required (skips when running as root)");
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.registerOutcome = new ConnectorRegisterOutcome.Registered(
+                new RegisteredConnector("c", "h", "1.0", true));
+        Harness h = onlineSession(workdir, client);
+        int mark = h.sink().toString().length();
+        try {
+            assertThat(h.repl().dispatch("register connectors")).isTrue();
+
+            // a-open and c-open still upload; the unreadable b-locked is recorded, not fatal
+            assertThat(client.registerCalls).hasSize(2);
+            assertThat(h.sink().toString().substring(mark))
+                    .containsIgnoringCase("cannot read").contains("b-locked.jar").contains("3 artifacts");
+        } finally {
+            Files.setPosixFilePermissions(locked, PosixFilePermissions.fromString("rwx------"));
+        }
+    }
+
+    @Test
+    void registerADirectoryOnTheMachineSurfaceDoesNotEchoUploadingLines(@TempDir Path workdir) throws Exception {
+        Path dir = Files.createDirectory(workdir.resolve("connectors"));
+        Files.write(dir.resolve("orders.jar"), new byte[] {1});
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.registerOutcome = new ConnectorRegisterOutcome.Registered(
+                new RegisteredConnector("orders", "h", "1.0", true));
+        Harness h = onlineSession(workdir, client);
+        int mark = h.sink().toString().length();
+
+        assertThat(h.repl().dispatch("register connectors -o json")).isTrue();
+
+        assertThat(h.sink().toString().substring(mark)).doesNotContain("uploading");
+    }
+
+    @Test
+    void registerEchoesTheArtifactNameAndSizeBeforeUploading(@TempDir Path workdir) throws Exception {
+        Files.write(workdir.resolve("orders.jar"), new byte[2048]);   // 2 KB
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.registerOutcome = new ConnectorRegisterOutcome.Registered(
+                new RegisteredConnector("orders", "hash-abc", "1.3.5", true));
+        Harness h = onlineSession(workdir, client);
+        int mark = h.sink().toString().length();
+
+        assertThat(h.repl().dispatch("register orders.jar")).isTrue();
+
+        assertThat(h.sink().toString().substring(mark))
+                .containsIgnoringCase("uploading").contains("orders.jar").contains("KB");
+    }
+
+    @Test
+    void registerEchoesEachArtifactBeforeUploadingItInADirectoryBatch(@TempDir Path workdir) throws Exception {
+        Path dir = Files.createDirectory(workdir.resolve("connectors"));
+        Files.write(dir.resolve("orders.jar"), new byte[1024]);
+        Files.write(dir.resolve("billing.jar"), new byte[2048]);
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.registerOutcome = new ConnectorRegisterOutcome.Registered(
+                new RegisteredConnector("c", "h", "1.0", true));
+        Harness h = onlineSession(workdir, client);
+        int mark = h.sink().toString().length();
+
+        assertThat(h.repl().dispatch("register connectors")).isTrue();
+
+        assertThat(h.sink().toString().substring(mark))
+                .contains("uploading orders.jar").contains("uploading billing.jar");
+    }
+
+    @Test
+    void registerWhileConnectedButNotAuthenticatedReportsAndDoesNotCallTheServer() {
+        // The not-authenticated guard fires before the file is even read, so no file need exist.
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        Harness h = harness(Path.of("cyn-work"), client, new ScriptedPrompter());
+        h.repl().dispatch("connect node1:7900");   // connected, never logged in
+
+        assertThat(h.repl().dispatch("register orders.jar")).isTrue();
+
+        assertThat(h.sink().toString()).contains("cli.not-authenticated").contains("register");
+        assertThat(client.registerCalls).isEmpty();
+    }
+
+    @Test
+    void registerOfflineReportsThatAConnectionIsRequired() {
+        Harness h = harness(Path.of("cyn-work"));
+
+        assertThat(h.repl().dispatch("register orders.jar")).isTrue();
+
+        assertThat(h.sink().toString()).contains("requires a connection").contains("register");
+    }
+
+    // --- schema read-back: `schema <id> [table]` reads the stored model without discovering ---
+
+    @Test
+    void schemaReadsBackTheStoredModelWithoutDiscovering() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.schemaOutcome = new ConnectionSchemaOutcome.Found(discoveredSchema());
+        Harness h = onlineSession(Path.of("cyn-work"), client);
+        int mark = h.sink().toString().length();
+
+        assertThat(h.repl().dispatch("schema my-mongo")).isTrue();
+
+        String out = h.sink().toString().substring(mark);
+        assertThat(out).contains("my-mongo").contains("mongodb").contains("orders").contains("customers");
+        // it read the stored model under the session credential — no discovery, no artifact fetch
+        assertThat(client.schemaCalls).containsExactly("jwt-tok@http://node1:7900/my-mongo");
+        assertThat(client.discoverSchemaCalls).isEmpty();
+        assertThat(client.getCalls).isEmpty();
+    }
+
+    @Test
+    void schemaWithATableOperandRendersJustThatTable() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.schemaOutcome = new ConnectionSchemaOutcome.Found(discoveredSchema());
+        Harness h = onlineSession(Path.of("cyn-work"), client);
+        int mark = h.sink().toString().length();
+
+        assertThat(h.repl().dispatch("schema my-mongo orders")).isTrue();
+
+        String out = h.sink().toString().substring(mark);
+        // the single-table view names the table, its fields with types, the pk marker and the index
+        assertThat(out).contains("orders").contains("id").contains("bigint").contains("pk")
+                .contains("pk_orders").contains("unique");
+        assertThat(out).doesNotContain("customers");
+    }
+
+    @Test
+    void schemaNarrowedToATableNamesThatTableInTheView() {
+        // `customers` shares no substring with its fields or indexes, so this witnesses the table name
+        // itself being rendered — not an accident of an index name embedding it.
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.schemaOutcome = new ConnectionSchemaOutcome.Found(discoveredSchema());
+        Harness h = onlineSession(Path.of("cyn-work"), client);
+        int mark = h.sink().toString().length();
+
+        assertThat(h.repl().dispatch("schema my-mongo customers")).isTrue();
+
+        String out = h.sink().toString().substring(mark);
+        assertThat(out).contains("customers").contains("email").contains("varchar");
+        assertThat(out).doesNotContain("orders");
+    }
+
+    @Test
+    void schemaForATableNotInTheModelReportsItAndTheAvailableTables() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.schemaOutcome = new ConnectionSchemaOutcome.Found(discoveredSchema());
+        Harness h = onlineSession(Path.of("cyn-work"), client);
+        int mark = h.sink().toString().length();
+
+        assertThat(h.repl().dispatch("schema my-mongo no_such")).isTrue();
+
+        String out = h.sink().toString().substring(mark);
+        // an unknown table is a benign line naming the miss, not a crash or a rendered model
+        assertThat(out).contains("no_such").containsIgnoringCase("not in the discovered model");
+    }
+
+    @Test
+    void schemaRendersTheFilteredModelAsJsonWithTheOutputFlag() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.schemaOutcome = new ConnectionSchemaOutcome.Found(discoveredSchema());
+        Harness h = onlineSession(Path.of("cyn-work"), client);
+        int mark = h.sink().toString().length();
+
+        assertThat(h.repl().dispatch("schema my-mongo orders -o json")).isTrue();
+
+        String out = h.sink().toString().substring(mark);
+        // the machine form keeps the envelope shape with tables filtered to the requested one
+        assertThat(out).contains("\"connectionId\"").contains("\"orders\"").doesNotContain("\"customers\"");
+    }
+
+    @Test
+    void schemaForANeverDiscoveredConnectionReportsNotDiscoveredYet() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.schemaOutcome = new ConnectionSchemaOutcome.Absent();
+        Harness h = onlineSession(Path.of("cyn-work"), client);
+        int mark = h.sink().toString().length();
+
+        assertThat(h.repl().dispatch("schema my-mongo")).isTrue();
+
+        assertThat(h.sink().toString().substring(mark))
+                .contains("my-mongo").containsIgnoringCase("not been discovered");
+    }
+
+    @Test
+    void schemaRenderingAServerRejectionShowsTheCodeAndMessage() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.schemaOutcome = new ConnectionSchemaOutcome.Rejected("control.forbidden", "You lack the grade.");
+        Harness h = onlineSession(Path.of("cyn-work"), client);
+
+        h.repl().dispatch("schema my-mongo");
+
+        assertThat(h.sink().toString()).contains("control.forbidden").contains("You lack the grade.");
+    }
+
+    @Test
+    void schemaRendersTheModelAsYamlWithTheOutputFlag() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.schemaOutcome = new ConnectionSchemaOutcome.Found(discoveredSchema());
+        Harness h = onlineSession(Path.of("cyn-work"), client);
+        int mark = h.sink().toString().length();
+
+        assertThat(h.repl().dispatch("schema my-mongo -o yaml")).isTrue();
+
+        String out = h.sink().toString().substring(mark);
+        assertThat(out).contains("connectionId: my-mongo").contains("name: orders").contains("unique: true");
+    }
+
+    @Test
+    void schemaWithNoIdReportsMissingOperandAndDoesNotCallTheServer() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        Harness h = onlineSession(Path.of("cyn-work"), client);
+        int mark = h.sink().toString().length();
+
+        assertThat(h.repl().dispatch("schema")).isTrue();
+
+        assertThat(h.sink().toString().substring(mark)).contains("schema:").contains("missing operand");
+        assertThat(client.schemaCalls).isEmpty();
+    }
+
+    @Test
+    void schemaWithAnUnknownOptionReportsItAndDoesNotCallTheServer() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        Harness h = onlineSession(Path.of("cyn-work"), client);
+        int mark = h.sink().toString().length();
+
+        assertThat(h.repl().dispatch("schema my-mongo -x")).isTrue();
+
+        assertThat(h.sink().toString().substring(mark)).contains("schema:").contains("unknown option");
+        assertThat(client.schemaCalls).isEmpty();
+    }
+
+    @Test
+    void schemaWithAnUnknownOutputFormatReportsItAndDoesNotCallTheServer() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        Harness h = onlineSession(Path.of("cyn-work"), client);
+        int mark = h.sink().toString().length();
+
+        assertThat(h.repl().dispatch("schema my-mongo -o xml")).isTrue();
+
+        assertThat(h.sink().toString().substring(mark))
+                .contains("schema:").contains("unknown output format").contains("xml");
+        assertThat(client.schemaCalls).isEmpty();
+    }
+
+    @Test
+    void schemaWithTooManyOperandsReportsUsageAndDoesNotCallTheServer() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        Harness h = onlineSession(Path.of("cyn-work"), client);
+        int mark = h.sink().toString().length();
+
+        assertThat(h.repl().dispatch("schema my-mongo orders extra")).isTrue();
+
+        assertThat(h.sink().toString().substring(mark)).contains("schema:").contains("too many operands");
+        assertThat(client.schemaCalls).isEmpty();
+    }
+
+    @Test
+    void schemaOfflineReportsThatAConnectionIsRequired() {
+        Harness h = harness(Path.of("cyn-work"));
+
+        assertThat(h.repl().dispatch("schema my-mongo")).isTrue();
+
+        assertThat(h.sink().toString()).contains("requires a connection").contains("schema");
     }
 
     // --- server-as-truth: a connected read verb sources the server store, never the local workspace ---

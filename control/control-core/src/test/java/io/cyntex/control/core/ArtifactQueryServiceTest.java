@@ -26,7 +26,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class ArtifactQueryServiceTest {
 
     private final InMemoryArtifactStore store = new InMemoryArtifactStore();
-    private final ApplyService apply = new ApplyService(CyntexCatalog.load(), store);
+    private final ApplyService apply = new ApplyService(CyntexCatalog::load, store);
     private final ArtifactQueryService query = new ArtifactQueryService(store);
 
     private static ArtifactDraft draft(String content) {

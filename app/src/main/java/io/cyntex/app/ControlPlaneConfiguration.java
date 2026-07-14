@@ -2,10 +2,22 @@ package io.cyntex.app;
 
 import io.cyntex.adapters.mongostore.MongoAuthStores;
 import io.cyntex.adapters.mongostore.MongoConnection;
+import io.cyntex.adapters.pdk.ConnectorArtifactRegistrar;
+import io.cyntex.adapters.pdk.ConnectorIntrospector;
+import io.cyntex.adapters.pdk.ConnectorProvisioner;
+import io.cyntex.adapters.pdk.PdkCapabilityDeriver;
+import io.cyntex.adapters.pdk.PdkConnectionTester;
+import io.cyntex.adapters.pdk.PdkSchemaDiscoverer;
+import io.cyntex.adapters.pdk.RegistryConnectorProvisioner;
+import io.cyntex.adapters.pdk.SeedConnectorSweep;
 import io.cyntex.control.core.ApplyService;
+import io.cyntex.control.core.ConnectorCatalogView;
 import io.cyntex.control.core.ArtifactQueryService;
 import io.cyntex.control.core.AuditGate;
 import io.cyntex.control.core.BootstrapService;
+import io.cyntex.control.core.ConnectionTestResultQueryService;
+import io.cyntex.control.core.ConnectionTestService;
+import io.cyntex.control.core.ConnectorRegisterService;
 import io.cyntex.control.core.ControlOperations;
 import io.cyntex.control.core.CredentialAuthenticator;
 import io.cyntex.control.core.LoginService;
@@ -14,6 +26,8 @@ import io.cyntex.control.core.PasswordHasher;
 import io.cyntex.control.core.PipelineLifecycleService;
 import io.cyntex.control.core.PipelineLogQueryService;
 import io.cyntex.control.core.PipelineObservationQueryService;
+import io.cyntex.control.core.SchemaDiscoveryService;
+import io.cyntex.control.core.SchemaQueryService;
 import io.cyntex.control.core.TokenSecrets;
 import io.cyntex.control.core.TokenService;
 import io.cyntex.control.core.TokenSigner;
@@ -21,7 +35,18 @@ import io.cyntex.control.restapi.ControlHttpFace;
 import io.cyntex.core.catalog.CyntexCatalog;
 import io.cyntex.core.logging.LogSink;
 import io.cyntex.core.logging.RingBufferLogSink;
+import io.cyntex.runtime.probe.ConnectionProbe;
+import io.cyntex.runtime.probe.DelegatingConnectionProbe;
+import io.cyntex.runtime.probe.DelegatingSchemaDiscoveryProbe;
+import io.cyntex.runtime.probe.SchemaDiscoveryProbe;
 import io.cyntex.spi.store.AuditStore;
+import io.cyntex.spi.store.ConnectionTestResultStore;
+import io.cyntex.spi.store.ConnectionTester;
+import io.cyntex.spi.store.CapabilityDeriver;
+import io.cyntex.spi.store.ConnectorCatalogStore;
+import io.cyntex.spi.store.ConnectorRegistry;
+import io.cyntex.spi.store.SchemaDiscoverer;
+import io.cyntex.spi.store.SchemaStore;
 import io.cyntex.spi.store.StorePort;
 import io.cyntex.spi.store.TokenStore;
 import io.cyntex.spi.store.UserStore;
@@ -52,7 +77,7 @@ import java.time.Clock;
  */
 @Configuration
 @ConditionalOnProperty(prefix = "cyntex.store.mongo", name = "enabled", matchIfMissing = true)
-@EnableConfigurationProperties(ControlAuthProperties.class)
+@EnableConfigurationProperties({ControlAuthProperties.class, ConnectorPluginProperties.class})
 @Import(ControlHttpFace.class)
 class ControlPlaneConfiguration {
 
@@ -142,13 +167,134 @@ class ControlPlaneConfiguration {
     }
 
     @Bean
-    ApplyService applyService(StorePort storePort) {
-        return new ApplyService(CyntexCatalog.load(), storePort.artifacts());
+    ApplyService applyService(StorePort storePort, ConnectorCatalogView connectorCatalogView) {
+        // The online apply validates against the live catalog view (the bundled snapshot union the
+        // connectors registered so far), so a connector registered at runtime is honoured without a restart.
+        return new ApplyService(connectorCatalogView::merged, storePort.artifacts());
     }
 
     @Bean
     ArtifactQueryService artifactQueryService(StorePort storePort) {
         return new ArtifactQueryService(storePort.artifacts());
+    }
+
+    // ---- the connector plane: the R5 synchronous connection-test verb, wired end to end ----
+    // control-core service -> runtime probe -> adapter-pdk tester -> provisioner -> connector registry.
+    // The PDK types stay inside the adapter-pdk beans; the runtime and control rings see only ports.
+
+    @Bean
+    ConnectorRegistry connectorRegistry(StorePort storePort) {
+        return storePort.connectors();
+    }
+
+    @Bean
+    ConnectorCatalogStore connectorCatalogStore(StorePort storePort) {
+        return storePort.connectorCatalog();
+    }
+
+    @Bean
+    CapabilityDeriver capabilityDeriver(ConnectorProvisioner provisioner) {
+        return new PdkCapabilityDeriver(provisioner);
+    }
+
+    @Bean
+    ConnectorCatalogView connectorCatalogView(ConnectorCatalogStore connectorCatalogStore) {
+        // The online catalog view = the bundled snapshot overlaid with the rows derived for registered
+        // connectors, read live; the offline native CLI keeps reading only the bundled snapshot.
+        return new ConnectorCatalogView(CyntexCatalog.load(), connectorCatalogStore);
+    }
+
+    @Bean
+    ConnectionTestResultStore connectionTestResultStore(StorePort storePort) {
+        return storePort.connectionTestResults();
+    }
+
+    @Bean
+    ConnectorIntrospector connectorIntrospector() {
+        return new ConnectorIntrospector();
+    }
+
+    @Bean
+    ConnectorProvisioner connectorProvisioner(
+            ConnectorRegistry registry, ConnectorIntrospector introspector, ConnectorPluginProperties properties) {
+        return new RegistryConnectorProvisioner(registry, introspector, properties.getPluginsDir());
+    }
+
+    // The startup seed sweep: the release's connectors/ directory goes through the same
+    // register-if-absent path an explicit register uses, so restarts and concurrent nodes are harmless.
+
+    @Bean
+    ConnectorArtifactRegistrar connectorArtifactRegistrar(
+            ConnectorRegistry registry, ConnectorIntrospector introspector,
+            CapabilityDeriver capabilityDeriver, ConnectorCatalogStore connectorCatalogStore) {
+        return new ConnectorArtifactRegistrar(registry, introspector, capabilityDeriver, connectorCatalogStore);
+    }
+
+    @Bean
+    SeedConnectorSweep seedConnectorSweep(ConnectorArtifactRegistrar registrar) {
+        return new SeedConnectorSweep(registrar);
+    }
+
+    @Bean
+    SeedSweepRunner seedSweepRunner(SeedConnectorSweep sweep, ConnectorPluginProperties properties) {
+        return new SeedSweepRunner(sweep, properties.getSeedDir());
+    }
+
+    @Bean
+    ConnectorRegisterService connectorRegisterService(ConnectorArtifactRegistrar registrar, AuditGate auditGate) {
+        // The register verb reaches the distribution store through the same registrar the seed sweep uses; it
+        // implements the spi ingestion port, so control-core drives it without depending on the adapters ring.
+        return new ConnectorRegisterService(registrar, auditGate);
+    }
+
+    @Bean
+    ConnectionTester connectionTester(ConnectorProvisioner provisioner, Clock clock) {
+        return new PdkConnectionTester(provisioner, clock);
+    }
+
+    @Bean
+    ConnectionProbe connectionProbe(ConnectionTester tester) {
+        return new DelegatingConnectionProbe(tester);
+    }
+
+    @Bean
+    ConnectionTestService connectionTestService(
+            ConnectionProbe probe, ConnectionTestResultStore resultStore, AuditGate auditGate) {
+        return new ConnectionTestService(probe, resultStore, auditGate);
+    }
+
+    @Bean
+    ConnectionTestResultQueryService connectionTestResultQueryService(ConnectionTestResultStore resultStore) {
+        return new ConnectionTestResultQueryService(resultStore);
+    }
+
+    // The schema-discovery half of the connection plane: the same provisioner feeds the PDK discoverer,
+    // injected into the runtime seam; discovered models persist through the schema store.
+
+    @Bean
+    SchemaStore schemaStore(StorePort storePort) {
+        return storePort.schemas();
+    }
+
+    @Bean
+    SchemaDiscoverer schemaDiscoverer(ConnectorProvisioner provisioner) {
+        return new PdkSchemaDiscoverer(provisioner);
+    }
+
+    @Bean
+    SchemaDiscoveryProbe schemaDiscoveryProbe(SchemaDiscoverer discoverer) {
+        return new DelegatingSchemaDiscoveryProbe(discoverer);
+    }
+
+    @Bean
+    SchemaDiscoveryService schemaDiscoveryService(
+            SchemaDiscoveryProbe probe, SchemaStore schemaStore, AuditGate auditGate, Clock clock) {
+        return new SchemaDiscoveryService(probe, schemaStore, auditGate, clock);
+    }
+
+    @Bean
+    SchemaQueryService schemaQueryService(SchemaStore schemaStore) {
+        return new SchemaQueryService(schemaStore);
     }
 
     @Bean

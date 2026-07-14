@@ -14,8 +14,8 @@ import java.util.Map;
  * the new verbs in lockstep rather than each face maintaining its own hand-written list.
  *
  * <p>The audit flag marks the operations that mutate persisted control-plane state (an artifact, a
- * user, a token) and therefore leave a record; read and list operations and the read-only connection
- * probe carry no audit flag.
+ * connection's persisted probe or discovery result, a user, a token) and therefore leave a record;
+ * read and list operations carry no audit flag.
  */
 public final class ControlOperations {
 
@@ -26,10 +26,31 @@ public final class ControlOperations {
     public static final Operation ARTIFACT_GET = new Operation("artifact.get", Scope.READ, false, null, CLI_POC);
     public static final Operation ARTIFACT_LIST = new Operation("artifact.list", Scope.READ, false, null, CLI_POC);
 
-    // connection domain: runs an external probe and persists its result for later query and display, so
-    // it mutates persisted state (a write) and is audited. The probe and the result-store shape land in a
-    // later slice; this only reserves the contract.
+    // connection domain: each probing verb runs an external probe and persists its result for later query
+    // and display, so it mutates persisted state (a write) and is audited; its read-back peer returns the
+    // latest persisted result (or a 404 when the connection was never probed), mutates nothing, and is
+    // read and unaudited. connection.test / connection.test-result answer "does it connect"; their pair
+    // connection.discover-schema / connection.schema answer "what is inside" (the discovered source model).
     public static final Operation CONNECTION_TEST = new Operation("connection.test", Scope.WRITE, true, null, CLI_POC);
+    public static final Operation CONNECTION_TEST_RESULT =
+            new Operation("connection.test-result", Scope.READ, false, null, CLI_POC);
+    public static final Operation CONNECTION_DISCOVER_SCHEMA =
+            new Operation("connection.discover-schema", Scope.WRITE, true, null, CLI_POC);
+    public static final Operation CONNECTION_SCHEMA =
+            new Operation("connection.schema", Scope.READ, false, null, CLI_POC);
+
+    // connector domain: registering a connector artifact ingests executable connector code into the
+    // distribution store, so it mutates persisted state (a write) and is audited. A remote caller hands
+    // over the artifact bytes; the operation classloads and stores in the control process rather than
+    // dispatching to the runtime, so it adds no member to the synchronous control-to-runtime whitelist.
+    public static final Operation CONNECTOR_REGISTER =
+            new Operation("connector.register", Scope.WRITE, true, null, CLI_POC);
+    // connector.list reads the online catalog view — the bundled snapshot union the rows derived for
+    // registered connectors — so a registered connector becomes visible without a restart. It reads
+    // derived catalog state, mutates nothing, and needs no member on the synchronous control-to-runtime
+    // whitelist; it is read-scoped and unaudited.
+    public static final Operation CONNECTOR_LIST =
+            new Operation("connector.list", Scope.READ, false, null, CLI_POC);
 
     // cluster domain: topology is sensitive, so listing members is a registry operation (authenticated
     // like every other verb) rather than an anonymous endpoint — only the process-liveness probe stays
@@ -66,6 +87,11 @@ public final class ControlOperations {
             ARTIFACT_GET,
             ARTIFACT_LIST,
             CONNECTION_TEST,
+            CONNECTION_TEST_RESULT,
+            CONNECTION_DISCOVER_SCHEMA,
+            CONNECTION_SCHEMA,
+            CONNECTOR_REGISTER,
+            CONNECTOR_LIST,
             CLUSTER_MEMBERS,
             PIPELINE_START,
             PIPELINE_STOP,

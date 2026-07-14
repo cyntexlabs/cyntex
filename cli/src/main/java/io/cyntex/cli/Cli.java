@@ -47,7 +47,8 @@ public final class Cli implements Runnable {
      */
     static final List<String> CONNECTED_VERBS = List.of(
             "apply", "get", "run", "export", "diff", "edit", "start", "stop", "pause", "resume",
-            "status", "metrics", "snapshot", "logs");
+            "status", "metrics", "snapshot", "logs", "test", "test-result", "discover-schema", "schema",
+            "register", "connectors");
 
     @Spec
     CommandSpec spec;

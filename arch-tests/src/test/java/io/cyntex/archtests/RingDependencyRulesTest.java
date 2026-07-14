@@ -192,18 +192,18 @@ class RingDependencyRulesTest {
                         "io.cyntex.core..",
                         // control-core decouples from the runtime through the storage port
                         "io.cyntex.spi.store..",
-                        // the sole synchronous control-to-runtime seam: the connection-probe whitelist
-                        // (a closed set of one). Every other control<->runtime interaction stays
-                        // store-decoupled; this narrow channel is the one compile reference control-core
-                        // holds into the runtime ring
+                        // the synchronous control-to-runtime seam: the probe whitelist (a closed set
+                        // of two — the connection probe and the schema-discovery probe). Every other
+                        // control<->runtime interaction stays store-decoupled; this narrow channel is
+                        // the one compile reference control-core holds into the runtime ring
                         "io.cyntex.runtime.probe..")
                 .allowEmptyShould(true)
                 .because("control-core is the resource-type-agnostic verb layer: pure logic that "
-                        + "depends on the kernel, the storage port, and the one synchronous "
-                        + "connection-probe seam only. It stays framework-free — Spring lives in "
+                        + "depends on the kernel, the storage port, and the synchronous probe "
+                        + "whitelist only. It stays framework-free — Spring lives in "
                         + "rest-api (the HTTP presentation face), never here — so the apply / registry "
                         + "logic is unit-testable without a container; it reaches the runtime only "
-                        + "through the store, save for the connection-probe whitelist (a closed set of one)")
+                        + "through the store, save for the probe whitelist (a closed set of two)")
                 .check(cyntexClasses);
     }
 
@@ -231,51 +231,82 @@ class RingDependencyRulesTest {
     }
 
     @Test
-    @DisplayName("R5 (exactness): the control-to-runtime sync whitelist is exactly the connection probe — no second channel")
-    void r5_controlToRuntimeSyncWhitelistHasNoSecondChannel() {
+    @DisplayName("R5 (exactness): the control-to-runtime sync whitelist is exactly the connection probe "
+            + "and the schema-discovery probe — no further channel")
+    void r5_controlToRuntimeSyncWhitelistHasNoFurtherChannel() {
         // A control-to-runtime sync channel is a runtime interface control reaches for. The whitelist is
-        // a closed set of exactly one such interface (the connection probe); the probe's value types
-        // (ProbeTarget / ProbeVerdict) are its payload, not channels of their own. This gate bans a
-        // second channel — a further probe interface control depends on. Widening the whitelist must
-        // change this gate and the sync-whitelist decision, not slip in beside it (a second probe
-        // interface control reaches for turns this red).
-        DescribedPredicate<JavaClass> aRuntimeSyncChannelOtherThanTheConnectionProbe =
+        // a closed set of exactly two such interfaces (the connection probe and the schema-discovery
+        // probe); the probes' value types are storage-port types (the connection config they take, the
+        // test result / source model they return), carried as payload, not channels of their own. This
+        // gate bans a further channel — another probe interface control depends on. Widening the
+        // whitelist must change this gate and the sync-whitelist decision, not slip in beside it (a
+        // further probe interface control reaches for turns this red).
+        DescribedPredicate<JavaClass> aRuntimeSyncChannelOutsideTheWhitelist =
                 resideInAPackage("io.cyntex.runtime.probe..")
                         .and(DescribedPredicate.describe("interfaces", JavaClass::isInterface))
                         .and(DescribedPredicate.not(name("io.cyntex.runtime.probe.ConnectionProbe")))
-                        .as("a control-to-runtime sync channel other than the connection probe");
+                        .and(DescribedPredicate.not(name("io.cyntex.runtime.probe.SchemaDiscoveryProbe")))
+                        .as("a control-to-runtime sync channel outside the whitelist");
         noClasses().that().resideInAPackage("io.cyntex.control..")
-                .should().dependOnClassesThat(aRuntimeSyncChannelOtherThanTheConnectionProbe)
+                .should().dependOnClassesThat(aRuntimeSyncChannelOutsideTheWhitelist)
                 .allowEmptyShould(true)
-                .because("the control-to-runtime sync whitelist is a closed set of exactly one member, "
-                        + "the connection probe; a second synchronous channel must change this gate and "
-                        + "the sync-whitelist decision, not slip in beside it")
+                .because("the control-to-runtime sync whitelist is a closed set of exactly two members, "
+                        + "the connection probe and the schema-discovery probe; a further synchronous "
+                        + "channel must change this gate and the sync-whitelist decision, not slip in "
+                        + "beside it")
                 .check(cyntexClasses);
     }
 
     @Test
-    @DisplayName("R5 (exactness): the connection probe exposes exactly one operation (the connection test)")
-    void r5_theConnectionProbeExposesExactlyOneOperation() {
-        // The whitelist member is a single operation. Counting all abstract methods — including any
+    @DisplayName("R5 (exactness): each whitelisted probe exposes exactly one operation")
+    void r5_eachWhitelistedProbeExposesExactlyOneOperation() {
+        // Each whitelist member is a single operation. Counting all abstract methods — including any
         // inherited from a super-interface, not only the probe's own — a second operation (added
-        // directly or pulled in through a super-interface) is a second synchronous control-to-runtime
+        // directly or pulled in through a super-interface) is a further synchronous control-to-runtime
         // call and must change the sync-whitelist decision, not slip in.
-        JavaClass connectionProbe = cyntexClasses.get("io.cyntex.runtime.probe.ConnectionProbe");
-        long operations = connectionProbe.getAllMethods().stream()
-                .filter(method -> method.getModifiers().contains(JavaModifier.ABSTRACT))
-                .count();
-        assertThat(operations)
-                .as("the connection-probe whitelist is a closed set of exactly one operation")
-                .isEqualTo(1L);
+        for (String probeName : new String[] {
+            "io.cyntex.runtime.probe.ConnectionProbe", "io.cyntex.runtime.probe.SchemaDiscoveryProbe"
+        }) {
+            JavaClass probe = cyntexClasses.get(probeName);
+            long operations = probe.getAllMethods().stream()
+                    .filter(method -> method.getModifiers().contains(JavaModifier.ABSTRACT))
+                    .count();
+            assertThat(operations)
+                    .as("each whitelisted probe is a closed set of exactly one operation: " + probeName)
+                    .isEqualTo(1L);
+        }
+    }
+
+    @Test
+    @DisplayName("R5 (exactness): control-core never drives the spi execution ports directly — the probes "
+            + "are the only path")
+    void r5_controlCoreDoesNotBypassTheProbesIntoTheSpiExecutionPorts() {
+        // The ring grant allows control-core to see all of io.cyntex.spi.store (it holds the storage
+        // ports), and the spi execution ports — the connection tester and the schema discoverer, the
+        // ports the probes delegate to — live in that same package. Compiling against them from
+        // control-core would silently bypass the runtime seam: legal to the package rule above, but a
+        // reversal of the sync-whitelist decision (discovery and testing run where the connectors run —
+        // the runtime side). This gate turns that bypass red instead of leaving it to prose.
+        DescribedPredicate<JavaClass> anSpiExecutionPort = name("io.cyntex.spi.store.ConnectionTester")
+                .or(name("io.cyntex.spi.store.SchemaDiscoverer"))
+                .<JavaClass>forSubtype()
+                .as("an spi execution port (the connection tester / the schema discoverer)");
+        noClasses().that().resideInAPackage("io.cyntex.control..")
+                .should().dependOnClassesThat(anSpiExecutionPort)
+                .allowEmptyShould(true)
+                .because("control drives connection testing and schema discovery only through the "
+                        + "whitelisted runtime probes; a direct compile reference to the spi execution "
+                        + "ports bypasses the seam and reverses the sync-whitelist decision")
+                .check(cyntexClasses);
     }
 
     @Test
     @DisplayName("R9: control and runtime hold no compile reference to each other, save the connection-probe whitelist")
     void r9_controlAndRuntimeDoNotReferenceEachOther() {
         // The control-to-runtime half carries the single R5 exception: control may reach the runtime
-        // synchronously only through the connection-probe whitelist (io.cyntex.runtime.probe), a closed
-        // set of one. Any other runtime package is still forbidden; the exactness gate above pins that
-        // whitelist to exactly one channel and one operation.
+        // synchronously only through the probe whitelist (io.cyntex.runtime.probe), a closed set of
+        // two. Any other runtime package is still forbidden; the exactness gates above pin that
+        // whitelist to exactly two channels of one operation each.
         noClasses().that().resideInAPackage("io.cyntex.control..")
                 .should().dependOnClassesThat(
                         JavaClass.Predicates.resideInAPackage("io.cyntex.runtime..")
@@ -283,8 +314,8 @@ class RingDependencyRulesTest {
                 .allowEmptyShould(true)
                 .because("control writes desired state and the runtime watches and converges; they "
                         + "decouple through the store and hold no reference to each other — the sole "
-                        + "exception is the synchronous connection-probe whitelist "
-                        + "(io.cyntex.runtime.probe), a closed set of one")
+                        + "exception is the synchronous probe whitelist "
+                        + "(io.cyntex.runtime.probe), a closed set of two")
                 .check(cyntexClasses);
         // The runtime-to-control half stays a blanket ban: the runtime never reaches up into control.
         noClasses().that().resideInAPackage("io.cyntex.runtime..")

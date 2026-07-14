@@ -1,29 +1,23 @@
-package io.cyntex.tools.catalog.assembler;
+package io.cyntex.core.catalog;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
-import io.cyntex.core.catalog.ConfigField;
-import io.cyntex.core.catalog.ConnectorCatalogEntry;
-import io.cyntex.core.catalog.EnumOption;
-import io.cyntex.core.catalog.Provenance;
-import io.cyntex.core.catalog.SinkCapability;
-import io.cyntex.core.catalog.VisibleWhen;
-
 /**
- * Serializes a {@link ConnectorCatalogEntry} to the neutral tree the bundled-catalog format defines —
- * the producer dual of core-catalog's {@code CatalogEntryReader}. Every key is emitted in a fixed
- * order with nulls explicit, so the output is a fully specified, byte-lockable shape. Enum-valued
- * fields are written with each enum's {@code yaml()} code.
+ * Serializes a {@link ConnectorCatalogEntry} to the neutral tree the catalog product format defines —
+ * the producer dual of {@link CatalogEntryReader}. Every key is emitted in a fixed order with nulls
+ * explicit, so the output is a fully specified, byte-lockable shape. Enum-valued fields are written
+ * with each enum's {@code yaml()} code. The bundled-catalog build tool and the runtime register path
+ * share this one producer so both emit the same format the reader consumes.
  */
-final class CatalogEntryWriter {
+public final class CatalogEntryWriter {
 
     private CatalogEntryWriter() {
     }
 
-    static Map<String, Object> toTree(ConnectorCatalogEntry entry) {
+    public static Map<String, Object> toTree(ConnectorCatalogEntry entry) {
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("id", entry.id());
         m.put("name", entry.name());

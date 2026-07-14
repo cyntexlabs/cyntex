@@ -258,6 +258,56 @@ class HttpControlPlaneClientTest {
     }
 
     @Test
+    void registerPostsTheBase64ArtifactWithABearerCredentialAndReturnsTheRegistration() throws Exception {
+        AtomicReference<CapturedRequest> seen = new AtomicReference<>();
+        HttpServer server = apiServer("/api/connectors:register", 200,
+                "{\"connectorId\":\"orders\",\"contentHash\":\"hash-abc\",\"pdkApiVersion\":\"1.3.5\","
+                        + "\"newlyRegistered\":true}",
+                seen);
+        try {
+            ConnectorRegisterOutcome outcome =
+                    new HttpControlPlaneClient().register(baseOf(server), "tok-abc", new byte[] {1, 2, 3, 4});
+            assertThat(outcome).isEqualTo(new ConnectorRegisterOutcome.Registered(
+                    new RegisteredConnector("orders", "hash-abc", "1.3.5", true)));
+            assertThat(seen.get().method()).isEqualTo("POST");
+            assertThat(seen.get().path()).isEqualTo("/api/connectors:register");
+            assertThat(seen.get().authorization()).isEqualTo("Bearer tok-abc");
+            // The artifact bytes travel base64-encoded in the JSON body.
+            Map<?, ?> sent = (Map<?, ?>) JsonReader.parse(seen.get().body());
+            assertThat(sent.get("artifact")).isEqualTo("AQIDBA==");
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void registerReturnsRejectedWithTheServerCodeAndMessageOnACodedError() throws Exception {
+        HttpServer server = apiServer("/api/connectors:register", 400,
+                "{\"code\":\"connector.registration-conflict\",\"params\":{},"
+                        + "\"message\":\"A different artifact already holds that id.\"}",
+                new AtomicReference<>());
+        try {
+            ConnectorRegisterOutcome outcome =
+                    new HttpControlPlaneClient().register(baseOf(server), "tok", new byte[] {9});
+            assertThat(outcome).isEqualTo(new ConnectorRegisterOutcome.Rejected(
+                    "connector.registration-conflict", "A different artifact already holds that id."));
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void registerReturnsUnreachableWhenTheServerIsDownWithoutThrowing() throws Exception {
+        int closedPort;
+        try (ServerSocket socket = new ServerSocket(0)) {
+            closedPort = socket.getLocalPort();
+        }
+        ConnectorRegisterOutcome outcome = new HttpControlPlaneClient()
+                .register(URI.create("http://127.0.0.1:" + closedPort), "tok", new byte[] {1});
+        assertThat(outcome).isInstanceOf(ConnectorRegisterOutcome.Unreachable.class);
+    }
+
+    @Test
     void applyReturnsRejectedWithTheServerCodeAndMessageOnACodedError() throws Exception {
         HttpServer server = apiServer("/api/artifacts:apply", 400,
                 "{\"code\":\"dsl.illegal-value\",\"params\":{},\"message\":\"Not a known kind.\"}",
@@ -398,6 +448,40 @@ class HttpControlPlaneClientTest {
     }
 
     @Test
+    void connectorListReturnsTheConnectorsWithOriginTagsAndSendsTheCredential() throws Exception {
+        AtomicReference<CapturedRequest> seen = new AtomicReference<>();
+        HttpServer server = apiServer("/api/connectors", 200,
+                "{\"connectors\":[{\"id\":\"mysql\",\"name\":\"MySQL\",\"group\":\"database\","
+                        + "\"modes\":[\"snapshot\",\"cdc\"],\"sink\":true,\"origin\":\"bundled\"},"
+                        + "{\"id\":\"acme\",\"name\":\"Acme\",\"group\":\"database\","
+                        + "\"modes\":[\"snapshot\"],\"sink\":false,\"origin\":\"registered\"}]}", seen);
+        try {
+            ConnectorListOutcome outcome = new HttpControlPlaneClient().connectorList(baseOf(server), "tok-1");
+            assertThat(outcome).isInstanceOf(ConnectorListOutcome.Listed.class);
+            assertThat(((ConnectorListOutcome.Listed) outcome).connectors()).containsExactly(
+                    new CatalogConnector("mysql", "MySQL", "database", List.of("snapshot", "cdc"), true, "bundled"),
+                    new CatalogConnector("acme", "Acme", "database", List.of("snapshot"), false, "registered"));
+            assertThat(seen.get().path()).isEqualTo("/api/connectors");
+            assertThat(seen.get().authorization()).isEqualTo("Bearer tok-1");
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void connectorListReturnsRejectedWithTheServerCodeAndMessageOnACodedErrorStatus() throws Exception {
+        HttpServer server = apiServer("/api/connectors", 403,
+                "{\"code\":\"control.forbidden\",\"params\":{},\"message\":\"You lack the grade.\"}",
+                new AtomicReference<>());
+        try {
+            ConnectorListOutcome outcome = new HttpControlPlaneClient().connectorList(baseOf(server), "tok");
+            assertThat(outcome).isEqualTo(new ConnectorListOutcome.Rejected("control.forbidden", "You lack the grade."));
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
     void listWithoutAKindSendsNoQueryFilter() throws Exception {
         AtomicReference<CapturedRequest> seen = new AtomicReference<>();
         HttpServer server = apiServer("/api/artifacts", 200, "{\"artifacts\":[]}", seen);
@@ -432,6 +516,290 @@ class HttpControlPlaneClientTest {
         }
         assertThat(new HttpControlPlaneClient().list(URI.create("http://127.0.0.1:" + closedPort), "tok", null))
                 .isInstanceOf(ListOutcome.Unreachable.class);
+    }
+
+    // --- connection test: POST /api/connections:test, authenticated, decodes the structured report -----
+
+    @Test
+    void testPostsTheConnectionAndDecodesTheStructuredReport() throws Exception {
+        AtomicReference<CapturedRequest> seen = new AtomicReference<>();
+        HttpServer server = apiServer("/api/connections:test", 200,
+                "{\"connectionId\":\"conn_ora\",\"connectorId\":\"oracle\",\"outcome\":\"PASSED\",\"checks\":["
+                        + "{\"name\":\"ping\",\"status\":\"PASSED\",\"message\":null,\"reason\":null,"
+                        + "\"solution\":null,\"connectorErrorCode\":null},"
+                        + "{\"name\":\"version\",\"status\":\"WARNING\",\"message\":\"server is old\",\"reason\":null,"
+                        + "\"solution\":null,\"connectorErrorCode\":null}],\"testedAt\":1752000000000}",
+                seen);
+        try {
+            ConnectionTestOutcome outcome = new HttpControlPlaneClient()
+                    .test(baseOf(server), "tok-abc", "conn_ora", "oracle", Map.of("host", "10.20.0.15"));
+
+            assertThat(outcome).isInstanceOf(ConnectionTestOutcome.Tested.class);
+            ConnectionReport report = ((ConnectionTestOutcome.Tested) outcome).report();
+            assertThat(report.connectionId()).isEqualTo("conn_ora");
+            assertThat(report.connectorId()).isEqualTo("oracle");
+            assertThat(report.outcome()).isEqualTo("PASSED");
+            assertThat(report.testedAt()).isEqualTo(1752000000000L);
+            assertThat(report.checks()).containsExactly(
+                    new ConnectionReport.Check("ping", "PASSED", null, null, null, null),
+                    new ConnectionReport.Check("version", "WARNING", "server is old", null, null, null));
+
+            // the request carried the connection id, its connector and settings under a bearer credential
+            assertThat(seen.get().method()).isEqualTo("POST");
+            assertThat(seen.get().path()).isEqualTo("/api/connections:test");
+            assertThat(seen.get().authorization()).isEqualTo("Bearer tok-abc");
+            Map<?, ?> sent = (Map<?, ?>) JsonReader.parse(seen.get().body());
+            assertThat(sent.get("id")).isEqualTo("conn_ora");
+            assertThat(sent.get("connectorId")).isEqualTo("oracle");
+            assertThat(sent.get("settings")).isEqualTo(Map.of("host", "10.20.0.15"));
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void testReturnsRejectedWithTheServerCodeAndMessageOnACodedErrorStatus() throws Exception {
+        HttpServer server = apiServer("/api/connections:test", 400,
+                "{\"code\":\"control.malformed-request\",\"params\":{},\"message\":\"a connectorId is required\"}",
+                new AtomicReference<>());
+        try {
+            ConnectionTestOutcome outcome = new HttpControlPlaneClient()
+                    .test(baseOf(server), "tok", "conn_ora", "oracle", Map.of());
+            assertThat(outcome).isEqualTo(
+                    new ConnectionTestOutcome.Rejected("control.malformed-request", "a connectorId is required"));
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void testReturnsUnreachableWhenTheServerIsDownWithoutThrowing() throws Exception {
+        int closedPort;
+        try (ServerSocket socket = new ServerSocket(0)) {
+            closedPort = socket.getLocalPort();
+        }
+        assertThat(new HttpControlPlaneClient()
+                .test(URI.create("http://127.0.0.1:" + closedPort), "tok", "c", "oracle", Map.of()))
+                .isInstanceOf(ConnectionTestOutcome.Unreachable.class);
+    }
+
+    // --- connection test result: GET /api/connections/{id}/test-result, decodes the stored report ---------
+
+    @Test
+    void testResultReturnsFoundWithTheStoredReportAndSendsTheCredential() throws Exception {
+        AtomicReference<CapturedRequest> seen = new AtomicReference<>();
+        HttpServer server = apiServer("/api/connections/", 200,
+                "{\"connectionId\":\"conn_ora\",\"connectorId\":\"oracle\",\"outcome\":\"FAILED\",\"checks\":["
+                        + "{\"name\":\"Login\",\"status\":\"FAILED\",\"message\":\"auth failed\",\"reason\":null,"
+                        + "\"solution\":null,\"connectorErrorCode\":\"11000\"}],\"testedAt\":1752000000000}",
+                seen);
+        try {
+            ConnectionTestResultOutcome outcome =
+                    new HttpControlPlaneClient().testResult(baseOf(server), "tok-xyz", "conn_ora");
+
+            assertThat(outcome).isInstanceOf(ConnectionTestResultOutcome.Found.class);
+            ConnectionReport report = ((ConnectionTestResultOutcome.Found) outcome).report();
+            assertThat(report.connectionId()).isEqualTo("conn_ora");
+            assertThat(report.connectorId()).isEqualTo("oracle");
+            assertThat(report.outcome()).isEqualTo("FAILED");
+            assertThat(report.testedAt()).isEqualTo(1752000000000L);
+            assertThat(report.checks()).containsExactly(
+                    new ConnectionReport.Check("Login", "FAILED", "auth failed", null, null, "11000"));
+
+            // the read is a GET to the connection's result path, under a bearer credential
+            assertThat(seen.get().method()).isEqualTo("GET");
+            assertThat(seen.get().path()).isEqualTo("/api/connections/conn_ora/test-result");
+            assertThat(seen.get().authorization()).isEqualTo("Bearer tok-xyz");
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void testResultReturnsAbsentOnA404() throws Exception {
+        // a 404 is "never tested", distinct from a coded refusal
+        HttpServer server = apiServer("/api/connections/", 404, null, new AtomicReference<>());
+        try {
+            assertThat(new HttpControlPlaneClient().testResult(baseOf(server), "tok", "never_tested"))
+                    .isInstanceOf(ConnectionTestResultOutcome.Absent.class);
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void testResultReturnsRejectedWithTheServerCodeAndMessageOnACodedErrorStatus() throws Exception {
+        HttpServer server = apiServer("/api/connections/", 403,
+                "{\"code\":\"control.forbidden\",\"params\":{},\"message\":\"You lack the grade.\"}",
+                new AtomicReference<>());
+        try {
+            ConnectionTestResultOutcome outcome =
+                    new HttpControlPlaneClient().testResult(baseOf(server), "tok", "conn_ora");
+            assertThat(outcome).isEqualTo(
+                    new ConnectionTestResultOutcome.Rejected("control.forbidden", "You lack the grade."));
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void testResultReturnsUnreachableWhenTheServerIsDownWithoutThrowing() throws Exception {
+        int closedPort;
+        try (ServerSocket socket = new ServerSocket(0)) {
+            closedPort = socket.getLocalPort();
+        }
+        assertThat(new HttpControlPlaneClient()
+                .testResult(URI.create("http://127.0.0.1:" + closedPort), "tok", "c"))
+                .isInstanceOf(ConnectionTestResultOutcome.Unreachable.class);
+    }
+
+    // --- schema discovery: POST /api/connections:discover-schema, decodes the discovered model ---------
+
+    private static final String SCHEMA_BODY =
+            "{\"connectionId\":\"conn_ora\",\"connectorId\":\"oracle\",\"tables\":["
+                    + "{\"name\":\"orders\",\"fields\":[{\"name\":\"id\",\"type\":\"NUMBER\"},"
+                    + "{\"name\":\"note\",\"type\":null}],\"primaryKey\":[\"id\"],"
+                    + "\"indexes\":[{\"name\":\"pk_orders\",\"fields\":[\"id\"],\"unique\":true}]}],"
+                    + "\"discoveredAt\":1752000000000}";
+
+    private static void assertDecodedSchema(ConnectionSchema schema) {
+        assertThat(schema.connectionId()).isEqualTo("conn_ora");
+        assertThat(schema.connectorId()).isEqualTo("oracle");
+        assertThat(schema.discoveredAt()).isEqualTo(1752000000000L);
+        assertThat(schema.tables()).containsExactly(new ConnectionSchema.Table(
+                "orders",
+                List.of(new ConnectionSchema.Field("id", "NUMBER"), new ConnectionSchema.Field("note", null)),
+                List.of("id"),
+                List.of(new ConnectionSchema.Index("pk_orders", List.of("id"), true))));
+    }
+
+    @Test
+    void discoverSchemaPostsTheConnectionAndDecodesTheModel() throws Exception {
+        AtomicReference<CapturedRequest> seen = new AtomicReference<>();
+        HttpServer server = apiServer("/api/connections:discover-schema", 200, SCHEMA_BODY, seen);
+        try {
+            ConnectionDiscoverSchemaOutcome outcome = new HttpControlPlaneClient()
+                    .discoverSchema(baseOf(server), "tok-abc", "conn_ora", "oracle", Map.of("host", "10.20.0.15"));
+
+            assertThat(outcome).isInstanceOf(ConnectionDiscoverSchemaOutcome.Discovered.class);
+            assertDecodedSchema(((ConnectionDiscoverSchemaOutcome.Discovered) outcome).schema());
+
+            // the request carried the connection id, its connector and settings under a bearer credential
+            assertThat(seen.get().method()).isEqualTo("POST");
+            assertThat(seen.get().path()).isEqualTo("/api/connections:discover-schema");
+            assertThat(seen.get().authorization()).isEqualTo("Bearer tok-abc");
+            Map<?, ?> sent = (Map<?, ?>) JsonReader.parse(seen.get().body());
+            assertThat(sent.get("id")).isEqualTo("conn_ora");
+            assertThat(sent.get("connectorId")).isEqualTo("oracle");
+            assertThat(sent.get("settings")).isEqualTo(Map.of("host", "10.20.0.15"));
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void discoverSchemaReturnsRejectedWithTheServerCodeAndMessageOnACodedErrorStatus() throws Exception {
+        HttpServer server = apiServer("/api/connections:discover-schema", 403,
+                "{\"code\":\"control.forbidden\",\"params\":{},\"message\":\"You lack the grade.\"}",
+                new AtomicReference<>());
+        try {
+            ConnectionDiscoverSchemaOutcome outcome = new HttpControlPlaneClient()
+                    .discoverSchema(baseOf(server), "tok", "conn_ora", "oracle", Map.of());
+            assertThat(outcome).isEqualTo(
+                    new ConnectionDiscoverSchemaOutcome.Rejected("control.forbidden", "You lack the grade."));
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void discoverSchemaReturnsUnreachableWhenTheServerIsDownWithoutThrowing() throws Exception {
+        int closedPort;
+        try (ServerSocket socket = new ServerSocket(0)) {
+            closedPort = socket.getLocalPort();
+        }
+        assertThat(new HttpControlPlaneClient()
+                .discoverSchema(URI.create("http://127.0.0.1:" + closedPort), "tok", "c", "oracle", Map.of()))
+                .isInstanceOf(ConnectionDiscoverSchemaOutcome.Unreachable.class);
+    }
+
+    // --- schema read-back: GET /api/connections/{id}/schema, decodes the stored model -------------------
+
+    @Test
+    void schemaReturnsFoundWithTheStoredModelAndSendsTheCredential() throws Exception {
+        AtomicReference<CapturedRequest> seen = new AtomicReference<>();
+        HttpServer server = apiServer("/api/connections/", 200, SCHEMA_BODY, seen);
+        try {
+            ConnectionSchemaOutcome outcome =
+                    new HttpControlPlaneClient().schema(baseOf(server), "tok-xyz", "conn_ora");
+
+            assertThat(outcome).isInstanceOf(ConnectionSchemaOutcome.Found.class);
+            assertDecodedSchema(((ConnectionSchemaOutcome.Found) outcome).schema());
+
+            // the read is a GET to the connection's schema path, under a bearer credential
+            assertThat(seen.get().method()).isEqualTo("GET");
+            assertThat(seen.get().path()).isEqualTo("/api/connections/conn_ora/schema");
+            assertThat(seen.get().authorization()).isEqualTo("Bearer tok-xyz");
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void schemaSkipsAMalformedTableEntryAndKeepsTheRest() throws Exception {
+        // one nameless table entry among good ones is skipped — the same lenient policy a malformed
+        // check gets in a test report — rather than discarding the whole model
+        String body = "{\"connectionId\":\"conn_ora\",\"connectorId\":\"oracle\",\"tables\":["
+                + "{\"fields\":[]},"
+                + "{\"name\":\"orders\",\"fields\":[],\"primaryKey\":[],\"indexes\":[]}],"
+                + "\"discoveredAt\":1}";
+        HttpServer server = apiServer("/api/connections/", 200, body, new AtomicReference<>());
+        try {
+            ConnectionSchemaOutcome outcome = new HttpControlPlaneClient().schema(baseOf(server), "tok", "conn_ora");
+
+            assertThat(outcome).isInstanceOf(ConnectionSchemaOutcome.Found.class);
+            ConnectionSchema schema = ((ConnectionSchemaOutcome.Found) outcome).schema();
+            assertThat(schema.tables()).extracting(ConnectionSchema.Table::name).containsExactly("orders");
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void schemaReturnsAbsentOnA404() throws Exception {
+        // a 404 is "never discovered", distinct from a coded refusal
+        HttpServer server = apiServer("/api/connections/", 404, null, new AtomicReference<>());
+        try {
+            assertThat(new HttpControlPlaneClient().schema(baseOf(server), "tok", "never_discovered"))
+                    .isInstanceOf(ConnectionSchemaOutcome.Absent.class);
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void schemaReturnsRejectedWithTheServerCodeAndMessageOnACodedErrorStatus() throws Exception {
+        HttpServer server = apiServer("/api/connections/", 403,
+                "{\"code\":\"control.forbidden\",\"params\":{},\"message\":\"You lack the grade.\"}",
+                new AtomicReference<>());
+        try {
+            ConnectionSchemaOutcome outcome = new HttpControlPlaneClient().schema(baseOf(server), "tok", "conn_ora");
+            assertThat(outcome).isEqualTo(
+                    new ConnectionSchemaOutcome.Rejected("control.forbidden", "You lack the grade."));
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
+    void schemaReturnsUnreachableWhenTheServerIsDownWithoutThrowing() throws Exception {
+        int closedPort;
+        try (ServerSocket socket = new ServerSocket(0)) {
+            closedPort = socket.getLocalPort();
+        }
+        assertThat(new HttpControlPlaneClient()
+                .schema(URI.create("http://127.0.0.1:" + closedPort), "tok", "c"))
+                .isInstanceOf(ConnectionSchemaOutcome.Unreachable.class);
     }
 
     // --- observation reads: GET /api/pipelines/{id}/{face} under /api, authenticated ---------------

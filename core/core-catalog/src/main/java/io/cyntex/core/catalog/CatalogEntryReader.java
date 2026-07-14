@@ -28,7 +28,7 @@ public final class CatalogEntryReader {
         return fromTree(asMap(CatalogJson.parse(json)));
     }
 
-    static ConnectorCatalogEntry fromTree(Map<String, Object> m) {
+    public static ConnectorCatalogEntry fromTree(Map<String, Object> m) {
         return new ConnectorCatalogEntry(
                 requireString(m, "id"),
                 str(m.get("name")),

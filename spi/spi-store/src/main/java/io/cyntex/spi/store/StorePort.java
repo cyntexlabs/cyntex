@@ -1,13 +1,15 @@
 package io.cyntex.spi.store;
 
 /**
- * The persistence port: one store surface with six concerns — the artifact truth layer, the pipeline
+ * The persistence port: one store surface with ten concerns — the artifact truth layer, the pipeline
  * state store (whose transitions land only through the epoch-fencing compare-and-swap), the pipeline
  * desired-state store (plain upsert intent, the split counterpart to the state store), the connection
- * catalog, the per-pipeline observation store (plain upsert latest projection, read by the monitor read
- * faces), and the SRS meta store (one durable coordination record per mining chain). A pure interface
- * over the core ring only (rule R2); a store backend (a database adapter) implements the six sub-stores
- * behind it.
+ * catalog, the discovered source-schema store, the connector distribution registry, the derived
+ * connector catalog rows (one normalized capability row per registered connector), the latest
+ * connection-test result per connection, the per-pipeline observation store (plain upsert latest
+ * projection, read by the monitor read faces), and the SRS meta store (one durable coordination
+ * record per mining chain). A pure interface over the core ring only (rule R2); a store backend
+ * (a database adapter) implements the ten sub-stores behind it.
  */
 public interface StorePort {
 
@@ -22,6 +24,18 @@ public interface StorePort {
 
     /** The store of registered connection / connector-instance configurations. */
     CatalogStore catalog();
+
+    /** The store of source models discovered off registered connections. */
+    SchemaStore schemas();
+
+    /** The connector distribution registry: registered connector artifacts and their bytes. */
+    ConnectorRegistry connectors();
+
+    /** The derived connector catalog rows: one normalized capability row per registered connector. */
+    ConnectorCatalogStore connectorCatalog();
+
+    /** The store of the latest connection-test result per connection. */
+    ConnectionTestResultStore connectionTestResults();
 
     /** The per-pipeline observation store; plain upsert latest projection, read by the monitor read faces. */
     ObservationStore observations();

@@ -128,6 +128,13 @@
       <artifactId>spi-store</artifactId>
       <version>${revision}</version>
     </dependency>
+    <!-- The runtime probe seam: the connection-test verb drives the runtime probe, whose adapter-backed
+         connection tester is composed here at the assembly root. -->
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>runtime-probe</artifactId>
+      <version>${revision}</version>
+    </dependency>
     <!-- The runtime convergence loop the assembly root drives: the app is the one place a runtime-ring
          module is wired in (rule R7), and the Spring scheduler that ticks it lives here, not in the
          runtime ring where the framework is banned. -->

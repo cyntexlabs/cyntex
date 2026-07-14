@@ -76,9 +76,24 @@ final class AuthInterceptor implements HandlerInterceptor {
             throw new CyntexException(ControlError.UNAUTHENTICATED, Map.of(), null);
         }
         Authorization.require(credential.get(), op);
-        // Expose the authenticated subject to the handler so an audited verb records the real caller.
+        // The caller is now authenticated and authorized; expose its subject so an audited handler attributes
+        // the operation to the session, never to anything the request body could forge.
         request.setAttribute(PRINCIPAL_ATTRIBUTE, credential.get().subject());
         return true;
+    }
+
+    /**
+     * The authenticated subject for the current request — the principal an audited handler attributes its
+     * operation to. Set by this interceptor before any {@code /api} handler runs, so it is always present on
+     * the guarded surface; its absence means a handler was reached without the guard, which is a wiring bug
+     * (a bare invariant violation), not a user-facing error.
+     */
+    static String authenticatedPrincipal(HttpServletRequest request) {
+        if (request.getAttribute(PRINCIPAL_ATTRIBUTE) instanceof String subject) {
+            return subject;
+        }
+        throw new IllegalStateException(
+                "no authenticated principal on the request: an /api handler ran without the auth guard");
     }
 
     /** The credential from an {@code Authorization: Bearer <credential>} header, or {@code null} if absent. */

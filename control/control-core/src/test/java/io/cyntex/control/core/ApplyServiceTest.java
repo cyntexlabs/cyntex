@@ -1,5 +1,7 @@
 package io.cyntex.control.core;
 
+import io.cyntex.core.catalog.CatalogEntryReader;
+import io.cyntex.core.catalog.ConnectorCatalogEntry;
 import io.cyntex.core.catalog.CyntexCatalog;
 import io.cyntex.core.dsl.DslError;
 import io.cyntex.core.dsl.DslException;
@@ -15,8 +17,10 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.function.Supplier;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.catchThrowable;
 
@@ -31,7 +35,7 @@ import static org.assertj.core.api.Assertions.catchThrowable;
 class ApplyServiceTest {
 
     private final RecordingArtifactStore store = new RecordingArtifactStore();
-    private final ApplyService service = new ApplyService(CyntexCatalog.load(), store);
+    private final ApplyService service = new ApplyService(CyntexCatalog::load, store);
 
     // A guaranteed-valid mysql source used as a pure connection (X18 dual-role: no mode / tables).
     private static final String TGT_MY = """
@@ -117,6 +121,55 @@ class ApplyServiceTest {
         assertThat(((DslException) t).code()).isEqualTo(DslError.UNSUPPORTED_MODE);
     }
 
+    // A registered connector 'acme' (absent from the bundled snapshot) whose declared source modes differ
+    // between the two rows — [cdc] then [snapshot] — so a cdc source is legal against the first, illegal
+    // against the second; and a config field 'host' so the source's config validates.
+    private static String acmeRow(String mode) {
+        return ("""
+                {
+                  "id": "acme", "name": "Acme", "displayName": "Acme", "icon": null,
+                  "group": "database", "modes": ["%MODE%"], "discovery": "catalog",
+                  "sink": {"capable": false, "writeSemantics": []}, "pushOut": false,
+                  "config": [{"name": "host", "type": "string", "label": {}, "required": false,
+                    "default": null, "secret": false, "options": [], "visibleWhen": null}],
+                  "provenance": {"connectorRepoSha": null, "specPath": "spec.json", "specContentHash": "h",
+                    "pdkApiVersion": "1.0.0", "requiredLevel": null, "modeSource": {"%MODE%": "declared"}}
+                }
+                """).replace("%MODE%", mode);
+    }
+
+    private static final String ACME_CDC_SOURCE = """
+            version: cyntex/v1
+            kind: source
+            id: src_a
+            connector: acme
+            config: { host: db }
+            mode: cdc
+            tables: [ orders ]
+            """;
+
+    @Test
+    void planValidatesAgainstTheLiveMergedViewSoARuntimeRegisteredConnectorIsHonoured() {
+        // The change's headline: plan() reads the catalog supplier per call, so a connector registered at
+        // runtime is honoured without a restart and its capability matrix is enforced live. acme is
+        // registered supporting [cdc] -> a cdc source validates; re-registered supporting only [snapshot] ->
+        // the same source now violates its matrix. This fails if plan captured the catalog once (both plans
+        // would see [cdc]) or were reverted to the fixed bundled snapshot (acme absent, the flip impossible).
+        List<ConnectorCatalogEntry> registered = new ArrayList<>();
+        registered.add(CatalogEntryReader.read(acmeRow("cdc")));
+        Supplier<CyntexCatalog> live = () -> CyntexCatalog.merged(CyntexCatalog.load(), List.copyOf(registered));
+        ApplyService liveService = new ApplyService(live, store);
+
+        assertThatCode(() -> liveService.plan(List.of(draft(ACME_CDC_SOURCE)))).doesNotThrowAnyException();
+
+        registered.clear();
+        registered.add(CatalogEntryReader.read(acmeRow("snapshot")));
+
+        Throwable t = catchThrowable(() -> liveService.plan(List.of(draft(ACME_CDC_SOURCE))));
+        assertThat(t).isInstanceOf(DslException.class);
+        assertThat(((DslException) t).code()).isEqualTo(DslError.UNSUPPORTED_MODE);
+    }
+
     @Test
     void anUnknownKindIsRejectedWithACodedDiagnostic() {
         // An illegal resource must surface a coded dsl.* diagnostic at validation, never an uncoded
@@ -195,7 +248,7 @@ class ApplyServiceTest {
 
     @Test
     void aNullStoreIsRejected() {
-        assertThatThrownBy(() -> new ApplyService(CyntexCatalog.load(), null))
+        assertThatThrownBy(() -> new ApplyService(CyntexCatalog::load, null))
                 .isInstanceOf(NullPointerException.class);
     }
 

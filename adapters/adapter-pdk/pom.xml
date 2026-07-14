@@ -69,16 +69,22 @@
       <artifactId>spi-sink</artifactId>
       <version>${revision}</version>
     </dependency>
+    <!-- The connection-test result contract (spi ring): the connection tester normalizes the frozen
+         PDK connectionTest into this module's ConnectionTestResult; ConnectionConfig is its input. -->
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>spi-store</artifactId>
+      <version>${revision}</version>
+    </dependency>
 
-    <!-- Test scope only: the regression checks that the ids the live harness reads back map to the
-         same catalog modes the offline build recorded, so it reuses the catalog's derivation model
-         (DerivedCapability / ModeResolver). Not a compile dependency — the bridge reports raw ids and
-         leaves the cyntex-namespace mapping to the catalog. -->
+    <!-- The catalog normalization + assembly the register path runs at runtime: after a connector is
+         registered, its declared capability ids are merged with its normalized spec into a catalog row
+         (SpecNormalizer / CatalogEntryAssembler), reusing the same model the offline build recorded so
+         the online and bundled catalogs agree. An adapters-ring module depending on the core ring. -->
     <dependency>
       <groupId>io.cyntex</groupId>
       <artifactId>core-catalog</artifactId>
       <version>${revision}</version>
-      <scope>test</scope>
     </dependency>
 
     <dependency>

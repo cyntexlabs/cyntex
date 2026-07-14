@@ -3,6 +3,7 @@ package io.cyntex.app;
 import io.cyntex.adapters.mongostore.StoreError;
 import io.cyntex.control.core.ApplyService;
 import io.cyntex.control.core.BootstrapService;
+import io.cyntex.control.core.ConnectionTestService;
 import io.cyntex.control.core.LoginService;
 import io.cyntex.control.core.OperationRegistry;
 import io.cyntex.core.common.CyntexException;
@@ -36,6 +37,8 @@ class ControlPlaneStartupTest {
                     assertThat(context).doesNotHaveBean(LoginService.class);
                     assertThat(context).doesNotHaveBean(BootstrapService.class);
                     assertThat(context).doesNotHaveBean(ApplyService.class);
+                    // The connection-test verb's service is part of the same Mongo-gated plane, not unconditional.
+                    assertThat(context).doesNotHaveBean(ConnectionTestService.class);
                 });
     }
 

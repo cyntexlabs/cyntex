@@ -4,32 +4,44 @@ import io.cyntex.control.core.ApplyService;
 import io.cyntex.control.core.ArtifactQueryService;
 import io.cyntex.control.core.AuditGate;
 import io.cyntex.control.core.BootstrapService;
+import io.cyntex.control.core.ConnectionTestResultQueryService;
+import io.cyntex.control.core.ConnectionTestService;
+import io.cyntex.control.core.ConnectorCatalogView;
+import io.cyntex.control.core.ConnectorRegisterService;
 import io.cyntex.control.core.ControlOperations;
 import io.cyntex.control.core.CredentialAuthenticator;
+import io.cyntex.control.core.GeneratedSecret;
 import io.cyntex.control.core.LoginService;
 import io.cyntex.control.core.OperationRegistry;
 import io.cyntex.control.core.PasswordHasher;
 import io.cyntex.control.core.PipelineLifecycleService;
 import io.cyntex.control.core.PipelineLogQueryService;
 import io.cyntex.control.core.PipelineObservationQueryService;
+import io.cyntex.control.core.SchemaDiscoveryService;
+import io.cyntex.control.core.SchemaQueryService;
 import io.cyntex.control.core.Scope;
+import io.cyntex.control.core.TokenSecrets;
 import io.cyntex.control.core.TokenService;
 import io.cyntex.control.core.TokenSigner;
-import io.cyntex.control.core.TokenSecrets;
-import io.cyntex.control.core.GeneratedSecret;
 import io.cyntex.control.core.VerifiedToken;
 import io.cyntex.core.catalog.CyntexCatalog;
+import io.cyntex.core.dsl.DslParser;
 import io.cyntex.core.lifecycle.DesiredState;
 import io.cyntex.core.lifecycle.Observation;
-import io.cyntex.core.model.Resource;
-import io.cyntex.core.model.canonical.CanonicalWriter;
-import io.cyntex.core.dsl.DslParser;
-import io.cyntex.spi.store.AuditRecord;
-import io.cyntex.spi.store.AuditStore;
-import io.cyntex.spi.store.DesiredStore;
 import io.cyntex.core.logging.LogSink;
 import io.cyntex.core.logging.RingBufferLogSink;
+import io.cyntex.core.model.Resource;
+import io.cyntex.core.model.canonical.CanonicalWriter;
+import io.cyntex.runtime.probe.ConnectionProbe;
+import io.cyntex.runtime.probe.SchemaDiscoveryProbe;
+import io.cyntex.spi.store.AuditRecord;
+import io.cyntex.spi.store.AuditStore;
+import io.cyntex.spi.store.ConnectionTestResult;
+import io.cyntex.spi.store.ConnectionTestResultStore;
+import io.cyntex.spi.store.DesiredStore;
+import io.cyntex.spi.store.DiscoveredSourceModel;
 import io.cyntex.spi.store.ObservationStore;
+import io.cyntex.spi.store.SchemaStore;
 import io.cyntex.spi.store.TokenRecord;
 import io.cyntex.spi.store.TokenStore;
 import io.cyntex.spi.store.User;
@@ -451,12 +463,117 @@ class AuthTest {
 
         @Bean
         ApplyService applyService(InMemoryArtifactStore store) {
-            return new ApplyService(CyntexCatalog.load(), store);
+            return new ApplyService(CyntexCatalog::load, store);
         }
 
         @Bean
         ArtifactQueryService artifactQueryService(InMemoryArtifactStore store) {
             return new ArtifactQueryService(store);
+        }
+
+        // The connection-test controller comes in with the whole ControlHttpFace bundle, so its service must
+        // be present for the context to stand up. This suite exercises the auth matrix, not the probe, so the
+        // service only needs to construct — its probe and result store are inert.
+        @Bean
+        ConnectionTestService connectionTestService(AuditGate auditGate) {
+            ConnectionProbe probe = config -> {
+                throw new UnsupportedOperationException("connection.test is not exercised in this test");
+            };
+            ConnectionTestResultStore resultStore = new ConnectionTestResultStore() {
+                @Override
+                public void save(ConnectionTestResult result) {
+                }
+
+                @Override
+                public Optional<ConnectionTestResult> find(String connectionId) {
+                    return Optional.empty();
+                }
+            };
+            return new ConnectionTestService(probe, resultStore, auditGate);
+        }
+
+        // The read-back controller is bundled too, so its query service must be present for the context to
+        // stand up; this suite exercises the auth matrix, not the read, so the store is inert (empty).
+        @Bean
+        ConnectionTestResultQueryService connectionTestResultQueryService() {
+            return new ConnectionTestResultQueryService(new ConnectionTestResultStore() {
+                @Override
+                public void save(ConnectionTestResult result) {
+                }
+
+                @Override
+                public Optional<ConnectionTestResult> find(String connectionId) {
+                    return Optional.empty();
+                }
+            });
+        }
+
+        // The discover-schema controller methods are bundled with the same controller, so their services
+        // must be present for the context to stand up; their behaviour is proven in ConnectionApiTest, so
+        // here they only need to construct (inert probe, empty store).
+        @Bean
+        SchemaDiscoveryService schemaDiscoveryService(AuditGate auditGate) {
+            SchemaDiscoveryProbe probe = config -> {
+                throw new UnsupportedOperationException("connection.discover-schema is not exercised in this test");
+            };
+            return new SchemaDiscoveryService(probe, new SchemaStore() {
+                @Override
+                public void save(DiscoveredSourceModel discovered) {
+                }
+
+                @Override
+                public Optional<DiscoveredSourceModel> get(String connectionId) {
+                    return Optional.empty();
+                }
+            }, auditGate, Clock.systemUTC());
+        }
+
+        @Bean
+        SchemaQueryService schemaQueryService() {
+            return new SchemaQueryService(new SchemaStore() {
+                @Override
+                public void save(DiscoveredSourceModel discovered) {
+                }
+
+                @Override
+                public Optional<DiscoveredSourceModel> get(String connectionId) {
+                    return Optional.empty();
+                }
+            });
+        }
+
+        // The connector register controller is bundled with the whole ControlHttpFace, so its service must be
+        // present for the context to stand up; this suite exercises the auth matrix, not registration, so the
+        // registrar is inert (never driven).
+        @Bean
+        ConnectorRegisterService connectorRegisterService(AuditGate auditGate) {
+            io.cyntex.spi.store.ConnectorRegistrar registrar = (artifact, source) -> {
+                throw new UnsupportedOperationException("connector.register is not exercised in this test");
+            };
+            return new ConnectorRegisterService(registrar, auditGate);
+        }
+
+        // The connector list controller comes in with the whole ControlHttpFace bundle, so its view must be
+        // present for the context to stand up; this suite exercises the auth matrix, not the listing, so the
+        // catalog store is inert (empty).
+        @Bean
+        ConnectorCatalogView connectorCatalogView() {
+            io.cyntex.spi.store.ConnectorCatalogStore store = new io.cyntex.spi.store.ConnectorCatalogStore() {
+                @Override
+                public void upsert(io.cyntex.core.catalog.ConnectorCatalogEntry entry) {
+                }
+
+                @Override
+                public Optional<io.cyntex.core.catalog.ConnectorCatalogEntry> get(String connectorId) {
+                    return Optional.empty();
+                }
+
+                @Override
+                public List<io.cyntex.core.catalog.ConnectorCatalogEntry> list() {
+                    return List.of();
+                }
+            };
+            return new ConnectorCatalogView(CyntexCatalog.load(), store);
         }
 
         @Bean

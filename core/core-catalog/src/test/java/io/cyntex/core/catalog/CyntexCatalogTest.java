@@ -42,6 +42,30 @@ class CyntexCatalogTest {
 
     private static final Map<String, String> ENTRIES = Map.of("mysql", MYSQL, "kafka", KAFKA);
 
+    private static final String POSTGRES = """
+            {
+              "id": "postgres", "name": "Postgres", "displayName": "PostgreSQL", "icon": null,
+              "group": "database", "modes": ["snapshot"], "discovery": "catalog",
+              "sink": {"capable": true, "writeSemantics": ["upsert"]},
+              "pushOut": true, "config": [],
+              "provenance": {"connectorRepoSha": "x", "specPath": "spec.json", "specContentHash": "h",
+                "pdkApiVersion": "1.0.0", "requiredLevel": null, "modeSource": {"snapshot": "derived"}}
+            }
+            """;
+
+    // Same id as the bundled mysql but a different row — proves a registered row shadows the bundled
+    // one whole (id-only identity) and carries the server-filled pdkApiVersion slot.
+    private static final String MYSQL_REGISTERED = """
+            {
+              "id": "mysql", "name": "Mysql", "displayName": "MySQL (registered)", "icon": null,
+              "group": "database", "modes": ["snapshot"], "discovery": "catalog",
+              "sink": {"capable": false, "writeSemantics": []},
+              "pushOut": false, "config": [],
+              "provenance": {"connectorRepoSha": "x", "specPath": "spec.json", "specContentHash": "h",
+                "pdkApiVersion": "1.2.3", "requiredLevel": null, "modeSource": {"snapshot": "derived"}}
+            }
+            """;
+
     @Test
     void preservesConnectorIdsInIndexOrder() {
         assertThat(CyntexCatalog.build(List.of("mysql", "kafka"), ENTRIES::get).ids())
@@ -75,5 +99,37 @@ class CyntexCatalogTest {
         // A duplicated index id would desync ids()/all() and silently drop an entry — fail loud.
         assertThatThrownBy(() -> CyntexCatalog.build(List.of("mysql", "mysql"), ENTRIES::get))
                 .isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
+    void mergedWithNoRegisteredRowsEqualsTheBundledView() {
+        CyntexCatalog bundled = CyntexCatalog.build(List.of("mysql", "kafka"), ENTRIES::get);
+
+        CyntexCatalog merged = CyntexCatalog.merged(bundled, List.of());
+
+        assertThat(merged.ids()).containsExactly("mysql", "kafka");
+        assertThat(merged.all()).extracting(ConnectorCatalogEntry::id).containsExactly("mysql", "kafka");
+    }
+
+    @Test
+    void mergedAppendsRegisteredOnlyIdsAfterTheBundledIds() {
+        CyntexCatalog bundled = CyntexCatalog.build(List.of("mysql"), ENTRIES::get);
+
+        CyntexCatalog merged = CyntexCatalog.merged(bundled, List.of(CatalogEntryReader.read(POSTGRES)));
+
+        assertThat(merged.ids()).containsExactly("mysql", "postgres");
+        assertThat(merged.byId("postgres").displayName()).isEqualTo("PostgreSQL");
+    }
+
+    @Test
+    void mergedLetsARegisteredRowShadowABundledRowWithTheSameId() {
+        CyntexCatalog bundled = CyntexCatalog.build(List.of("mysql", "kafka"), ENTRIES::get);
+
+        CyntexCatalog merged = CyntexCatalog.merged(bundled, List.of(CatalogEntryReader.read(MYSQL_REGISTERED)));
+
+        // Id-only identity: the id set and its order are unchanged, but the row is the registered one.
+        assertThat(merged.ids()).containsExactly("mysql", "kafka");
+        assertThat(merged.byId("mysql").displayName()).isEqualTo("MySQL (registered)");
+        assertThat(merged.byId("mysql").provenance().pdkApiVersion()).isEqualTo("1.2.3");
     }
 }

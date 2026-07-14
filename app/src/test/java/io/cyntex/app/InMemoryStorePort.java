@@ -2,8 +2,12 @@ package io.cyntex.app;
 
 import io.cyntex.spi.store.ArtifactStore;
 import io.cyntex.spi.store.CatalogStore;
+import io.cyntex.spi.store.ConnectionTestResultStore;
+import io.cyntex.spi.store.ConnectorCatalogStore;
+import io.cyntex.spi.store.ConnectorRegistry;
 import io.cyntex.spi.store.DesiredStore;
 import io.cyntex.spi.store.ObservationStore;
+import io.cyntex.spi.store.SchemaStore;
 import io.cyntex.spi.store.SrsMetaStore;
 import io.cyntex.spi.store.StateStore;
 import io.cyntex.spi.store.StorePort;
@@ -42,6 +46,27 @@ final class InMemoryStorePort implements StorePort {
     @Override
     public CatalogStore catalog() {
         throw new UnsupportedOperationException("catalog is not exercised by the convergence wiring test");
+    }
+
+    @Override
+    public SchemaStore schemas() {
+        throw new UnsupportedOperationException("schemas are not exercised by the convergence wiring test");
+    }
+
+    @Override
+    public ConnectorRegistry connectors() {
+        throw new UnsupportedOperationException("connectors are not exercised by the convergence wiring test");
+    }
+
+    @Override
+    public ConnectorCatalogStore connectorCatalog() {
+        throw new UnsupportedOperationException("the connector catalog is not exercised by the convergence wiring test");
+    }
+
+    @Override
+    public ConnectionTestResultStore connectionTestResults() {
+        throw new UnsupportedOperationException(
+                "connection test results are not exercised by the convergence wiring test");
     }
 
     @Override

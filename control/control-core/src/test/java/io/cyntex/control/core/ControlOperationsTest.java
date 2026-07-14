@@ -17,6 +17,11 @@ class ControlOperationsTest {
                         "artifact.get",
                         "artifact.list",
                         "connection.test",
+                        "connection.test-result",
+                        "connection.discover-schema",
+                        "connection.schema",
+                        "connector.register",
+                        "connector.list",
                         "cluster.members",
                         "pipeline.start",
                         "pipeline.stop",
@@ -41,6 +46,19 @@ class ControlOperationsTest {
         assertThat(registry.resolve("artifact.list").scope()).isEqualTo(Scope.READ);
         // connection.test persists its result for later query, so it is a state-mutating write.
         assertThat(registry.resolve("connection.test").scope()).isEqualTo(Scope.WRITE);
+        // connection.test-result reads back the latest persisted result; it mutates nothing, so it is read.
+        assertThat(registry.resolve("connection.test-result").scope()).isEqualTo(Scope.READ);
+        // connection.discover-schema persists the discovered source model for later query, so it is a
+        // state-mutating write.
+        assertThat(registry.resolve("connection.discover-schema").scope()).isEqualTo(Scope.WRITE);
+        // connection.schema reads back the latest persisted source model; it mutates nothing, so it is read.
+        assertThat(registry.resolve("connection.schema").scope()).isEqualTo(Scope.READ);
+        // connector.register ingests a connector artifact into the distribution store, so it is a
+        // state-mutating write.
+        assertThat(registry.resolve("connector.register").scope()).isEqualTo(Scope.WRITE);
+        // connector.list reads the online catalog view (bundled snapshot union registered rows); it
+        // mutates nothing, so it is read.
+        assertThat(registry.resolve("connector.list").scope()).isEqualTo(Scope.READ);
         // cluster.members reads live topology; it is authenticated like every registry operation, but
         // needs no write or admin privilege.
         assertThat(registry.resolve("cluster.members").scope()).isEqualTo(Scope.READ);
@@ -64,6 +82,8 @@ class ControlOperationsTest {
                 List.of(
                         "artifact.apply",
                         "connection.test",
+                        "connection.discover-schema",
+                        "connector.register",
                         "pipeline.start",
                         "pipeline.stop",
                         "pipeline.pause",
@@ -74,8 +94,9 @@ class ControlOperationsTest {
                         "token.revoke")) {
             assertThat(registry.resolve(id).audited()).as(id).isTrue();
         }
-        for (String id : List.of("artifact.get", "artifact.list", "cluster.members", "user.list", "token.list",
-                "pipeline.status", "pipeline.metrics", "pipeline.snapshot", "pipeline.logs")) {
+        for (String id : List.of("artifact.get", "artifact.list", "connection.test-result", "connection.schema",
+                "connector.list", "cluster.members", "pipeline.status", "pipeline.metrics", "pipeline.snapshot",
+                "pipeline.logs", "user.list", "token.list")) {
             assertThat(registry.resolve(id).audited()).as(id).isFalse();
         }
     }
@@ -83,7 +104,7 @@ class ControlOperationsTest {
     @Test
     void everyL1OperationIsOnTheCliPocSurface() {
         assertThat(registry.exposedOn(Frontend.CLI, Maturity.POC))
-                .hasSize(19)
+                .hasSize(24)
                 .allSatisfy(op -> assertThat(op.exposure()).containsEntry(Frontend.CLI, Maturity.POC));
     }
 

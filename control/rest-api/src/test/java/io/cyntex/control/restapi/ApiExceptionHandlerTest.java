@@ -2,7 +2,9 @@ package io.cyntex.control.restapi;
 
 import io.cyntex.control.core.ControlError;
 import io.cyntex.control.core.MonitorError;
+import io.cyntex.core.common.CyntexErrorCode;
 import io.cyntex.core.common.CyntexException;
+import io.cyntex.core.common.Severity;
 import io.cyntex.core.dsl.DslError;
 import io.cyntex.messages.MessageCatalog;
 import org.junit.jupiter.api.Test;
@@ -10,7 +12,9 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -111,6 +115,43 @@ class ApiExceptionHandlerTest {
     }
 
     @Test
+    void aConnectorDomainCodeDefaultsToServerSideRegardlessOfWhereItWasRaised() {
+        // No connector code is a client error by its code alone: the same connector code raised on the
+        // resolve path (connection test / discovery) is a server-side failure — e.g. a registered connector
+        // that fails to link at test time is connector.load-failed but not the caller's fault. So statusFor
+        // keeps every connector.* at 500; the register verb, which knows the uploaded artifact is the
+        // client's, opts specific failures into a 400 via BadRequestCodedException instead of the code table.
+        for (String code : List.of(
+                "connector.load-failed",
+                "connector.no-connector-class",
+                "connector.ambiguous-connector-class",
+                "connector.spec-not-found",
+                "connector.spec-invalid",
+                "connector.registration-conflict",
+                "connector.not-registered",
+                "connector.ambiguous-registration")) {
+            assertThat(ApiExceptionHandler.statusFor(new StubCode(code))).as(code)
+                    .isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR);
+        }
+    }
+
+    @Test
+    void aBoundaryAttributedCodedErrorIsABadRequestPreservingTheCode() {
+        // A verb boundary that knows a domain code is the client's fault in its context wraps it as a
+        // BadRequestCodedException: a 400 that still renders the underlying coded body (here a connector
+        // artifact refused at register), even though the code defaults to 500 globally.
+        CyntexException connectorFailure = new CyntexException(new StubCode("connector.spec-invalid"),
+                Map.of("artifact", "bad.jar", "spec", "spec.json", "detail", "the spec is not valid JSON"), null);
+
+        ResponseEntity<ApiError> response = handler.handle(new BadRequestCodedException(connectorFailure));
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        assertThat(response.getBody().code()).isEqualTo("connector.spec-invalid");
+        assertThat(response.getBody().message()).isNotBlank().isNotEqualTo("connector.spec-invalid");
+        assertThat(response.getBody().params()).containsEntry("artifact", "bad.jar");
+    }
+
+    @Test
     void theCanonicalCodeCrossesTheBoundaryAsAStringNotAnEnum() {
         CyntexException e = new CyntexException(DslError.MALFORMED_YAML, Map.of("detail", "bad token"), null);
 
@@ -118,5 +159,18 @@ class ApiExceptionHandlerTest {
 
         // the wire identity is the canonical code string (ApiError.code is a String); the enum never crosses
         assertThat(body.code()).isEqualTo("dsl.malformed-yaml");
+    }
+
+    /** A coded error whose only relevant facet is its canonical code string — enough to exercise statusFor. */
+    private record StubCode(String code) implements CyntexErrorCode {
+        @Override
+        public Severity severity() {
+            return Severity.ERROR;
+        }
+
+        @Override
+        public Set<String> placeholders() {
+            return Set.of();
+        }
     }
 }

@@ -2,6 +2,7 @@ package io.cyntex.cli;
 
 import java.net.URI;
 import java.util.List;
+import java.util.Map;
 import java.util.function.BooleanSupplier;
 
 /**
@@ -44,6 +45,60 @@ interface ControlPlaneClient {
      * coded rejection, or unreachable on any I/O failure. Never throws.
      */
     ListOutcome list(URI baseUrl, String credential, String kind);
+
+    /**
+     * Runs a connection test via {@code POST {baseUrl}/api/connections:test}, authenticated by the bearer
+     * {@code credential}: the request carries the connection {@code id} (the key its result is stored under),
+     * the {@code connectorId} it configures, and the {@code settings} to run that connector with. Returns the
+     * structured report on success (pass or fail alike), a coded rejection when the server refuses, or
+     * unreachable on any I/O failure. Never throws.
+     */
+    ConnectionTestOutcome test(
+            URI baseUrl, String credential, String id, String connectorId, Map<String, Object> settings);
+
+    /**
+     * Reads a connection's latest test result via {@code GET {baseUrl}/api/connections/{id}/test-result},
+     * authenticated by the bearer {@code credential}: the stored report on success, absent on a 404 (the
+     * connection has never been tested), a coded rejection when the server refuses, or unreachable on any I/O
+     * failure. Never throws.
+     */
+    ConnectionTestResultOutcome testResult(URI baseUrl, String credential, String id);
+
+    /**
+     * Runs a schema discovery via {@code POST {baseUrl}/api/connections:discover-schema}, authenticated by
+     * the bearer {@code credential}: the request carries the connection {@code id} (the key its model is
+     * stored under), the {@code connectorId} it configures, and the {@code settings} to run that connector
+     * with. Returns the discovered model on success, a coded rejection when the server refuses, or
+     * unreachable on any I/O failure. Never throws.
+     */
+    ConnectionDiscoverSchemaOutcome discoverSchema(
+            URI baseUrl, String credential, String id, String connectorId, Map<String, Object> settings);
+
+    /**
+     * Reads a connection's latest discovered source model via {@code GET {baseUrl}/api/connections/{id}/schema},
+     * authenticated by the bearer {@code credential}: the stored model on success, absent on a 404 (the
+     * connection has never been discovered), a coded rejection when the server refuses, or unreachable on any
+     * I/O failure. Never throws.
+     */
+    ConnectionSchemaOutcome schema(URI baseUrl, String credential, String id);
+
+    /**
+     * Registers a connector artifact via {@code POST {baseUrl}/api/connectors:register}, authenticated by
+     * the bearer {@code credential}: the {@code artifact} bytes are uploaded (base64-encoded in the body),
+     * and the server introspects and content-hash idempotently stores them. Returns what was registered on
+     * success (newly, or an already-registered no-op), a coded rejection when the server refuses (a bad
+     * artifact, an id conflict), or unreachable on any I/O failure. Never throws.
+     */
+    ConnectorRegisterOutcome register(URI baseUrl, String credential, byte[] artifact);
+
+    /**
+     * Lists the connectors the online catalog exposes via {@code GET {baseUrl}/api/connectors},
+     * authenticated by the bearer {@code credential}: the bundled snapshot union the rows derived for
+     * registered connectors, each tagged bundled or registered. Returns the connectors on success
+     * (possibly empty), a coded rejection when the server refuses, or unreachable on any I/O failure.
+     * Never throws.
+     */
+    ConnectorListOutcome connectorList(URI baseUrl, String credential);
 
     /**
      * Issues a pipeline lifecycle verb ({@code start} / {@code stop} / {@code pause} / {@code resume}) via
