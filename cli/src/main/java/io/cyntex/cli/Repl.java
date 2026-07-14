@@ -672,7 +672,6 @@ final class Repl {
      * as a human report, or on the machine surfaces as an {@code {"artifacts":[...],"summary":{...}}} document.
      */
     private void registerDirectory(Path directory, OutputFormat format) {
-        PrintWriter err = commandLine.getErr();
         List<Path> jars;
         try (var entries = Files.list(directory)) {
             jars = entries.filter(Files::isRegularFile)
@@ -680,74 +679,91 @@ final class Repl {
                     .sorted()
                     .toList();
         } catch (IOException e) {
+            PrintWriter err = commandLine.getErr();
             err.println("register: cannot read " + directory + ": " + e.getMessage());
             err.flush();
             return;
         }
         List<BatchEntry> outcomes = new ArrayList<>();
         for (Path jar : jars) {
-            byte[] artifact;
+            String name = jar.getFileName().toString();
+            byte[] read;
             try {
-                artifact = Files.readAllBytes(jar);
+                read = Files.readAllBytes(jar);
             } catch (IOException e) {
-                err.println("register: cannot read " + jar + ": " + e.getMessage());
-                err.flush();
-                return;
+                outcomes.add(new BatchEntry.Unreadable(name, e.getMessage()));
+                continue;   // one unreadable jar does not abort the rest of the batch
             }
-            echoUploading(jar.getFileName().toString(), artifact.length, format);
-            ConnectorRegisterOutcome outcome = controlPlane.register(session.landingNode(), session.credential(), artifact);
-            outcomes.add(new BatchEntry(jar.getFileName().toString(), outcome));
+            byte[] artifact = read;
+            echoUploading(name, artifact.length, format);
+            ConnectorRegisterOutcome outcome = withFailover(
+                    () -> controlPlane.register(session.landingNode(), session.credential(), artifact),
+                    o -> o instanceof ConnectorRegisterOutcome.Unreachable);
+            outcomes.add(new BatchEntry.Attempted(name, outcome));
             if (outcome instanceof ConnectorRegisterOutcome.Unreachable) {
-                break;
+                break;   // failover found no healthy member; the server is gone, so stop uploading the rest
             }
         }
-        renderBatch(directory, outcomes, format);
+        renderBatch(directory, outcomes, jars.size(), format);
     }
 
-    /** One artifact's place in a directory batch: its filename and the server's outcome for it. */
-    private record BatchEntry(String artifact, ConnectorRegisterOutcome outcome) {
+    /** One artifact's place in a directory batch: uploaded (with the server's outcome) or unreadable locally. */
+    private sealed interface BatchEntry {
+        String artifact();
+
+        record Attempted(String artifact, ConnectorRegisterOutcome outcome) implements BatchEntry {
+        }
+
+        record Unreadable(String artifact, String message) implements BatchEntry {
+        }
     }
 
-    /** The counts closing a batch report: newly registered, already-present no-ops, coded refusals, unreachable. */
-    private record BatchCounts(int registered, int alreadyRegistered, int rejected, int unreachable) {
+    /** The counts closing a batch report: newly registered, no-ops, coded refusals, unreachable, unreadable. */
+    private record BatchCounts(int registered, int alreadyRegistered, int rejected, int unreachable, int unreadable) {
         static BatchCounts of(List<BatchEntry> outcomes) {
             int registered = 0;
             int alreadyRegistered = 0;
             int rejected = 0;
             int unreachable = 0;
+            int unreadable = 0;
             for (BatchEntry entry : outcomes) {
-                switch (entry.outcome()) {
-                    case ConnectorRegisterOutcome.Registered r -> {
-                        if (r.connector().newlyRegistered()) {
-                            registered++;
-                        } else {
-                            alreadyRegistered++;
+                switch (entry) {
+                    case BatchEntry.Unreadable ignored -> unreadable++;
+                    case BatchEntry.Attempted attempted -> {
+                        switch (attempted.outcome()) {
+                            case ConnectorRegisterOutcome.Registered r -> {
+                                if (r.connector().newlyRegistered()) {
+                                    registered++;
+                                } else {
+                                    alreadyRegistered++;
+                                }
+                            }
+                            case ConnectorRegisterOutcome.Rejected ignored -> rejected++;
+                            case ConnectorRegisterOutcome.Unreachable ignored -> unreachable++;
                         }
                     }
-                    case ConnectorRegisterOutcome.Rejected ignored -> rejected++;
-                    case ConnectorRegisterOutcome.Unreachable ignored -> unreachable++;
                 }
             }
-            return new BatchCounts(registered, alreadyRegistered, rejected, unreachable);
+            return new BatchCounts(registered, alreadyRegistered, rejected, unreachable, unreadable);
         }
     }
 
     /** Renders a directory batch on the chosen surface: a human report, or a machine artifacts/summary document. */
-    private void renderBatch(Path directory, List<BatchEntry> outcomes, OutputFormat format) {
+    private void renderBatch(Path directory, List<BatchEntry> outcomes, int scanned, OutputFormat format) {
         if (format == OutputFormat.TEXT) {
-            renderBatchText(directory, outcomes);
+            renderBatchText(directory, outcomes, scanned);
             return;
         }
         PrintWriter out = commandLine.getOut();
-        Map<String, Object> document = batchDocument(outcomes);
+        Map<String, Object> document = batchDocument(outcomes, scanned);
         out.println(format == OutputFormat.JSON ? JsonOut.write(document) : YamlOut.write(document));
         out.flush();
     }
 
     /** The human batch report: one line per artifact then a counts summary; an empty scan says so plainly. */
-    private void renderBatchText(Path directory, List<BatchEntry> outcomes) {
+    private void renderBatchText(Path directory, List<BatchEntry> outcomes, int scanned) {
         PrintWriter out = commandLine.getOut();
-        if (outcomes.isEmpty()) {
+        if (scanned == 0) {
             out.println("no connector jars found in " + directory);
             out.flush();
             return;
@@ -755,50 +771,75 @@ final class Repl {
         for (BatchEntry entry : outcomes) {
             out.println(batchLine(entry));
         }
-        out.println(batchSummary(outcomes));
+        out.println(batchSummary(outcomes, scanned));
         out.flush();
     }
 
-    /** One human report line for an artifact: its state and identity, or its coded refusal, or unreachable. */
+    /** One human report line for an artifact: its state and identity, its coded refusal, unreachable, or unreadable. */
     private static String batchLine(BatchEntry entry) {
-        return switch (entry.outcome()) {
-            case ConnectorRegisterOutcome.Registered registered -> entry.artifact() + "  "
-                    + (registered.connector().newlyRegistered() ? "registered" : "already registered")
-                    + "  " + registered.connector().connectorId() + "  " + registered.connector().contentHash();
-            case ConnectorRegisterOutcome.Rejected rejected -> entry.artifact() + "  error: " + rejected.code()
-                    + "  " + rejected.message();
-            case ConnectorRegisterOutcome.Unreachable ignored -> entry.artifact() + "  unreachable";
+        return switch (entry) {
+            case BatchEntry.Unreadable unreadable -> unreadable.artifact() + "  error: cannot read  " + unreadable.message();
+            case BatchEntry.Attempted attempted -> attempted.artifact() + "  " + attemptedLine(attempted.outcome());
         };
     }
 
-    /** The counts line closing a batch report: total attempted and a breakdown by outcome. */
-    private static String batchSummary(List<BatchEntry> outcomes) {
+    /** The state portion of a human batch line for an uploaded artifact. */
+    private static String attemptedLine(ConnectorRegisterOutcome outcome) {
+        return switch (outcome) {
+            case ConnectorRegisterOutcome.Registered registered -> (registered.connector().newlyRegistered() ? "registered" : "already registered")
+                    + "  " + registered.connector().connectorId() + "  " + registered.connector().contentHash();
+            case ConnectorRegisterOutcome.Rejected rejected -> "error: " + rejected.code() + "  " + rejected.message();
+            case ConnectorRegisterOutcome.Unreachable ignored -> "unreachable";
+        };
+    }
+
+    /** The counts line closing a batch report: how many jars were attempted of those scanned, then a breakdown. */
+    private static String batchSummary(List<BatchEntry> outcomes, int scanned) {
         BatchCounts counts = BatchCounts.of(outcomes);
-        StringBuilder summary = new StringBuilder()
-                .append(outcomes.size()).append(" artifacts: ")
-                .append(counts.registered()).append(" registered, ")
+        int notAttempted = scanned - outcomes.size();
+        StringBuilder summary = new StringBuilder();
+        if (notAttempted > 0) {
+            summary.append(outcomes.size()).append(" of ").append(scanned).append(" artifacts attempted: ");
+        } else {
+            summary.append(scanned).append(" artifacts: ");
+        }
+        summary.append(counts.registered()).append(" registered, ")
                 .append(counts.alreadyRegistered()).append(" no-op, ")
                 .append(counts.rejected()).append(" rejected");
+        if (counts.unreadable() > 0) {
+            summary.append(", ").append(counts.unreadable()).append(" unreadable");
+        }
         if (counts.unreachable() > 0) {
             summary.append(", ").append(counts.unreachable()).append(" unreachable");
+        }
+        if (notAttempted > 0) {
+            summary.append("; ").append(notAttempted).append(" not attempted");
         }
         return summary.toString();
     }
 
     /** A directory batch as a machine document: an ordered {@code artifacts} array and a counts {@code summary}. */
-    private static Map<String, Object> batchDocument(List<BatchEntry> outcomes) {
+    private static Map<String, Object> batchDocument(List<BatchEntry> outcomes, int scanned) {
         List<Object> artifacts = new ArrayList<>();
         for (BatchEntry entry : outcomes) {
             artifacts.add(batchRow(entry));
         }
         BatchCounts counts = BatchCounts.of(outcomes);
         Map<String, Object> summary = new LinkedHashMap<>();
-        summary.put("total", outcomes.size());
+        summary.put("total", scanned);
+        summary.put("attempted", outcomes.size());
         summary.put("registered", counts.registered());
         summary.put("alreadyRegistered", counts.alreadyRegistered());
         summary.put("rejected", counts.rejected());
+        if (counts.unreadable() > 0) {
+            summary.put("unreadable", counts.unreadable());
+        }
         if (counts.unreachable() > 0) {
             summary.put("unreachable", counts.unreachable());
+        }
+        int notAttempted = scanned - outcomes.size();
+        if (notAttempted > 0) {
+            summary.put("notAttempted", notAttempted);
         }
         Map<String, Object> document = new LinkedHashMap<>();
         document.put("artifacts", artifacts);
@@ -810,16 +851,21 @@ final class Repl {
     private static Map<String, Object> batchRow(BatchEntry entry) {
         Map<String, Object> row = new LinkedHashMap<>();
         row.put("artifact", entry.artifact());
-        switch (entry.outcome()) {
-            case ConnectorRegisterOutcome.Registered registered -> {
-                RegisteredConnector connector = registered.connector();
-                row.put("connectorId", connector.connectorId());
-                row.put("contentHash", connector.contentHash());
-                putIfPresent(row, "pdkApiVersion", connector.pdkApiVersion());
-                row.put("newlyRegistered", connector.newlyRegistered());
+        switch (entry) {
+            case BatchEntry.Unreadable unreadable -> row.put("error", errorObject(null, "cannot read: " + unreadable.message()));
+            case BatchEntry.Attempted attempted -> {
+                switch (attempted.outcome()) {
+                    case ConnectorRegisterOutcome.Registered registered -> {
+                        RegisteredConnector connector = registered.connector();
+                        row.put("connectorId", connector.connectorId());
+                        row.put("contentHash", connector.contentHash());
+                        putIfPresent(row, "pdkApiVersion", connector.pdkApiVersion());
+                        row.put("newlyRegistered", connector.newlyRegistered());
+                    }
+                    case ConnectorRegisterOutcome.Rejected rejected -> row.put("error", errorObject(rejected.code(), rejected.message()));
+                    case ConnectorRegisterOutcome.Unreachable ignored -> row.put("error", errorObject(null, "the server is unreachable"));
+                }
             }
-            case ConnectorRegisterOutcome.Rejected rejected -> row.put("error", errorObject(rejected.code(), rejected.message()));
-            case ConnectorRegisterOutcome.Unreachable ignored -> row.put("error", errorObject(null, "the server is unreachable"));
         }
         return row;
     }

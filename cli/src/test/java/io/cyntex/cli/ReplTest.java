@@ -1448,21 +1448,66 @@ class ReplTest {
     }
 
     @Test
-    void registerOfADirectoryStopsUploadingWhenTheServerBecomesUnreachable(@TempDir Path workdir) throws Exception {
+    void registerOfADirectoryStopsAndTakesTheSessionOfflineWhenTheServerIsUnreachable(@TempDir Path workdir) throws Exception {
         Path dir = Files.createDirectory(workdir.resolve("connectors"));
-        Files.write(dir.resolve("a-first.jar"), new byte[] {1});          // registered
-        Files.write(dir.resolve("b-second.jar"), new byte[] {1, 2});      // unreachable -> stop the batch
-        Files.write(dir.resolve("c-third.jar"), new byte[] {1, 2, 3});    // never attempted
+        Files.write(dir.resolve("a-first.jar"), new byte[] {1});
+        Files.write(dir.resolve("b-second.jar"), new byte[] {1, 2});
         FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
-        client.registerOutcomeByLength.put(1, new ConnectorRegisterOutcome.Registered(
-                new RegisteredConnector("first", "h1", "1.0", true)));
-        client.registerOutcomeByLength.put(2, new ConnectorRegisterOutcome.Unreachable());
         Harness h = onlineSession(workdir, client);
+        client.setHealthy();   // the server is now down: no member is reachable
+        int mark = h.sink().toString().length();
 
         assertThat(h.repl().dispatch("register connectors")).isTrue();
 
-        // sorted by name: a-first uploads, b-second is unreachable and breaks, c-third is never attempted
-        assertThat(client.registerCalls).hasSize(2);
+        // a-first is attempted, fails over to no healthy member, and the batch stops before b-second
+        assertThat(client.registerCalls).hasSize(1);
+        assertThat(h.repl().session().isConnected()).isFalse();   // failover took the session offline
+        String out = h.sink().toString().substring(mark);
+        assertThat(out).containsIgnoringCase("connection lost")
+                .containsIgnoringCase("not attempted");           // the un-tried jar is signalled, not dropped silently
+    }
+
+    @Test
+    void registerContinuesPastAnUnreadableJarInADirectoryAndReportsIt(@TempDir Path workdir) throws Exception {
+        Path dir = Files.createDirectory(workdir.resolve("connectors"));
+        Files.write(dir.resolve("a-open.jar"), new byte[] {1});
+        Path locked = dir.resolve("b-locked.jar");
+        Files.write(locked, new byte[] {1, 2});
+        Files.write(dir.resolve("c-open.jar"), new byte[] {1, 2, 3});
+        assumeTrue(Files.getFileAttributeView(locked, PosixFileAttributeView.class) != null,
+                "POSIX permissions required");
+        Files.setPosixFilePermissions(locked, PosixFilePermissions.fromString("---------"));
+        assumeTrue(!Files.isReadable(locked), "permission enforcement required (skips when running as root)");
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.registerOutcome = new ConnectorRegisterOutcome.Registered(
+                new RegisteredConnector("c", "h", "1.0", true));
+        Harness h = onlineSession(workdir, client);
+        int mark = h.sink().toString().length();
+        try {
+            assertThat(h.repl().dispatch("register connectors")).isTrue();
+
+            // a-open and c-open still upload; the unreadable b-locked is recorded, not fatal
+            assertThat(client.registerCalls).hasSize(2);
+            assertThat(h.sink().toString().substring(mark))
+                    .containsIgnoringCase("cannot read").contains("b-locked.jar").contains("3 artifacts");
+        } finally {
+            Files.setPosixFilePermissions(locked, PosixFilePermissions.fromString("rwx------"));
+        }
+    }
+
+    @Test
+    void registerADirectoryOnTheMachineSurfaceDoesNotEchoUploadingLines(@TempDir Path workdir) throws Exception {
+        Path dir = Files.createDirectory(workdir.resolve("connectors"));
+        Files.write(dir.resolve("orders.jar"), new byte[] {1});
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.registerOutcome = new ConnectorRegisterOutcome.Registered(
+                new RegisteredConnector("orders", "h", "1.0", true));
+        Harness h = onlineSession(workdir, client);
+        int mark = h.sink().toString().length();
+
+        assertThat(h.repl().dispatch("register connectors -o json")).isTrue();
+
+        assertThat(h.sink().toString().substring(mark)).doesNotContain("uploading");
     }
 
     @Test
