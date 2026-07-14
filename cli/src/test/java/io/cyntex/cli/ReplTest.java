@@ -1267,6 +1267,23 @@ class ReplTest {
     }
 
     @Test
+    void registerRendersTheRegistrationAsYamlWithTheOutputFlag(@TempDir Path workdir) throws Exception {
+        Files.write(workdir.resolve("orders.jar"), new byte[] {1, 2, 3, 4});
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.registerOutcome = new ConnectorRegisterOutcome.Registered(
+                new RegisteredConnector("orders", "hash-abc", "1.3.5", true));
+        Harness h = onlineSession(workdir, client);
+        int mark = h.sink().toString().length();
+
+        assertThat(h.repl().dispatch("register orders.jar -o yaml")).isTrue();
+
+        String out = h.sink().toString().substring(mark);
+        assertThat(out).contains("connectorId:").contains("orders")
+                .contains("contentHash:").contains("hash-abc")
+                .contains("newlyRegistered:");
+    }
+
+    @Test
     void registerForAMissingFileReportsCannotReadAndDoesNotCallTheServer(@TempDir Path workdir) {
         FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
         Harness h = onlineSession(workdir, client);
