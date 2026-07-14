@@ -548,7 +548,7 @@ final class Repl {
                 o -> o instanceof ConnectorRegisterOutcome.Unreachable);
         switch (outcome) {
             case ConnectorRegisterOutcome.Registered registered -> renderRegistered(registered.connector(), parsed.format());
-            case ConnectorRegisterOutcome.Rejected rejected -> renderRejection(rejected.code(), rejected.message());
+            case ConnectorRegisterOutcome.Rejected rejected -> renderRegisterRejection(rejected.code(), rejected.message(), parsed.format());
             case ConnectorRegisterOutcome.Unreachable ignored -> reportRequestFailed();
         }
     }
@@ -625,6 +625,33 @@ final class Repl {
         putIfPresent(map, "pdkApiVersion", connector.pdkApiVersion());
         map.put("newlyRegistered", connector.newlyRegistered());
         return map;
+    }
+
+    /**
+     * Renders a coded server refusal of a registration on the chosen surface. Text keeps the shared human
+     * diagnostic (the {@code code} then the message, to err); the machine surfaces emit a structured
+     * {@code {"error":{"code","message"}}} document to out, so {@code register -o json|yaml} stays
+     * parseable even when the server refuses the artifact.
+     */
+    private void renderRegisterRejection(String code, String message, OutputFormat format) {
+        if (format == OutputFormat.TEXT) {
+            renderRejection(code, message);
+            return;
+        }
+        PrintWriter out = commandLine.getOut();
+        Map<String, Object> document = errorDocument(code, message);
+        out.println(format == OutputFormat.JSON ? JsonOut.write(document) : YamlOut.write(document));
+        out.flush();
+    }
+
+    /** A coded refusal as an ordered tree for the machine surfaces: an {@code error} object with code (when present) and message. */
+    private static Map<String, Object> errorDocument(String code, String message) {
+        Map<String, Object> error = new LinkedHashMap<>();
+        putIfPresent(error, "code", code == null || code.isBlank() ? null : code);
+        error.put("message", message);
+        Map<String, Object> document = new LinkedHashMap<>();
+        document.put("error", error);
+        return document;
     }
 
     /**

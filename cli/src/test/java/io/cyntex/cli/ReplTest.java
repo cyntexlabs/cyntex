@@ -1322,6 +1322,39 @@ class ReplTest {
     }
 
     @Test
+    void registerRenderingAServerRejectionAsJsonEmitsAStructuredErrorDocument(@TempDir Path workdir) throws Exception {
+        Files.write(workdir.resolve("orders.jar"), new byte[] {1, 2, 3, 4});
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.registerOutcome = new ConnectorRegisterOutcome.Rejected(
+                "connector.registration-conflict", "A different artifact already holds that id.");
+        Harness h = onlineSession(workdir, client);
+        int mark = h.sink().toString().length();
+
+        assertThat(h.repl().dispatch("register orders.jar -o json")).isTrue();
+
+        String out = h.sink().toString().substring(mark);
+        assertThat(out).contains("\"error\"")
+                .contains("\"code\"").contains("connector.registration-conflict")
+                .contains("\"message\"").contains("A different artifact already holds that id.");
+    }
+
+    @Test
+    void registerRenderingAServerRejectionAsYamlEmitsAStructuredErrorDocument(@TempDir Path workdir) throws Exception {
+        Files.write(workdir.resolve("orders.jar"), new byte[] {1, 2, 3, 4});
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.registerOutcome = new ConnectorRegisterOutcome.Rejected(
+                "connector.spec-invalid", "The artifact spec is not valid JSON.");
+        Harness h = onlineSession(workdir, client);
+        int mark = h.sink().toString().length();
+
+        assertThat(h.repl().dispatch("register orders.jar -o yaml")).isTrue();
+
+        String out = h.sink().toString().substring(mark);
+        assertThat(out).contains("error:").contains("code:").contains("connector.spec-invalid")
+                .contains("message:").contains("The artifact spec is not valid JSON.");
+    }
+
+    @Test
     void registerWhileConnectedButNotAuthenticatedReportsAndDoesNotCallTheServer() {
         // The not-authenticated guard fires before the file is even read, so no file need exist.
         FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
