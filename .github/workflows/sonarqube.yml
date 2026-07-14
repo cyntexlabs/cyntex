@@ -109,9 +109,13 @@ jobs:
           details="$(printf '%s' "$ps" | jq -r '.projectStatus.conditions[]? | select(.status=="ERROR") | "- `\(.metricKey)`: \(.actualValue) (fails \(.comparator) \(.errorThreshold))"' 2>/dev/null || true)"
 
           case "$status" in
-            OK)    emoji="white_check_mark"; verdict="passed" ;;
-            ERROR) emoji="x";                verdict="failed" ;;
-            *)     emoji="warning";          verdict="unknown (see the workflow logs)" ;;
+            OK)    emoji="white_check_mark";   verdict="passed" ;;
+            ERROR) emoji="x";                  verdict="failed" ;;
+            # NONE = the gate could not be evaluated because there is no New Code to measure
+            # (the "Sonar way" conditions are all on new code; the first analysis, or one with
+            # no New Code baseline set on the server, has nothing to compare against). Not a failure.
+            NONE)  emoji="information_source"; verdict="not evaluated (no New Code baseline yet)" ;;
+            *)     emoji="warning";            verdict="unknown (see the workflow logs)" ;;
           esac
 
           {
