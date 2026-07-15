@@ -57,8 +57,8 @@ final class Repl {
      * verbs ({@code test} = {@code connection.test}, {@code test-result} = {@code connection.test-result},
      * {@code discover-schema} = {@code connection.discover-schema}, {@code schema} = {@code connection.schema}),
      * and the connector verbs ({@code register} = {@code connector.register}, {@code connectors} =
-     * {@code connector.list}). Offline they fall through to the table, where the connected verbs report
-     * "requires a connection" and {@code ls} browses the local workspace. {@code validate} is not here — it
+     * {@code connector.list}). Offline they fall through to the table, where the connected verbs report a
+     * coded {@code cli.not-connected} and {@code ls} browses the local workspace. {@code validate} is not here — it
      * runs the full local stack in either state until a server validate endpoint exists.
      */
     private static final List<String> ONLINE_VERBS = List.of(

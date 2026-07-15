@@ -1081,7 +1081,7 @@ class ReplTest {
 
         assertThat(h.repl().dispatch("test my-mongo")).isTrue();
 
-        assertThat(h.sink().toString()).contains("requires a connection").contains("test");
+        assertThat(h.sink().toString()).contains("cli.not-connected").contains("test");
     }
 
     // --- connection test result: `test-result <id>` reads back the connection's latest stored result ---
@@ -1184,7 +1184,7 @@ class ReplTest {
 
         assertThat(h.repl().dispatch("test-result my-mongo")).isTrue();
 
-        assertThat(h.sink().toString()).contains("requires a connection").contains("test-result");
+        assertThat(h.sink().toString()).contains("cli.not-connected").contains("test-result");
     }
 
     // --- schema discovery: `discover-schema <id>` discovers a stored connection's source model ---
@@ -1289,7 +1289,7 @@ class ReplTest {
 
         assertThat(h.repl().dispatch("discover-schema my-mongo")).isTrue();
 
-        assertThat(h.sink().toString()).contains("requires a connection").contains("discover-schema");
+        assertThat(h.sink().toString()).contains("cli.not-connected").contains("discover-schema");
     }
 
     // --- register: `register <path>` uploads a local artifact to the server -----------------------
@@ -1630,7 +1630,7 @@ class ReplTest {
 
         assertThat(h.repl().dispatch("register orders.jar")).isTrue();
 
-        assertThat(h.sink().toString()).contains("requires a connection").contains("register");
+        assertThat(h.sink().toString()).contains("cli.not-connected").contains("register");
     }
 
     // --- schema read-back: `schema <id> [table]` reads the stored model without discovering ---
@@ -1804,7 +1804,7 @@ class ReplTest {
 
         assertThat(h.repl().dispatch("schema my-mongo")).isTrue();
 
-        assertThat(h.sink().toString()).contains("requires a connection").contains("schema");
+        assertThat(h.sink().toString()).contains("cli.not-connected").contains("schema");
     }
 
     // --- server-as-truth: a connected read verb sources the server store, never the local workspace ---
@@ -1933,14 +1933,14 @@ class ReplTest {
     void applyWhileOfflineFallsThroughToTheConnectionRequiredNotice() {
         Harness h = harness();   // offline: apply is a connected verb, so the offline notice fires
         assertThat(h.repl().dispatch("apply")).isTrue();
-        assertThat(h.sink().toString()).contains("requires a connection");
+        assertThat(h.sink().toString()).contains("cli.not-connected");
     }
 
     @Test
     void getWhileOfflineFallsThroughToTheConnectionRequiredNotice() {
         Harness h = harness();   // offline: get is a connected verb, discoverable rather than unknown
         assertThat(h.repl().dispatch("get x")).isTrue();
-        assertThat(h.sink().toString()).contains("requires a connection");
+        assertThat(h.sink().toString()).contains("cli.not-connected");
     }
 
     // --- pipeline lifecycle verbs route online to POST /api/pipelines/{id}:{verb} ------------------
@@ -2013,7 +2013,7 @@ class ReplTest {
     void startWhileOfflineFallsThroughToTheConnectionRequiredNotice() {
         Harness h = harness();   // offline: start is a connected verb, discoverable rather than unknown
         assertThat(h.repl().dispatch("start pl1")).isTrue();
-        assertThat(h.sink().toString()).contains("requires a connection");
+        assertThat(h.sink().toString()).contains("cli.not-connected");
     }
 
     @Test
@@ -2202,7 +2202,7 @@ class ReplTest {
         for (String verb : List.of("status pl1", "metrics pl1", "snapshot pl1", "logs pl1")) {
             Harness h = harness();
             assertThat(h.repl().dispatch(verb)).isTrue();
-            assertThat(h.sink().toString()).contains("requires a connection");
+            assertThat(h.sink().toString()).contains("cli.not-connected");
         }
     }
 

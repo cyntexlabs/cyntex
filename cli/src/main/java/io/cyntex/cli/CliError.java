@@ -35,7 +35,10 @@ enum CliError implements CyntexErrorCode {
     NOT_CONNECTED("cli.not-connected", Set.of("verb")),
 
     /** A connected online verb was run before the session authenticated; {@code verb} names it. */
-    NOT_AUTHENTICATED("cli.not-authenticated", Set.of("verb"));
+    NOT_AUTHENTICATED("cli.not-authenticated", Set.of("verb")),
+
+    /** A verb whose name is declared and reserved but which is not built yet; {@code verb} names it. */
+    VERB_NOT_IMPLEMENTED("cli.verb-not-implemented", Set.of("verb"));
 
     private final String code;
     private final Set<String> placeholders;

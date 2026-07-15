@@ -14,6 +14,7 @@ cli.not-authenticated
 cli.not-connected
 cli.resource-not-found
 cli.unknown-connector
+cli.verb-not-implemented
 connector.ambiguous-connector-class
 connector.ambiguous-registration
 connector.api-level-incompatible

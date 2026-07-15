@@ -41,6 +41,9 @@ cli.not-connected:
 cli.not-authenticated:
   message: "The `{verb}` command needs you to sign in first."
   solution: "Run `login <username>` to authenticate, then try again."
+cli.verb-not-implemented:
+  message: "The `{verb}` command is reserved but not implemented yet."
+  solution: "Use the commands it will be built from in the meantime; `help` lists what this build can do."
 dsl.unknown-field:
   message: "Unknown field '{field}' at {path}."
   solution: "Remove it, or run `cyntex explain` to see the fields allowed here."
