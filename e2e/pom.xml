@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Declarative e2e test-specification framework.
+  Test-scope code only, deliberately: this module is a test harness, never a shipped artifact.
+  The ArchUnit importer skips test sources, so nothing here is scanned by the ring rules
+  R1-R10 - which is exactly the intent, since this module sits outside the six business rings
+  and reads a target database directly (a thing no ring may do).
+  It is NOT registered as a scanned dependency in arch-tests for the same reason.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>io.cyntex</groupId>
+    <artifactId>cyntex</artifactId>
+    <version>${revision}</version>
+  </parent>
+
+  <artifactId>e2e</artifactId>
+  <name>Cyntex :: E2E</name>
+  <description>Declarative YAML test-specification envelope + Java executor (test scope only)</description>
+
+  <dependencyManagement>
+    <dependencies>
+      <dependency>
+        <groupId>io.cyntex</groupId>
+        <artifactId>bom</artifactId>
+        <version>${revision}</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
+
+  <dependencies>
+    <!-- The envelope's pipeline: key references a product .cyn.yml, parsed by the product's own
+         parser. A second, drifting copy of the DSL in test scope is the failure this avoids. -->
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>core-dsl</artifactId>
+      <version>${revision}</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>core-model</artifactId>
+      <version>${revision}</version>
+      <scope>test</scope>
+    </dependency>
+    <!-- The state matcher asserts on the product's own lifecycle enum, so the vocabulary cannot
+         drift from the states the runtime actually publishes. -->
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>core-lifecycle</artifactId>
+      <version>${revision}</version>
+      <scope>test</scope>
+    </dependency>
+    <!-- Reads the test-specification envelope. Test scope only: this never reaches any ring's
+         runtime classpath, the same argument the arch-tests catalog gate makes. -->
+    <dependency>
+      <groupId>org.yaml</groupId>
+      <artifactId>snakeyaml</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.assertj</groupId>
+      <artifactId>assertj-core</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+</project>

@@ -39,6 +39,9 @@
     <module>tools/catalog-assembler</module>
     <!-- cli is the surface ring: the offline CLI product front-end (depends only on the core ring) -->
     <module>cli</module>
+    <!-- e2e is the declarative test-specification framework: test-scope only, outside the six
+         rings, drives the product black-box; declared after everything it exercises -->
+    <module>e2e</module>
     <!-- arch-tests stays last in the reactor: it test-depends on every ring to assert R1-R10 -->
     <module>arch-tests</module>
   </modules>
