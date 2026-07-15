@@ -1,5 +1,6 @@
 package io.cyntex.e2e;
 
+import io.cyntex.control.core.MonitorError;
 import io.cyntex.core.common.JsonReader;
 import io.cyntex.core.common.JsonWriter;
 import io.cyntex.core.lifecycle.LifecycleVerb;
@@ -16,6 +17,7 @@ import java.time.Duration;
 import java.util.Base64;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * The product's HTTP surface, as a caller sees it.
@@ -118,17 +120,45 @@ final class ControlPlane {
     }
 
     /**
-     * The published lifecycle state. Before the first convergence pass there is no observation at all,
-     * and the product says so with a coded 404; reporting that as some state would invent a reading.
+     * The published lifecycle state, or empty when the pipeline has published no observation yet.
+     *
+     * <p>Empty is a reading, not a failure. Between recording a start intent and the first convergence
+     * pass there is no observation at all and the product says so with a coded refusal - so a caller that
+     * took that for fatal could never wait for a pipeline to come up, which is the one thing waiting is
+     * for. Answering with some state instead would be worse still: it would invent a reading.
      */
-    PipelineState state(String pipelineId) {
+    Optional<PipelineState> state(String pipelineId) {
         HttpResponse<String> response = send(authedGet("/api/pipelines/" + pipelineId + "/status"));
-        expect(response, 200, "read the status of " + pipelineId);
-        if (!(JsonReader.parse(response.body()) instanceof Map<?, ?> map)
-                || !(map.get("state") instanceof String state)) {
-            throw new AssertionError("status carried no state: " + response.body());
+        return interpretState(response.statusCode(), response.body(), pipelineId);
+    }
+
+    /**
+     * What a status answer is allowed to mean. Only the product's own {@code monitor.no-observation} code
+     * reads as "nothing published yet"; every other refusal stays loud, another code's 404 included. A rule
+     * written on the status alone would let a route that 404s for its own reasons pass for a pipeline that
+     * is merely slow to converge, and the specification would sit out its whole bound and then blame the
+     * data. The code is the product's contract for exactly this distinction, so the code is what is read.
+     */
+    static Optional<PipelineState> interpretState(int status, String body, String pipelineId) {
+        if (status == 404 && MonitorError.NO_OBSERVATION.code().equals(codeOf(body))) {
+            return Optional.empty();
         }
-        return PipelineState.valueOf(state);
+        if (status != 200) {
+            throw new AssertionError(
+                    "could not read the status of " + pipelineId + ": expected HTTP 200, got " + status
+                            + " - " + body);
+        }
+        if (!(JsonReader.parse(body) instanceof Map<?, ?> map) || !(map.get("state") instanceof String state)) {
+            throw new AssertionError("status carried no state: " + body);
+        }
+        return Optional.of(PipelineState.valueOf(state));
+    }
+
+    /** The code a structured error body carries, or null for a body that is not one. */
+    private static String codeOf(String body) {
+        return JsonReader.parse(body) instanceof Map<?, ?> map && map.get("code") instanceof String code
+                ? code
+                : null;
     }
 
     private HttpRequest get(String path) {

@@ -4,6 +4,7 @@ import io.cyntex.core.lifecycle.LifecycleVerb;
 import io.cyntex.core.lifecycle.PipelineState;
 
 import java.util.List;
+import java.util.Optional;
 
 /**
  * How one tier reaches the product under test. The same specification runs on every binding, so
@@ -44,6 +45,11 @@ public interface TierBinding {
     /** Reads the current row count from the endpoint that owns the table. */
     long count(TableAlias table);
 
-    /** Reads the published lifecycle state of a pipeline. */
-    PipelineState state(String pipelineId);
+    /**
+     * Reads the published lifecycle state of a pipeline, or empty when it has published none yet.
+     *
+     * <p>Empty is a reading and not an error: a pipeline is unobserved until a convergence pass publishes
+     * it, so "nothing yet" is the honest answer for that window and a wait is entitled to sit through it.
+     */
+    Optional<PipelineState> state(String pipelineId);
 }

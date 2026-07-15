@@ -32,6 +32,9 @@ class TierBindingsIT {
     private static final Duration TIMEOUT = Duration.ofSeconds(30);
     private static final Duration POLL = Duration.ofMillis(200);
 
+    /** Short on purpose: the run below waits for something that is never coming, and says so. */
+    private static final Duration UNOBSERVED_BOUND = Duration.ofMillis(500);
+
     @TempDir
     private Path workspace;
 
@@ -96,6 +99,42 @@ class TierBindingsIT {
         }
     }
 
+    /**
+     * A pipeline that was applied and never started publishes no observation at all: the convergence pass
+     * reconciles the pipelines that carry a recorded intent, and applying one records none. So the product
+     * answers this read with its coded "no observation" refusal for as long as the specification cares to
+     * ask - which makes it the one place the wait model's treatment of that answer can be pinned against a
+     * real server rather than against a stand-in that never produces it.
+     *
+     * <p>Every real run passes through a shorter version of this window between {@code start} and the first
+     * convergence pass, where an unpublished reading means "not yet" and nothing more.
+     */
+    @ParameterizedTest
+    @EnumSource(Tiers.class)
+    void awaitWaitsOutAPipelineThatHasPublishedNoObservation(Tiers tier) {
+        String database = "e2e_unobserved_" + tier.name().toLowerCase();
+        writeWorkspace(SharedMongo.replicaSetUrl(database));
+
+        try (ServerHandle server = tier.launcher.apply(SharedMongo.replicaSetUrl(database + "_store"));
+                MongoEndpoints endpoints = new MongoEndpoints()) {
+            ControlPlane control = new ControlPlane(server.baseUrl());
+            control.bootstrapAndLogin("e2e", "e2e-password");
+            HttpTierBinding binding = new HttpTierBinding(control, workspace, endpoints);
+
+            assertThatThrownBy(
+                            () ->
+                                    new E2eExecutor(
+                                                    binding, new FilePipelineLoader(workspace), UNOBSERVED_BOUND, POLL)
+                                            .execute(EnvelopeParser.parse(unstartedSpecification())))
+                    // The bound expiring is the pass: it says the executor kept asking. Reporting the
+                    // unpublished read as the reading is what tells the author the pipeline never converged,
+                    // rather than blaming a transport that answered exactly as designed.
+                    .isInstanceOf(AssertionError.class)
+                    .hasMessageContaining("timed out after")
+                    .hasMessageContaining("e2e_pipeline expected RUNNING, found no published observation");
+        }
+    }
+
     /** The specification under test: identical text for both tiers, by construction. */
     private String specification() {
         return """
@@ -110,6 +149,19 @@ class TierBindingsIT {
                   - assert: { count: { tgt_mongo.orders: 3 } }
                   - cdc: { tgt_mongo.orders: insert 2 }
                   - assert: { count: { tgt_mongo.orders: 5 } }
+                """;
+    }
+
+    /** Applies a pipeline and never starts it, so nothing is ever published about it. */
+    private String unstartedSpecification() {
+        return """
+                name: an-unstarted-pipeline-publishes-no-observation
+                tier: smoke
+                setup:
+                  apply: [tgt_mongo.cyn.yml, pipeline.cyn.yml]
+                pipeline: pipeline.cyn.yml
+                steps:
+                  - await: { state: RUNNING }
                 """;
     }
 

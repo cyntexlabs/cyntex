@@ -116,11 +116,24 @@ public final class E2eExecutor {
         return mismatches.isEmpty() ? Optional.empty() : Optional.of(String.join("; ", mismatches));
     }
 
+    /**
+     * A pipeline that has published no observation yet reads as a mismatch, never as a failure: that is
+     * the window between recording an intent and the first convergence pass, and an {@code await} exists
+     * to sit through exactly it. The unpublished read is named in the mismatch rather than folded into
+     * the states, because "nothing was ever published" and "the wrong state was published" fail for
+     * different reasons and send an author looking in different places.
+     */
     private Optional<String> stateMismatch(PipelineState expected, String pipelineId) {
-        PipelineState actual = binding.state(pipelineId);
-        return actual == expected
-                ? Optional.empty()
-                : Optional.of(pipelineId + " expected " + expected + ", found " + actual);
+        Optional<PipelineState> actual = binding.state(pipelineId);
+        if (actual.filter(published -> published == expected).isPresent()) {
+            return Optional.empty();
+        }
+        return Optional.of(
+                pipelineId
+                        + " expected "
+                        + expected
+                        + ", found "
+                        + actual.map(Object::toString).orElse("no published observation"));
     }
 
     private static void sleep(Duration interval) {

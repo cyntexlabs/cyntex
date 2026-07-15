@@ -9,7 +9,9 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -113,6 +115,27 @@ class E2eExecutorTest {
     }
 
     @Test
+    void awaitPollsThroughAPipelineThatHasPublishedNoObservationYet() {
+        // The window every real run opens: a start intent is recorded, and until the first convergence pass
+        // lands there is nothing published to read at all. Sitting through it is what the bound is for, so
+        // an unpublished reading is "not yet" - a wait that failed here could never wait for a start.
+        binding.unobservedThen(PipelineState.RUNNING);
+
+        execute(minimal("steps:\n  - start\n  - await: { state: RUNNING }\n"));
+
+        assertThat(binding.stateReads).isEqualTo(2);
+    }
+
+    @Test
+    void reportsAnUnpublishedObservationAsTheReadingRatherThanAsAState() {
+        binding.neverObserved();
+
+        assertThatThrownBy(() -> execute(minimal("steps:\n  - assert: { state: RUNNING }\n")))
+                .isInstanceOf(AssertionError.class)
+                .hasMessageContaining("mongo2mongo expected RUNNING, found no published observation");
+    }
+
+    @Test
     void reportsTheStateMismatchAgainstTheResolvedPipeline() {
         binding.states(PipelineState.PAUSED);
 
@@ -195,7 +218,7 @@ class E2eExecutorTest {
         private final List<TableAlias> readTables = new ArrayList<>();
         private final Map<TableAlias, List<Long>> countSeries = new HashMap<>();
         private final Map<TableAlias, AtomicInteger> countCursor = new HashMap<>();
-        private List<PipelineState> stateSeries = List.of(PipelineState.RUNNING);
+        private List<Optional<PipelineState>> stateSeries = List.of(Optional.of(PipelineState.RUNNING));
         private int stateReads;
         private int countReads;
 
@@ -205,7 +228,21 @@ class E2eExecutorTest {
         }
 
         void states(PipelineState... readings) {
-            stateSeries = List.of(readings);
+            stateSeries = Stream.of(readings).map(Optional::of).toList();
+        }
+
+        /** Publishes nothing on the first read, then these states: the window a real start opens. */
+        void unobservedThen(PipelineState... readings) {
+            stateSeries =
+                    Stream.concat(
+                                    Stream.of(Optional.<PipelineState>empty()),
+                                    Stream.of(readings).map(Optional::of))
+                            .toList();
+        }
+
+        /** Publishes nothing, ever: a pipeline no convergence pass has reached. */
+        void neverObserved() {
+            stateSeries = List.of(Optional.empty());
         }
 
         @Override
@@ -249,7 +286,7 @@ class E2eExecutorTest {
         }
 
         @Override
-        public PipelineState state(String pipelineId) {
+        public Optional<PipelineState> state(String pipelineId) {
             statedPipelineIds.add(pipelineId);
             int index = stateReads++;
             return stateSeries.get(Math.min(index, stateSeries.size() - 1));

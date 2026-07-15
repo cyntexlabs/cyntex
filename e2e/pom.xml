@@ -57,6 +57,16 @@
       <version>${revision}</version>
       <scope>test</scope>
     </dependency>
+    <!-- The wait model tells "this pipeline has published nothing yet" apart from a real failure by the
+         code the product sends, and takes that code from the product's own enum rather than spelling it
+         again here: a hand-copied code is a second truth, and this one decides whether a specification
+         waits or fails. -->
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>control-core</artifactId>
+      <version>${revision}</version>
+      <scope>test</scope>
+    </dependency>
     <!-- Reads the test-specification envelope. Test scope only: this never reaches any ring's
          runtime classpath, the same argument the arch-tests catalog gate makes. -->
     <dependency>

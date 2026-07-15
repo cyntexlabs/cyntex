@@ -13,6 +13,7 @@ import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * Binds a specification to a running product over its HTTP surface.
@@ -91,7 +92,7 @@ final class HttpTierBinding implements TierBinding {
     }
 
     @Override
-    public PipelineState state(String pipelineId) {
+    public Optional<PipelineState> state(String pipelineId) {
         return control.state(pipelineId);
     }
 
