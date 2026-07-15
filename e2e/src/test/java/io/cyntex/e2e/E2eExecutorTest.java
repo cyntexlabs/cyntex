@@ -29,8 +29,16 @@ class E2eExecutorTest {
 
     private final RecordingBinding binding = new RecordingBinding();
 
+    /**
+     * The dependency order, and the seed is part of it. A connector must be registered before a resource
+     * naming it can be applied, and a resource must exist before its model can be discovered - but a model
+     * is discovered from what the source holds, and what the source holds is what the seed put there. The
+     * harness's own seed is what materializes the table: it drops and rewrites it, so a discovery running
+     * first reads a table that is not there yet, comes back empty, and leaves the sink with no target model
+     * and no key to upsert on. Discovering last is what makes the discovery real.
+     */
     @Test
-    void provisionsInDependencyOrderBeforeAnyDataOrSteps() {
+    void provisionsInDependencyOrderAndDiscoversWhatTheSeedPutThere() {
         execute(
                 """
                 name: n
@@ -52,8 +60,8 @@ class E2eExecutorTest {
                         // One apply, not one per file: the product resolves references within the set
                         // submitted together, so a pipeline and its source must arrive in the same batch.
                         "apply:[src_mongo.cyn.yml, tgt_mongo.cyn.yml]",
-                        "discover:src_mongo",
                         "seed:src_mongo.orders=3",
+                        "discover:src_mongo",
                         "drive:START");
     }
 

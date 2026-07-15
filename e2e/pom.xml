@@ -74,6 +74,19 @@
       <artifactId>snakeyaml</artifactId>
       <scope>test</scope>
     </dependency>
+    <!-- The frozen PDK contract, compiled against by the connector this module packages and hands the
+         product to register. A specification that moves data needs a connector to move it through, and
+         the connectors a release ships are not available to this build - so the harness brings its own,
+         implementing the same contract every real connector implements. Test scope, like everything
+         here: this is a fixture the harness builds, never a shipped artifact, and rule R3's lock of the
+         PDK import to adapter-pdk governs the rings, which the ArchUnit importer's skip of test sources
+         leaves this module outside of. Declared rather than inherited through app -> adapter-pdk: a
+         compile surface that depends on a transitive is one dependency change away from vanishing. -->
+    <dependency>
+      <groupId>io.tapdata</groupId>
+      <artifactId>tapdata-pdk-api</artifactId>
+      <scope>test</scope>
+    </dependency>
     <!-- The in-process tier boots the real assembly root in this JVM; the real-process tier runs the
          boot jar this same module produces. Both are the product as it ships, driven only through its
          HTTP surface - no package-private seam of io.cyntex.app is reached from here. -->

@@ -36,8 +36,17 @@ final class HttpTierBinding implements TierBinding {
     private final ControlPlane control;
     private final Path workspace;
     private final DslParser parser = new DslParser();
-    private final MongoEndpoints endpoints;
     private final Map<String, SourceResource> sourcesById = new LinkedHashMap<>();
+
+    /**
+     * The driver per connector id. Which store an endpoint lives in is decided by the connector the
+     * resource names, so that is what chooses the reader — the harness reaches a Mongo collection with a
+     * Mongo driver and a directory of files with a file reader, and neither is the product. A run
+     * supplies drivers for the connectors its specification names and nothing else, so a specification
+     * that reaches for an endpoint this run cannot read independently says so rather than reading it
+     * through the product.
+     */
+    private final Map<String, Endpoints> endpointsByConnector;
 
     /**
      * What a specification's {@code ${...}} references resolve to. The harness is the client here, and
@@ -48,10 +57,14 @@ final class HttpTierBinding implements TierBinding {
      */
     private final UnaryOperator<String> env;
 
-    HttpTierBinding(ControlPlane control, Path workspace, MongoEndpoints endpoints, UnaryOperator<String> env) {
+    HttpTierBinding(
+            ControlPlane control,
+            Path workspace,
+            Map<String, Endpoints> endpointsByConnector,
+            UnaryOperator<String> env) {
         this.control = control;
         this.workspace = workspace;
-        this.endpoints = endpoints;
+        this.endpointsByConnector = Map.copyOf(endpointsByConnector);
         this.env = env;
     }
 
@@ -85,7 +98,8 @@ final class HttpTierBinding implements TierBinding {
 
     @Override
     public void seed(TableAlias table, long rows) {
-        endpoints.seed(uriOf(table), table.table(), rows);
+        Endpoint endpoint = endpoint(table);
+        endpoint.driver().seed(endpoint.uri(), table.table(), rows);
     }
 
     @Override
@@ -95,12 +109,14 @@ final class HttpTierBinding implements TierBinding {
 
     @Override
     public void cdc(TableAlias table, CdcOp op, long rows) {
-        endpoints.cdc(uriOf(table), table.table(), op, rows);
+        Endpoint endpoint = endpoint(table);
+        endpoint.driver().cdc(endpoint.uri(), table.table(), op, rows);
     }
 
     @Override
     public long count(TableAlias table) {
-        return endpoints.count(uriOf(table), table.table());
+        Endpoint endpoint = endpoint(table);
+        return endpoint.driver().count(endpoint.uri(), table.table());
     }
 
     @Override
@@ -128,15 +144,31 @@ final class HttpTierBinding implements TierBinding {
         return source;
     }
 
-    private String uriOf(TableAlias table) {
+    /**
+     * Where a table lives and what reads it, both taken from the resource that declares it: the
+     * connector chooses the driver, the {@code uri} setting is the address handed to it. Resolving both
+     * from the one applied resource is what keeps the address the harness dials identical to the one the
+     * product was given.
+     */
+    private Endpoint endpoint(TableAlias table) {
         SourceResource source = requireSource(table.resourceId());
+        Endpoints driver = endpointsByConnector.get(source.connector());
+        if (driver == null) {
+            throw new EnvelopeException(
+                    table + " is reached with the " + source.connector()
+                            + " connector, which this run has no independent driver for; it knows "
+                            + endpointsByConnector.keySet());
+        }
         if (!(source.config().get(URI_SETTING) instanceof String uri)) {
             throw new EnvelopeException(
                     table.resourceId() + " carries no " + URI_SETTING + " setting, so " + table
                             + " cannot be read from outside the product");
         }
-        return uri;
+        return new Endpoint(driver, uri);
     }
+
+    /** One addressable endpoint: the driver that reads it and the address it answers on. */
+    private record Endpoint(Endpoints driver, String uri) {}
 
     /**
      * Reads a resource and resolves its references, exactly as the CLI does before an apply — so what the

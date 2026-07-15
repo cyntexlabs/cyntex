@@ -14,34 +14,30 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * The endpoints a specification lays data on and reads data from, reached with a driver of the
- * harness's own rather than through the product.
- *
- * <p>This is the one thing the harness must not delegate: a count taken from the product's own
- * record of what it wrote would agree with the product by construction, and would keep agreeing
- * while the target database stayed empty. Rule R3 locks this driver to adapter-mongo-store for the
- * rings; this module is deliberately not one of them.
+ * The {@link Endpoints} driver for a Mongo store, addressed by the connection string the resource
+ * carries as its {@code uri}. Rule R3 locks this driver to adapter-mongo-store for the rings; this
+ * module is deliberately not one of them.
  *
  * <p>Row shape is deliberately minimal - {@code _id} and a sequence - because the {@code seed}
  * generator vocabulary is not decided yet. What is decided is that it must be deterministic: a
  * specification that seeds three rows and counts three rows may not depend on what those rows held.
  */
-final class MongoEndpoints implements AutoCloseable {
+final class MongoEndpoints implements Endpoints {
 
     private static final String SEQUENCE_FIELD = "seq";
     private static final String TOUCHED_FIELD = "touched";
 
     private final Map<String, MongoClient> clientsByUri = new LinkedHashMap<>();
 
-    /** Lays {@code rows} rows down, numbered from one, replacing whatever the table held. */
-    void seed(String uri, String table, long rows) {
+    @Override
+    public void seed(String uri, String table, long rows) {
         MongoCollection<Document> collection = collection(uri, table);
         collection.drop();
         insertRange(collection, 1, rows);
     }
 
-    /** Produces {@code rows} changes of one kind against a table that is already seeded. */
-    void cdc(String uri, String table, CdcOp op, long rows) {
+    @Override
+    public void cdc(String uri, String table, CdcOp op, long rows) {
         MongoCollection<Document> collection = collection(uri, table);
         switch (op) {
             case INSERT -> insertRange(collection, highestId(collection) + 1, rows);
@@ -51,8 +47,8 @@ final class MongoEndpoints implements AutoCloseable {
         }
     }
 
-    /** The rows the table holds now. */
-    long count(String uri, String table) {
+    @Override
+    public long count(String uri, String table) {
         return collection(uri, table).countDocuments();
     }
 

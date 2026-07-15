@@ -83,7 +83,10 @@ final class RealProcessServer implements ServerHandle {
                 "--server.port=" + port,
                 "--cyntex.store.mongo.enabled=true",
                 "--cyntex.store.mongo.uri=" + storeUri,
-                "--cyntex.store.mongo.server-selection-timeout=5s");
+                "--cyntex.store.mongo.server-selection-timeout=5s",
+                // A staging directory of this launch's own, for the same reason the other tier gets one:
+                // the cache is content-addressed and reused, so a shared one serves a stale connector.
+                "--" + ServerHandle.PLUGINS_DIRECTORY_SETTING + "=" + ServerHandle.privateStagingDirectory());
         try {
             return new ProcessBuilder(command)
                     .directory(workingDirectory.toFile())

@@ -38,15 +38,26 @@ public final class E2eExecutor {
         for (Seed seed : envelope.seed()) {
             binding.seed(seed.table(), seed.rows());
         }
+        // Discovery trails the seed: a source model is read out of what the source holds, and the seed is
+        // what puts it there.
+        envelope.setup().discover().forEach(binding::discoverSchema);
         for (Step step : envelope.steps()) {
             execute(step, pipelineId);
         }
     }
 
     /**
-     * Strict order: a resource may not be applied before the connector it names is registered, and a
-     * model may not be discovered before the source declaring it exists. The resources themselves go in
-     * one batch, because that is the closure the product resolves references within.
+     * Strict order: a resource may not be applied before the connector it names is registered. The
+     * resources themselves go in one batch, because that is the closure the product resolves references
+     * within.
+     *
+     * <p>The third bootstrap verb, {@code discover}, is deliberately not here. Its dependency is not on the
+     * apply alone but on the data: a model is discovered from what the source holds, and the harness's seed
+     * is what materializes the table - it drops and rewrites it, so before a seed there is nothing to
+     * discover. Running discovery first reads an absent table, returns an empty model, and leaves the sink
+     * with no target and no key to upsert on - quietly, because an empty model is what an empty source
+     * honestly looks like. So the executor keeps the envelope's three-key ordering and runs the discovery
+     * once the data it describes exists.
      */
     private void provision(Setup setup) {
         setup.connectors().forEach(binding::registerConnector);
@@ -55,7 +66,6 @@ public final class E2eExecutor {
             // that asks the product for nothing.
             binding.applyResources(setup.apply());
         }
-        setup.discover().forEach(binding::discoverSchema);
     }
 
     private void execute(Step step, String pipelineId) {

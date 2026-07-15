@@ -1,0 +1,197 @@
+package io.cyntex.e2e;
+
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
+
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.time.Duration;
+import java.util.Map;
+import java.util.function.Function;
+import java.util.function.UnaryOperator;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+/**
+ * The first specification that moves rows through a connector: a source directory, the product, a
+ * target directory, and a count taken from the target by a reader that is not the product.
+ *
+ * <p>Everything between the two directories is the real thing - the artifact is registered through the
+ * register verb, its class is resolved and loaded in isolation, the source model is discovered from it,
+ * the target model and its key are derived from that discovery, the lifecycle verb drives a Jet job,
+ * and the rows travel capture -> ring -> DAG -> sink. Only the stores at the ends are directories.
+ *
+ * <p>The two directories are deliberately different ones. A sink names its target table after the
+ * source row's table, so a single directory would have the pipeline write {@code orders.csv} back over
+ * the file the harness seeded - and the count would then read the harness's own rows and pass without a
+ * single row having crossed the product.
+ */
+class FirstPipelineIT {
+
+    private static final Duration TIMEOUT = Duration.ofSeconds(60);
+    private static final Duration POLL = Duration.ofMillis(200);
+
+    private static final long SEEDED = 3;
+    private static final long INSERTED = 2;
+
+    @TempDir
+    private Path workspace;
+
+    @TempDir
+    private Path connectorJars;
+
+    @TempDir
+    private Path sourceDirectory;
+
+    @TempDir
+    private Path targetDirectory;
+
+    private String previousConnectorsDir;
+
+    @BeforeAll
+    static void requireDocker() {
+        DockerGate.require();
+    }
+
+    @BeforeEach
+    void publishTheConnectorJar() {
+        E2eConnectorJar.buildInto(connectorJars);
+        previousConnectorsDir = System.setProperty("cyntex.e2e.connectors-dir", connectorJars.toString());
+    }
+
+    @AfterEach
+    void restoreTheConnectorsDirectory() {
+        if (previousConnectorsDir == null) {
+            System.clearProperty("cyntex.e2e.connectors-dir");
+        } else {
+            System.setProperty("cyntex.e2e.connectors-dir", previousConnectorsDir);
+        }
+    }
+
+    /** The fidelity axis, and the only thing that differs between the runs below. */
+    private enum Tiers {
+
+        IN_PROCESS(InProcessServer::start),
+        REAL_PROCESS(RealProcessServer::start);
+
+        private final Function<String, ServerHandle> launcher;
+
+        Tiers(Function<String, ServerHandle> launcher) {
+            this.launcher = launcher;
+        }
+    }
+
+    /**
+     * Seeded rows reach the target, and rows produced while the pipeline runs follow them.
+     *
+     * <p>The count is the assertion, and it is the only one that could be. A pipeline whose connector
+     * emits nothing still reaches {@code RUNNING}, so a specification that awaited the state would pass
+     * over an empty pipeline; and the target file does not exist at all until the product creates it, so
+     * a count that reaches three is three rows that were read, carried and written.
+     *
+     * <p>Five, not eight: the tail has no offset to resume from and replays the three seeded rows on top
+     * of the snapshot's, so the sink is handed eight rows and keeps five. That is the overlap the
+     * product's snapshot-to-cdc seam leaves, and the upsert absorbing it is what this number asserts.
+     * The key it absorbs on is derived from the discovered source model - so a run that discovered
+     * nothing would append instead and count eight.
+     */
+    @ParameterizedTest
+    @EnumSource(Tiers.class)
+    void rowsCrossFromASourceFileToATargetFile(Tiers tier) {
+        String store = SharedMongo.replicaSetUrl("e2e_first_" + tier.name().toLowerCase() + "_store");
+        writeWorkspace();
+
+        try (ServerHandle server = tier.launcher.apply(store);
+                Endpoints files = new FileEndpoints()) {
+            ControlPlane control = new ControlPlane(server.baseUrl());
+            control.bootstrapAndLogin("e2e", "e2e-password");
+            HttpTierBinding binding = new HttpTierBinding(
+                    control, workspace, Map.of(E2eConnectorJar.CONNECTOR_ID, files), env());
+
+            new E2eExecutor(binding, new FilePipelineLoader(workspace), TIMEOUT, POLL)
+                    .execute(EnvelopeParser.parse(specification()));
+
+            // The awaits above counted through the binding, which finds a table's directory by reading the
+            // resource the specification applied. This reads the target directory by the path this test
+            // chose, so a binding that had been counting the source's own seeded file all along - the one
+            // way every count above could hold without a row moving - cannot reach here.
+            assertThat(files.count(targetDirectory.toString(), "orders")).isEqualTo(SEEDED + INSERTED);
+        }
+    }
+
+    /** The specification under test: identical text for both tiers, by construction. */
+    private String specification() {
+        return """
+                name: rows-cross-from-a-source-file-to-a-target-file
+                tier: smoke
+                setup:
+                  connectors: [e2e_file]
+                  apply: [src_file.cyn.yml, tgt_file.cyn.yml, pipeline.cyn.yml]
+                  discover: [src_file]
+                pipeline: pipeline.cyn.yml
+                seed:
+                  src_file.orders: { rows: 3 }
+                steps:
+                  - start
+                  - await: { count: { tgt_file.orders: 3 } }
+                  - cdc: { src_file.orders: insert 2 }
+                  - await: { count: { tgt_file.orders: 5 } }
+                """;
+    }
+
+    /**
+     * The workspace an author would write: legal product DSL naming its endpoints by reference, with the
+     * addresses supplied by the loading side.
+     */
+    private void writeWorkspace() {
+        write("src_file.cyn.yml", """
+                version: cyntex/v1
+                kind: source
+                id: src_file
+                connector: e2e_file
+                config: { uri: "${SRC_DIR}" }
+                mode: cdc
+                tables: [ orders ]
+                """);
+        write("tgt_file.cyn.yml", """
+                version: cyntex/v1
+                kind: source
+                id: tgt_file
+                connector: e2e_file
+                config: { uri: "${TGT_DIR}" }
+                """);
+        write("pipeline.cyn.yml", """
+                version: cyntex/v1
+                kind: pipeline
+                id: e2e_pipeline
+                source: src_file
+                transforms:
+                  - { id: all_orders, from: [orders], type: filter, expr: "true" }
+                serve:
+                  from: all_orders
+                  sync:
+                    - source: tgt_file
+                """);
+    }
+
+    /** The harness is the client, so the addresses its checked-in references resolve to are its own. */
+    private UnaryOperator<String> env() {
+        return Map.of(
+                "SRC_DIR", sourceDirectory.toString(),
+                "TGT_DIR", targetDirectory.toString())::get;
+    }
+
+    private void write(String name, String content) {
+        try {
+            Files.writeString(workspace.resolve(name), content);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+}

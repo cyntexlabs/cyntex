@@ -68,7 +68,24 @@ final class StoreBackedDagSource implements DagSource {
     public DAG dagFor(String pipelineId) {
         PipelineResource pipeline = StoredArtifacts.requirePipeline(artifacts(), pipelineId);
         TargetTable target = targetModelResolver.resolve(pipeline).orElse(null);
-        return PipelineDagBuilder.build(pipeline, bindings(target), sinkAckBinding(pipeline, pipelineId));
+        return PipelineDagBuilder.build(
+                pipeline, bindings(sourceIdByTable(pipeline), target), sinkAckBinding(pipeline, pipelineId));
+    }
+
+    /**
+     * The source id to reach for each table the pipeline's sources read. A reference into a source names the
+     * table, while the vertex reading it is keyed by the source id, so this is what carries one to the other.
+     * A table read by two of one pipeline's sources cannot occur here: the reference rules reject the
+     * ambiguity before a pipeline is ever stored.
+     */
+    private Map<String, String> sourceIdByTable(PipelineResource pipeline) {
+        Map<String, String> byTable = new LinkedHashMap<>();
+        for (String sourceId : pipeline.sources()) {
+            SourceCaptureResolution resolution =
+                    SourceCaptureResolution.of(StoredArtifacts.requireSource(artifacts(), sourceId));
+            byTable.put(resolution.table(), sourceId);
+        }
+        return byTable;
     }
 
     /**
@@ -94,12 +111,12 @@ final class StoreBackedDagSource implements DagSource {
      * builder walks the topology; only the vertex suppliers they return travel onto the DAG, so they may
      * reach the store freely while what they produce stays serializable.
      */
-    private DagBindings bindings(TargetTable target) {
+    private DagBindings bindings(Map<String, String> sourceIdByTable, TargetTable target) {
         return new DagBindings(
                 this::sourceVertex,
                 StoreBackedDagSource::transformPort,
                 element -> sinkWriter(element, target),
-                StoreBackedDagSource::upstreams);
+                ref -> upstreams(ref, sourceIdByTable));
     }
 
     /**
@@ -160,13 +177,19 @@ final class StoreBackedDagSource implements DagSource {
     }
 
     /**
-     * The producer vertex keys a reference names. A literal token is a source id or a step id, which is the
-     * vertex key itself. A regex reference expands the source universe and is not carried by the linear L1
-     * builder.
+     * The producer vertex keys a reference names.
+     *
+     * <p>A reference reaching a source names the <em>table</em> that source reads, not the source itself,
+     * while the vertex reading it is keyed by the source id — so a token naming one of the pipeline's tables
+     * resolves to that source's vertex. Any other literal is already a vertex key: a step id, or a source id
+     * where the source declares no table to be addressed by instead. Translating here is what this binding is
+     * for: the builder is told which vertices a reference produces and cannot know that a table implies one.
+     *
+     * <p>A regex reference expands the source universe and is not carried by the linear L1 builder.
      */
-    private static List<String> upstreams(FromRef ref) {
+    private static List<String> upstreams(FromRef ref, Map<String, String> sourceIdByTable) {
         if (ref instanceof FromRef.Literal literal) {
-            return List.of(literal.ref());
+            return List.of(sourceIdByTable.getOrDefault(literal.ref(), literal.ref()));
         }
         throw new IllegalStateException("regex from: reference is not carried by the linear L1 builder: " + ref);
     }

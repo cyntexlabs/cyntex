@@ -69,7 +69,8 @@ class TierBindingsIT {
                 MongoEndpoints endpoints = new MongoEndpoints()) {
             ControlPlane control = new ControlPlane(server.baseUrl());
             control.bootstrapAndLogin("e2e", "e2e-password");
-            HttpTierBinding binding = new HttpTierBinding(control, workspace, endpoints, envFor(endpointUri));
+            HttpTierBinding binding =
+                    new HttpTierBinding(control, workspace, driversFor(endpoints), envFor(endpointUri));
 
             new E2eExecutor(binding, new FilePipelineLoader(workspace), TIMEOUT, POLL)
                     .execute(EnvelopeParser.parse(specification()));
@@ -94,7 +95,7 @@ class TierBindingsIT {
             ControlPlane control = new ControlPlane(server.baseUrl());
             control.bootstrapAndLogin("e2e", "e2e-password");
             HttpTierBinding binding = new HttpTierBinding(
-                    control, workspace, endpoints, envFor(SharedMongo.replicaSetUrl(database)));
+                    control, workspace, driversFor(endpoints), envFor(SharedMongo.replicaSetUrl(database)));
 
             assertThatThrownBy(() -> binding.count(new TableAlias("never_applied", "orders")))
                     .isInstanceOf(EnvelopeException.class)
@@ -123,7 +124,7 @@ class TierBindingsIT {
             ControlPlane control = new ControlPlane(server.baseUrl());
             control.bootstrapAndLogin("e2e", "e2e-password");
             HttpTierBinding binding = new HttpTierBinding(
-                    control, workspace, endpoints, envFor(SharedMongo.replicaSetUrl(database)));
+                    control, workspace, driversFor(endpoints), envFor(SharedMongo.replicaSetUrl(database)));
 
             long start = System.nanoTime();
 
@@ -195,6 +196,11 @@ class TierBindingsIT {
                   sync:
                     - source: tgt_mongo
                 """);
+    }
+
+    /** The one connector these specifications reach, and the driver that reads it independently. */
+    private static Map<String, Endpoints> driversFor(MongoEndpoints endpoints) {
+        return Map.of("mongodb", endpoints);
     }
 
     /**

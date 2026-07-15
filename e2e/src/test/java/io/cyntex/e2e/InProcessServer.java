@@ -35,7 +35,10 @@ final class InProcessServer implements ServerHandle {
                         "cyntex.store.mongo.enabled=true",
                         "cyntex.store.mongo.uri=" + storeUri,
                         // The container speaks plaintext; store TLS is opt-in, so no flag is needed.
-                        "cyntex.store.mongo.server-selection-timeout=5s")
+                        "cyntex.store.mongo.server-selection-timeout=5s",
+                        // This tier's working directory is the harness's own module, and the setting's
+                        // default is relative to it.
+                        ServerHandle.PLUGINS_DIRECTORY_SETTING + "=" + ServerHandle.privateStagingDirectory())
                 .run();
         int port = ((WebServerApplicationContext) context).getWebServer().getPort();
         return new InProcessServer(context, URI.create("http://localhost:" + port));
