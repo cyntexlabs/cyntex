@@ -91,6 +91,16 @@
       <artifactId>junit-jupiter</artifactId>
       <scope>test</scope>
     </dependency>
+    <!-- Holds the generated schema to the parser it describes. Byte-locking the schema to its
+         generator proves only that nobody hand-edited it; whether the description is TRUE is a
+         separate question, and a schema that quietly disagrees with the parser is worse than none -
+         a model reading it as ground truth would take its word. Test scope, like everything here. -->
+    <dependency>
+      <groupId>com.networknt</groupId>
+      <artifactId>json-schema-validator</artifactId>
+      <version>1.5.6</version>
+      <scope>test</scope>
+    </dependency>
     <dependency>
       <groupId>org.junit.jupiter</groupId>
       <artifactId>junit-jupiter</artifactId>

@@ -1,0 +1,92 @@
+{
+  "$id": "https://cyntex.io/schema/e2e/matchers-v1.json",
+  "description": "Every word a specification may use. Generated from the executor; a word is admitted only once something real answers it.",
+  "matchers": [
+    {
+      "word": "count",
+      "description": "Rows present at an endpoint, read from the endpoint itself rather than from the product's record of what it wrote."
+    },
+    {
+      "word": "state",
+      "description": "The pipeline's published lifecycle state, read from the observation face."
+    }
+  ],
+  "steps": [
+    {
+      "word": "pause",
+      "description": "A lifecycle verb, driven on the pipeline. Written on its own."
+    },
+    {
+      "word": "resume",
+      "description": "A lifecycle verb, driven on the pipeline. Written on its own."
+    },
+    {
+      "word": "start",
+      "description": "A lifecycle verb, driven on the pipeline. Written on its own."
+    },
+    {
+      "word": "stop",
+      "description": "A lifecycle verb, driven on the pipeline. Written on its own."
+    },
+    {
+      "word": "assert",
+      "description": "Checks a matcher once, now."
+    },
+    {
+      "word": "await",
+      "description": "Polls a matcher until it holds or the bound expires."
+    },
+    {
+      "word": "cdc",
+      "description": "Produces changes against a seeded table while the pipeline runs."
+    }
+  ],
+  "cdcOperations": [
+    {
+      "word": "delete",
+      "description": "Produces delete changes."
+    },
+    {
+      "word": "insert",
+      "description": "Produces insert changes."
+    },
+    {
+      "word": "update",
+      "description": "Produces update changes."
+    }
+  ],
+  "tiers": [
+    {
+      "word": "full",
+      "description": "The full matrix, nightly."
+    },
+    {
+      "word": "perf",
+      "description": "Performance baselines, on their own lane."
+    },
+    {
+      "word": "smoke",
+      "description": "Runs on every pull request; must stay minutes-fast."
+    }
+  ],
+  "pipelineStates": [
+    "COMPLETED",
+    "NEW",
+    "PAUSED",
+    "RUNNING",
+    "STOPPED"
+  ],
+  "topLevelKeys": [
+    "name",
+    "tier",
+    "setup",
+    "pipeline",
+    "seed",
+    "steps"
+  ],
+  "setupKeys": [
+    "connectors",
+    "apply",
+    "discover"
+  ]
+}

@@ -25,17 +25,13 @@ import java.util.Set;
  */
 public final class EnvelopeParser {
 
-    private static final Set<String> TOP_LEVEL_KEYS =
-            Set.of("name", "tier", "setup", "pipeline", "seed", "steps");
-    private static final Set<String> SETUP_KEYS = Set.of("connectors", "apply", "discover");
-    private static final Set<String> LIFECYCLE_STEPS = Set.of("start", "pause", "resume", "stop");
-    private static final Set<String> BODIED_STEPS = Set.of("cdc", "await", "assert");
+
 
     private EnvelopeParser() {}
 
     public static Envelope parse(String yaml) {
         Map<String, Object> root = mapping(load(yaml), "envelope");
-        rejectUnknownKeys(root.keySet(), TOP_LEVEL_KEYS, "envelope");
+        rejectUnknownKeys(root.keySet(), Set.copyOf(Vocabulary.TOP_LEVEL_KEYS), "envelope");
         return new Envelope(
                 requiredString(root, "name"),
                 tier(requiredString(root, "tier")),
@@ -62,7 +58,7 @@ public final class EnvelopeParser {
             return Setup.NONE;
         }
         Map<String, Object> mapping = mapping(node, "setup");
-        rejectUnknownKeys(mapping.keySet(), SETUP_KEYS, "setup");
+        rejectUnknownKeys(mapping.keySet(), Set.copyOf(Vocabulary.SETUP_KEYS), "setup");
         return new Setup(
                 stringList(mapping.get("connectors"), "setup.connectors"),
                 stringList(mapping.get("apply"), "setup.apply"),
@@ -78,7 +74,7 @@ public final class EnvelopeParser {
                 .forEach(
                         (alias, spec) -> {
                             Map<String, Object> rows = mapping(spec, "seed." + alias);
-                            rejectUnknownKeys(rows.keySet(), Set.of("rows"), "seed." + alias);
+                            rejectUnknownKeys(rows.keySet(), Vocabulary.SEED_KEYS, "seed." + alias);
                             seeds.add(new Seed(alias(alias), rowCount(rows.get("rows"), "seed." + alias + ".rows")));
                         });
         return seeds;
@@ -110,21 +106,43 @@ public final class EnvelopeParser {
             throw new EnvelopeException("a step carries exactly one verb, found: " + mapping.keySet());
         }
         Map.Entry<String, Object> only = mapping.entrySet().iterator().next();
-        return switch (only.getKey()) {
-            case "await" -> new Step.Await(matcher(only.getValue()));
-            case "assert" -> new Step.Assertion(matcher(only.getValue()));
-            case "cdc" -> cdc(only.getValue());
-            default -> throw new EnvelopeException(
-                    "unknown step verb: " + only.getKey() + "; a step with a body is one of " + BODIED_STEPS);
+        // Exhaustive over the keyword enum: a keyword added to the vocabulary does not compile until
+        // it means something here.
+        return switch (keyword(only.getKey())) {
+            case AWAIT -> new Step.Await(matcher(only.getValue()));
+            case ASSERT -> new Step.Assertion(matcher(only.getValue()));
+            case CDC -> cdc(only.getValue());
         };
     }
 
     private static LifecycleVerb lifecycleVerb(String verb) {
-        if (!LIFECYCLE_STEPS.contains(verb.toLowerCase(Locale.ROOT))) {
+        if (!Vocabulary.LIFECYCLE_STEPS.contains(verb.toLowerCase(Locale.ROOT))) {
             throw new EnvelopeException(
-                    "unknown step verb: " + verb + "; a step on its own is one of " + LIFECYCLE_STEPS);
+                    "unknown step verb: " + verb + "; a step on its own is one of "
+                            + Vocabulary.LIFECYCLE_STEPS);
         }
         return LifecycleVerb.valueOf(verb.toUpperCase(Locale.ROOT));
+    }
+
+    private static StepKeyword keyword(String word) {
+        return word(StepKeyword.values(), StepKeyword::word, word,
+                "unknown step verb: " + word + "; a step with a body is one of " + Vocabulary.BODIED_STEPS);
+    }
+
+    private static MatcherWord matcherWord(String word) {
+        return word(MatcherWord.values(), MatcherWord::word, word,
+                "unknown matcher: " + word + "; known matchers are " + Vocabulary.MATCHERS);
+    }
+
+    /** Resolves a written word to its enum, refusing anything the vocabulary does not hold. */
+    private static <T> T word(T[] values, java.util.function.Function<T, String> spelling,
+            String written, String refusal) {
+        for (T value : values) {
+            if (spelling.apply(value).equals(written)) {
+                return value;
+            }
+        }
+        throw new EnvelopeException(refusal);
     }
 
     private static Step.Cdc cdc(Object node) {
@@ -146,7 +164,7 @@ public final class EnvelopeParser {
             return CdcOp.valueOf(op.toUpperCase(Locale.ROOT));
         } catch (IllegalArgumentException e) {
             throw new EnvelopeException(
-                    "unknown cdc operation: " + op + "; known operations are insert, update, delete");
+                    "unknown cdc operation: " + op + "; known operations are " + Vocabulary.CDC_OPERATIONS);
         }
     }
 
@@ -169,11 +187,9 @@ public final class EnvelopeParser {
             throw new EnvelopeException("a matcher carries exactly one word, found: " + mapping.keySet());
         }
         Map.Entry<String, Object> only = mapping.entrySet().iterator().next();
-        return switch (only.getKey()) {
-            case "count" -> count(only.getValue());
-            case "state" -> new Matcher.State(pipelineState(only.getValue()));
-            default -> throw new EnvelopeException(
-                    "unknown matcher: " + only.getKey() + "; known matchers are count, state");
+        return switch (matcherWord(only.getKey())) {
+            case COUNT -> count(only.getValue());
+            case STATE -> new Matcher.State(pipelineState(only.getValue()));
         };
     }
 
