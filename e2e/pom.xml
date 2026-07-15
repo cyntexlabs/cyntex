@@ -112,6 +112,15 @@
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-failsafe-plugin</artifactId>
+        <configuration>
+          <systemPropertyVariables>
+            <!-- Where the reactor puts the service deliverable. The real-process tier drives this file
+                 rather than a classpath, which is the whole of its fidelity claim; the app module is
+                 built before this one, so by the time a specification runs the jar is there. Naming it
+                 here keeps the path a build fact instead of a guess inside a test. -->
+            <cyntex.e2e.boot-jar>${project.basedir}/../app/target/app-${revision}-boot.jar</cyntex.e2e.boot-jar>
+          </systemPropertyVariables>
+        </configuration>
         <executions>
           <execution>
             <goals>
