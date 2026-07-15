@@ -121,17 +121,22 @@ class TierBindingsIT {
             control.bootstrapAndLogin("e2e", "e2e-password");
             HttpTierBinding binding = new HttpTierBinding(control, workspace, endpoints);
 
+            long start = System.nanoTime();
+
             assertThatThrownBy(
                             () ->
                                     new E2eExecutor(
                                                     binding, new FilePipelineLoader(workspace), UNOBSERVED_BOUND, POLL)
                                             .execute(EnvelopeParser.parse(unstartedSpecification())))
-                    // The bound expiring is the pass: it says the executor kept asking. Reporting the
-                    // unpublished read as the reading is what tells the author the pipeline never converged,
-                    // rather than blaming a transport that answered exactly as designed.
+                    // Reporting the unpublished read as the reading is what tells the author the pipeline
+                    // never converged, rather than blaming a transport that answered exactly as designed.
                     .isInstanceOf(AssertionError.class)
-                    .hasMessageContaining("timed out after")
                     .hasMessageContaining("e2e_pipeline expected RUNNING, found no published observation");
+
+            // The message alone cannot tell a wait apart from a give-up: an executor that abandoned the run
+            // on the first refusal would word its timeout identically and get here in microseconds. The clock
+            // is the only witness that the refusal was polled through rather than thrown on.
+            assertThat(Duration.ofNanos(System.nanoTime() - start)).isGreaterThanOrEqualTo(UNOBSERVED_BOUND);
         }
     }
 

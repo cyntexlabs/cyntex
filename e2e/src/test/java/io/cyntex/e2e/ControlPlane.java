@@ -126,6 +126,11 @@ final class ControlPlane {
      * pass there is no observation at all and the product says so with a coded refusal - so a caller that
      * took that for fatal could never wait for a pipeline to come up, which is the one thing waiting is
      * for. Answering with some state instead would be worse still: it would invent a reading.
+     *
+     * <p>Empty is weaker than it looks: this read is served from the published observations alone, so a
+     * pipeline that was never applied answers exactly as one that is applied and not yet converged. A
+     * caller cannot tell "still coming" from "never existed" here, and a wait for the second will spend
+     * its whole bound before saying so.
      */
     Optional<PipelineState> state(String pipelineId) {
         HttpResponse<String> response = send(authedGet("/api/pipelines/" + pipelineId + "/status"));
@@ -154,11 +159,20 @@ final class ControlPlane {
         return Optional.of(PipelineState.valueOf(state));
     }
 
-    /** The code a structured error body carries, or null for a body that is not one. */
+    /**
+     * The code a structured error body carries, or null for a body that is not one - a body that does not
+     * parse included. A refusal can come from something that is not the product at all (an empty body, a
+     * proxy's HTML), and the caller's job is to report that loudly with the pipeline and status named; it
+     * cannot do that if reading the body for a code throws a parse error over the top of it.
+     */
     private static String codeOf(String body) {
-        return JsonReader.parse(body) instanceof Map<?, ?> map && map.get("code") instanceof String code
-                ? code
-                : null;
+        try {
+            return JsonReader.parse(body) instanceof Map<?, ?> map && map.get("code") instanceof String code
+                    ? code
+                    : null;
+        } catch (RuntimeException e) {
+            return null;
+        }
     }
 
     private HttpRequest get(String path) {

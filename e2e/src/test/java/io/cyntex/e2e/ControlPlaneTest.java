@@ -6,6 +6,7 @@ import io.cyntex.core.lifecycle.LifecycleError;
 import io.cyntex.core.lifecycle.PipelineState;
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -34,17 +35,22 @@ class ControlPlaneTest {
                 .isEmpty();
     }
 
+    /**
+     * The rule is written on the code and not on the status, so a 404 that means something else stays loud.
+     * The status read serves only this one code today, so no live server can produce the answer below - the
+     * rule is pinned here against the day another one is added, which is exactly when a status-only reading
+     * would start passing a real failure off as a pipeline that is merely slow.
+     */
     @Test
     void keepsAnotherCodesNotFoundLoud() {
-        // The case a rule written on the status alone would get wrong: this 404 says the pipeline does not
-        // exist, and reading it as "merely slow to converge" would make the specification wait out its whole
-        // bound and then report the wrong thing entirely.
+        // Asserted on the status this reports, not on the code: the message quotes the body back verbatim, so
+        // a code the test itself planted there would be echoed by an implementation that never read it.
         assertThatThrownBy(
                         () ->
                                 ControlPlane.interpretState(
                                         404, coded(LifecycleError.UNKNOWN_PIPELINE.code()), PIPELINE))
                 .isInstanceOf(AssertionError.class)
-                .hasMessageContaining(LifecycleError.UNKNOWN_PIPELINE.code());
+                .hasMessageContaining("got 404");
     }
 
     @Test
@@ -52,6 +58,21 @@ class ControlPlaneTest {
         assertThatThrownBy(() -> ControlPlane.interpretState(500, "boom", PIPELINE))
                 .isInstanceOf(AssertionError.class)
                 .hasMessageContaining("got 500");
+    }
+
+    /**
+     * A refusal that is not the product's structured body at all - an empty answer, or a proxy's HTML. The
+     * caller has to hear the status and the body it actually got; reading the body for a code must not throw
+     * a parse error over the top of the diagnostic, which is the one thing this answer is good for.
+     */
+    @Test
+    void keepsARefusalThatCarriesNoStructuredBodyLoud() {
+        for (String body : List.of("", "<html><body>Not Found</body></html>", "boom")) {
+            assertThatThrownBy(() -> ControlPlane.interpretState(404, body, PIPELINE))
+                    .isInstanceOf(AssertionError.class)
+                    .hasMessageContaining("got 404")
+                    .hasMessageContaining(PIPELINE);
+        }
     }
 
     @Test
