@@ -64,6 +64,33 @@
       <artifactId>snakeyaml</artifactId>
       <scope>test</scope>
     </dependency>
+    <!-- The in-process tier boots the real assembly root in this JVM; the real-process tier runs the
+         boot jar this same module produces. Both are the product as it ships, driven only through its
+         HTTP surface - no package-private seam of io.cyntex.app is reached from here. -->
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>app</artifactId>
+      <version>${revision}</version>
+      <scope>test</scope>
+    </dependency>
+    <!-- Endpoints a specification seeds, changes and counts. This is the harness reading a pipeline's
+         target the way a user would, from outside the product; rule R3 locks the driver to
+         adapter-mongo-store for the rings, and this module is deliberately not one of them. -->
+    <dependency>
+      <groupId>org.mongodb</groupId>
+      <artifactId>mongodb-driver-sync</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.testcontainers</groupId>
+      <artifactId>mongodb</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.testcontainers</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
     <dependency>
       <groupId>org.junit.jupiter</groupId>
       <artifactId>junit-jupiter</artifactId>
@@ -75,4 +102,25 @@
       <scope>test</scope>
     </dependency>
   </dependencies>
+
+  <build>
+    <plugins>
+      <!-- Specification runs (*IT) are Docker-backed and live in the integration-test phase, so `mvn
+           test` stays fast and `mvn verify` exercises them. Without this binding failsafe is not
+           active in this module and every *IT here would be silently collected by nobody - a tier that
+           never runs while the build stays green is the exact failure this framework exists to catch. -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-failsafe-plugin</artifactId>
+        <executions>
+          <execution>
+            <goals>
+              <goal>integration-test</goal>
+              <goal>verify</goal>
+            </goals>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
 </project>
