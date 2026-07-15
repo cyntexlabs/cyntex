@@ -1,5 +1,6 @@
 package io.cyntex.e2e;
 
+import io.cyntex.core.dsl.DslException;
 import io.cyntex.core.dsl.DslParser;
 import io.cyntex.core.model.PipelineResource;
 import io.cyntex.core.model.Resource;
@@ -27,7 +28,7 @@ public final class FilePipelineLoader implements PipelineLoader {
         Resource resource = parse(pipelineRef, read(pipelineRef));
         if (!(resource instanceof PipelineResource pipeline)) {
             throw new EnvelopeException(
-                    pipelineRef + " must declare a pipeline, found kind: " + kindOf(resource));
+                    pipelineRef + " must declare a pipeline, found kind: " + resource.kind());
         }
         return pipeline.id();
     }
@@ -40,15 +41,15 @@ public final class FilePipelineLoader implements PipelineLoader {
         }
     }
 
+    /**
+     * Only a DSL error becomes an authoring error. Anything else thrown by the parser is a defect in
+     * the parser, and blaming the author's YAML for it would bury the real fault.
+     */
     private Resource parse(String pipelineRef, String yaml) {
         try {
             return parser.parse(yaml);
-        } catch (RuntimeException e) {
+        } catch (DslException e) {
             throw new EnvelopeException(pipelineRef + " does not parse: " + e.getMessage(), e);
         }
-    }
-
-    private static String kindOf(Resource resource) {
-        return resource.getClass().getSimpleName().replace("Resource", "").toLowerCase(java.util.Locale.ROOT);
     }
 }

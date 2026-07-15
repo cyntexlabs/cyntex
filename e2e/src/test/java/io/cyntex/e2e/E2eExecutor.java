@@ -12,9 +12,10 @@ import java.util.Optional;
  * Runs a specification against one tier binding.
  *
  * <p>Waiting is condition-driven and bounded: {@code await} polls a matcher until it holds or the
- * bound expires, and a expired bound fails with what was expected and what was actually read. There
- * is no fixed-duration sleep anywhere in a run - a sleep long enough to be reliable is a sleep that
- * wastes that long on every green run, and it is never quite reliable anyway.
+ * bound expires, and an expired bound reports how long it actually waited alongside what it expected
+ * and what it last read. There is no fixed-duration sleep anywhere in a run - a sleep long enough to
+ * be reliable is a sleep that wastes that long on every green run, and it is never quite reliable
+ * anyway.
  */
 public final class E2eExecutor {
 
@@ -53,38 +54,45 @@ public final class E2eExecutor {
         switch (step) {
             case Step.Lifecycle lifecycle -> binding.drive(pipelineId, lifecycle.verb());
             case Step.Cdc cdc -> binding.cdc(cdc.table(), cdc.op(), cdc.rows());
-            case Step.Assertion assertion -> check(assertion.matcher());
-            case Step.Await await -> await(await.matcher());
+            case Step.Assertion assertion -> check(assertion.matcher(), pipelineId);
+            case Step.Await await -> await(await.matcher(), pipelineId);
         }
     }
 
-    private void check(Matcher matcher) {
-        mismatch(matcher)
+    private void check(Matcher matcher, String pipelineId) {
+        mismatch(matcher, pipelineId)
                 .ifPresent(
                         mismatch -> {
                             throw new AssertionError(mismatch);
                         });
     }
 
-    private void await(Matcher matcher) {
-        long deadline = System.nanoTime() + timeout.toNanos();
+    private void await(Matcher matcher, String pipelineId) {
+        long start = System.nanoTime();
+        long deadline = start + timeout.toNanos();
         while (true) {
-            Optional<String> mismatch = mismatch(matcher);
+            Optional<String> mismatch = mismatch(matcher, pipelineId);
             if (mismatch.isEmpty()) {
                 return;
             }
-            if (System.nanoTime() >= deadline) {
-                throw new AssertionError("timed out after " + timeout + "; " + mismatch.get());
+            if (System.nanoTime() - deadline >= 0) {
+                throw new AssertionError(
+                        "timed out after "
+                                + Duration.ofNanos(System.nanoTime() - start)
+                                + " (bound "
+                                + timeout
+                                + "); "
+                                + mismatch.get());
             }
             sleep(pollInterval);
         }
     }
 
     /** The reading that falsifies the matcher, or empty when it holds. */
-    private Optional<String> mismatch(Matcher matcher) {
+    private Optional<String> mismatch(Matcher matcher, String pipelineId) {
         return switch (matcher) {
             case Matcher.Count count -> countMismatch(count.expected());
-            case Matcher.State state -> stateMismatch(state.expected());
+            case Matcher.State state -> stateMismatch(state.expected(), pipelineId);
         };
     }
 
@@ -100,16 +108,11 @@ public final class E2eExecutor {
         return mismatches.isEmpty() ? Optional.empty() : Optional.of(String.join("; ", mismatches));
     }
 
-    private Optional<String> stateMismatch(Map<String, PipelineState> expected) {
-        List<String> mismatches = new ArrayList<>();
-        expected.forEach(
-                (id, state) -> {
-                    PipelineState actual = binding.state(id);
-                    if (actual != state) {
-                        mismatches.add(id + " expected " + state + ", found " + actual);
-                    }
-                });
-        return mismatches.isEmpty() ? Optional.empty() : Optional.of(String.join("; ", mismatches));
+    private Optional<String> stateMismatch(PipelineState expected, String pipelineId) {
+        PipelineState actual = binding.state(pipelineId);
+        return actual == expected
+                ? Optional.empty()
+                : Optional.of(pipelineId + " expected " + expected + ", found " + actual);
     }
 
     private static void sleep(Duration interval) {

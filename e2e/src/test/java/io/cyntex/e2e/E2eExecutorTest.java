@@ -17,7 +17,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 /**
  * The executor turns a specification into calls on a tier binding. What it must get right is order
  * and honesty: provisioning strictly before data, data strictly before steps, and a wait that fails
- * loudly on timeout instead of sliding past.
+ * loudly on timeout reporting what it expected against what it actually read.
  */
 class E2eExecutorTest {
 
@@ -41,7 +41,7 @@ class E2eExecutorTest {
                 seed:
                   src_mongo.orders: { rows: 3 }
                 steps:
-                  - run
+                  - start
                 """);
 
         assertThat(binding.calls)
@@ -56,40 +56,39 @@ class E2eExecutorTest {
 
     @Test
     void drivesEveryLifecycleVerbInDeclarationOrder() {
-        execute(minimal("steps:\n  - run\n  - pause\n  - resume\n  - stop\n"));
+        execute(minimal("steps:\n  - start\n  - pause\n  - resume\n  - stop\n"));
 
-        assertThat(binding.calls)
-                .containsExactly("drive:START", "drive:PAUSE", "drive:RESUME", "drive:STOP");
+        assertThat(binding.calls).containsExactly("drive:START", "drive:PAUSE", "drive:RESUME", "drive:STOP");
     }
 
     @Test
     void awaitPollsUntilTheMatcherHolds() {
         binding.countsOverTime(TARGET, 0L, 0L, 100L);
 
-        execute(minimal("steps:\n  - run\n  - await: { count: { tgt_mongo.orders: 100 } }\n"));
+        execute(minimal("steps:\n  - start\n  - await: { count: { tgt_mongo.orders: 100 } }\n"));
 
         assertThat(binding.countReads).isEqualTo(3);
     }
 
     @Test
-    void awaitFailsLoudlyWhenTheBoundExpires() {
+    void awaitFailsLoudlyReportingExpectedAgainstActual() {
         binding.countsOverTime(TARGET, 7L);
 
-        assertThatThrownBy(
-                        () -> execute(minimal("steps:\n  - await: { count: { tgt_mongo.orders: 100 } }\n")))
+        assertThatThrownBy(() -> execute(minimal("steps:\n  - await: { count: { tgt_mongo.orders: 100 } }\n")))
                 .isInstanceOf(AssertionError.class)
-                .hasMessageContaining("tgt_mongo.orders")
-                .hasMessageContaining("100")
-                .hasMessageContaining("7");
+                .hasMessageContaining("timed out after")
+                // Pinned as one phrase: asserting the numbers separately cannot tell this message
+                // apart from one that reports them the wrong way round.
+                .hasMessageContaining("tgt_mongo.orders expected 100, found 7");
     }
 
     @Test
     void assertChecksOnceAndDoesNotWait() {
         binding.countsOverTime(TARGET, 0L, 100L);
 
-        assertThatThrownBy(
-                        () -> execute(minimal("steps:\n  - assert: { count: { tgt_mongo.orders: 100 } }\n")))
-                .isInstanceOf(AssertionError.class);
+        assertThatThrownBy(() -> execute(minimal("steps:\n  - assert: { count: { tgt_mongo.orders: 100 } }\n")))
+                .isInstanceOf(AssertionError.class)
+                .hasMessageContaining("tgt_mongo.orders expected 100, found 0");
         assertThat(binding.countReads).isEqualTo(1);
     }
 
@@ -102,12 +101,23 @@ class E2eExecutorTest {
     }
 
     @Test
-    void awaitsTheStateMatcherAgainstThePublishedObservation() {
+    void awaitsTheStateOfThePipelineResolvedFromTheEnvelope() {
         binding.states(PipelineState.NEW, PipelineState.RUNNING);
 
-        execute(minimal("steps:\n  - await: { state: { mongo2mongo: RUNNING } }\n"));
+        execute(minimal("steps:\n  - await: { state: RUNNING }\n"));
 
         assertThat(binding.stateReads).isEqualTo(2);
+        // The state read must address the pipeline the envelope names, not a hand-copied id.
+        assertThat(binding.statedPipelineIds).containsOnly(PIPELINE_ID);
+    }
+
+    @Test
+    void reportsTheStateMismatchAgainstTheResolvedPipeline() {
+        binding.states(PipelineState.PAUSED);
+
+        assertThatThrownBy(() -> execute(minimal("steps:\n  - assert: { state: RUNNING }\n")))
+                .isInstanceOf(AssertionError.class)
+                .hasMessageContaining("mongo2mongo expected RUNNING, found PAUSED");
     }
 
     @Test
@@ -119,8 +129,8 @@ class E2eExecutorTest {
 
     @Test
     void countMatcherOverSeveralTablesHoldsOnlyWhenEveryTableMatches() {
-        binding.count(TARGET, 100L);
-        binding.count(SOURCE, 1L);
+        binding.countsOverTime(TARGET, 100L);
+        binding.countsOverTime(SOURCE, 1L);
 
         assertThatThrownBy(
                         () ->
@@ -129,14 +139,40 @@ class E2eExecutorTest {
                                                 "steps:\n  - assert: { count: { tgt_mongo.orders: 100,"
                                                         + " src_mongo.orders: 2 } }\n")))
                 .isInstanceOf(AssertionError.class)
-                .hasMessageContaining("src_mongo.orders");
+                .hasMessageContaining("src_mongo.orders expected 2, found 1");
+    }
+
+    @Test
+    void readsTheCountEndpointsInTheOrderTheAuthorWroteThem() {
+        binding.countsOverTime(new TableAlias("c", "t"), 9L);
+        binding.countsOverTime(new TableAlias("a", "t"), 9L);
+        binding.countsOverTime(new TableAlias("b", "t"), 9L);
+
+        execute(minimal("steps:\n  - assert: { count: { c.t: 9, a.t: 9, b.t: 9 } }\n"));
+
+        assertThat(binding.readTables)
+                .containsExactly(new TableAlias("c", "t"), new TableAlias("a", "t"), new TableAlias("b", "t"));
     }
 
     @Test
     void drivesTheVerbAgainstThePipelineResolvedFromTheEnvelope() {
-        execute(minimal("steps:\n  - run\n"));
+        execute(minimal("steps:\n  - start\n"));
 
         assertThat(binding.drivenPipelineIds).containsExactly(PIPELINE_ID);
+    }
+
+    @Test
+    void pollsAtLeastOnceEvenWithAZeroBound() {
+        binding.countsOverTime(TARGET, 7L);
+
+        assertThatThrownBy(
+                        () ->
+                                new E2eExecutor(binding, path -> PIPELINE_ID, Duration.ZERO, Duration.ofMillis(1))
+                                        .execute(
+                                                EnvelopeParser.parse(
+                                                        minimal("steps:\n  - await: { count: { tgt_mongo.orders: 100 } }\n"))))
+                .isInstanceOf(AssertionError.class);
+        assertThat(binding.countReads).isEqualTo(1);
     }
 
     private void execute(String yaml) {
@@ -154,15 +190,13 @@ class E2eExecutorTest {
 
         private final List<String> calls = new ArrayList<>();
         private final List<String> drivenPipelineIds = new ArrayList<>();
+        private final List<String> statedPipelineIds = new ArrayList<>();
+        private final List<TableAlias> readTables = new ArrayList<>();
         private final Map<TableAlias, List<Long>> countSeries = new HashMap<>();
         private final Map<TableAlias, AtomicInteger> countCursor = new HashMap<>();
         private List<PipelineState> stateSeries = List.of(PipelineState.RUNNING);
         private int stateReads;
         private int countReads;
-
-        void count(TableAlias table, long rows) {
-            countsOverTime(table, rows);
-        }
 
         void countsOverTime(TableAlias table, Long... readings) {
             countSeries.put(table, List.of(readings));
@@ -200,13 +234,14 @@ class E2eExecutorTest {
         }
 
         @Override
-        public void cdc(TableAlias table, CdcOp op, int rows) {
+        public void cdc(TableAlias table, CdcOp op, long rows) {
             calls.add("cdc:" + table + "=" + op + " x" + rows);
         }
 
         @Override
         public long count(TableAlias table) {
             countReads++;
+            readTables.add(table);
             List<Long> series = countSeries.getOrDefault(table, List.of(0L));
             int index = countCursor.computeIfAbsent(table, t -> new AtomicInteger()).getAndIncrement();
             return series.get(Math.min(index, series.size() - 1));
@@ -214,6 +249,7 @@ class E2eExecutorTest {
 
         @Override
         public PipelineState state(String pipelineId) {
+            statedPipelineIds.add(pipelineId);
             int index = stateReads++;
             return stateSeries.get(Math.min(index, stateSeries.size() - 1));
         }

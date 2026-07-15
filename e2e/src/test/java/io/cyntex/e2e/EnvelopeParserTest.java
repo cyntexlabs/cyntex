@@ -4,8 +4,6 @@ import io.cyntex.core.lifecycle.LifecycleVerb;
 import io.cyntex.core.lifecycle.PipelineState;
 import org.junit.jupiter.api.Test;
 
-import java.util.List;
-
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -28,12 +26,12 @@ class EnvelopeParserTest {
             seed:
               src_mongo.orders: { rows: 100 }
             steps:
-              - run
+              - start
               - await: { count: { tgt_mongo.orders: 100 } }
               - cdc: { src_mongo.orders: insert 10 }
               - await: { count: { tgt_mongo.orders: 110 } }
               - stop
-              - run
+              - start
               - await: { count: { tgt_mongo.orders: 110 } }
             """;
 
@@ -47,8 +45,7 @@ class EnvelopeParserTest {
         assertThat(envelope.setup().connectors()).containsExactly("mongodb");
         assertThat(envelope.setup().apply()).containsExactly("src_mongo.cyn.yml", "tgt_mongo.cyn.yml");
         assertThat(envelope.setup().discover()).containsExactly("src_mongo");
-        assertThat(envelope.seed())
-                .containsExactly(new Seed(new TableAlias("src_mongo", "orders"), 100L));
+        assertThat(envelope.seed()).containsExactly(new Seed(new TableAlias("src_mongo", "orders"), 100L));
     }
 
     @Test
@@ -59,7 +56,7 @@ class EnvelopeParserTest {
                 .containsExactly(
                         new Step.Lifecycle(LifecycleVerb.START),
                         new Step.Await(Matcher.count(new TableAlias("tgt_mongo", "orders"), 100L)),
-                        new Step.Cdc(new TableAlias("src_mongo", "orders"), CdcOp.INSERT, 10),
+                        new Step.Cdc(new TableAlias("src_mongo", "orders"), CdcOp.INSERT, 10L),
                         new Step.Await(Matcher.count(new TableAlias("tgt_mongo", "orders"), 110L)),
                         new Step.Lifecycle(LifecycleVerb.STOP),
                         new Step.Lifecycle(LifecycleVerb.START),
@@ -67,16 +64,9 @@ class EnvelopeParserTest {
     }
 
     @Test
-    void mapsTheRunStepOntoTheStartVerb() {
-        Envelope envelope = EnvelopeParser.parse(minimal("steps:\n  - run\n"));
-
-        assertThat(envelope.steps()).containsExactly(new Step.Lifecycle(LifecycleVerb.START));
-    }
-
-    @Test
-    void parsesEveryLifecycleStep() {
+    void spellsLifecycleStepsExactlyAsTheProductSpellsItsVerbs() {
         Envelope envelope =
-                EnvelopeParser.parse(minimal("steps:\n  - run\n  - pause\n  - resume\n  - stop\n"));
+                EnvelopeParser.parse(minimal("steps:\n  - start\n  - pause\n  - resume\n  - stop\n"));
 
         assertThat(envelope.steps())
                 .extracting(step -> ((Step.Lifecycle) step).verb())
@@ -85,12 +75,18 @@ class EnvelopeParserTest {
     }
 
     @Test
+    void rejectsRunBecauseTheProductReservesItForApplyThenStart() {
+        assertThatThrownBy(() -> EnvelopeParser.parse(minimal("steps:\n  - run\n")))
+                .isInstanceOf(EnvelopeException.class)
+                .hasMessageContaining("run");
+    }
+
+    @Test
     void parsesTheStateMatcherAgainstTheProductLifecycleEnum() {
-        Envelope envelope =
-                EnvelopeParser.parse(minimal("steps:\n  - assert: { state: { p1: RUNNING } }\n"));
+        Envelope envelope = EnvelopeParser.parse(minimal("steps:\n  - assert: { state: RUNNING }\n"));
 
         assertThat(envelope.steps())
-                .containsExactly(new Step.Assertion(Matcher.state("p1", PipelineState.RUNNING)));
+                .containsExactly(new Step.Assertion(Matcher.state(PipelineState.RUNNING)));
     }
 
     @Test
@@ -132,22 +128,32 @@ class EnvelopeParserTest {
     }
 
     @Test
+    void splitsAnAliasAtTheFirstDotSoATableNameMayContainDots() {
+        Envelope envelope =
+                EnvelopeParser.parse(minimal("steps:\n  - await: { count: { src.orders.2026: 1 } }\n"));
+
+        assertThat(envelope.steps())
+                .containsExactly(new Step.Await(Matcher.count(new TableAlias("src", "orders.2026"), 1L)));
+    }
+
+    @Test
     void rejectsAnUnknownTier() {
-        assertThatThrownBy(() -> EnvelopeParser.parse("name: n\ntier: nightly\npipeline: p.cyn.yml\nsteps:\n  - run\n"))
+        assertThatThrownBy(
+                        () -> EnvelopeParser.parse("name: n\ntier: nightly\npipeline: p.cyn.yml\nsteps:\n  - start\n"))
                 .isInstanceOf(EnvelopeException.class)
                 .hasMessageContaining("nightly");
     }
 
     @Test
     void rejectsAnEnvelopeWithoutAName() {
-        assertThatThrownBy(() -> EnvelopeParser.parse("tier: smoke\npipeline: p.cyn.yml\nsteps:\n  - run\n"))
+        assertThatThrownBy(() -> EnvelopeParser.parse("tier: smoke\npipeline: p.cyn.yml\nsteps:\n  - start\n"))
                 .isInstanceOf(EnvelopeException.class)
                 .hasMessageContaining("name");
     }
 
     @Test
     void rejectsAnEnvelopeWithoutAPipeline() {
-        assertThatThrownBy(() -> EnvelopeParser.parse("name: n\ntier: smoke\nsteps:\n  - run\n"))
+        assertThatThrownBy(() -> EnvelopeParser.parse("name: n\ntier: smoke\nsteps:\n  - start\n"))
                 .isInstanceOf(EnvelopeException.class)
                 .hasMessageContaining("pipeline");
     }
@@ -168,7 +174,7 @@ class EnvelopeParserTest {
 
     @Test
     void treatsSetupAsOptionalSoAPipelineOnlyCaseStillParses() {
-        Envelope envelope = EnvelopeParser.parse(minimal("steps:\n  - run\n"));
+        Envelope envelope = EnvelopeParser.parse(minimal("steps:\n  - start\n"));
 
         assertThat(envelope.setup().connectors()).isEmpty();
         assertThat(envelope.setup().apply()).isEmpty();
@@ -179,18 +185,106 @@ class EnvelopeParserTest {
     @Test
     void keepsSeedEntriesInDeclarationOrder() {
         Envelope envelope =
-                EnvelopeParser.parse(
-                        minimal("seed:\n  a.t1: { rows: 1 }\n  b.t2: { rows: 2 }\nsteps:\n  - run\n"));
+                EnvelopeParser.parse(minimal("seed:\n  a.t1: { rows: 1 }\n  b.t2: { rows: 2 }\nsteps:\n  - start\n"));
 
         assertThat(envelope.seed())
-                .containsExactly(
-                        new Seed(new TableAlias("a", "t1"), 1L), new Seed(new TableAlias("b", "t2"), 2L));
+                .containsExactly(new Seed(new TableAlias("a", "t1"), 1L), new Seed(new TableAlias("b", "t2"), 2L));
+    }
+
+    @Test
+    void keepsCountEntriesInDeclarationOrderSoEndpointsAreReadAsWritten() {
+        Envelope envelope =
+                EnvelopeParser.parse(
+                        minimal("steps:\n  - assert: { count: { c.t: 3, a.t: 1, b.t: 2 } }\n"));
+
+        Matcher.Count count = (Matcher.Count) ((Step.Assertion) envelope.steps().get(0)).matcher();
+        assertThat(count.expected().keySet())
+                .containsExactly(new TableAlias("c", "t"), new TableAlias("a", "t"), new TableAlias("b", "t"));
     }
 
     @Test
     void rejectsMalformedYaml() {
-        assertThatThrownBy(() -> EnvelopeParser.parse("name: [unclosed\n"))
+        assertThatThrownBy(() -> EnvelopeParser.parse("name: [unclosed\n")).isInstanceOf(EnvelopeException.class);
+    }
+
+    @Test
+    void rejectsADuplicateKeyRatherThanSilentlyKeepingTheLast() {
+        assertThatThrownBy(
+                        () -> EnvelopeParser.parse(minimal("steps:\n  - await: { count: { t.orders: 100, t.orders: 110 } }\n")))
                 .isInstanceOf(EnvelopeException.class);
+    }
+
+    @Test
+    void rejectsADuplicateTopLevelKey() {
+        assertThatThrownBy(() -> EnvelopeParser.parse("name: first\nname: second\ntier: smoke\npipeline: p.cyn.yml\nsteps:\n  - start\n"))
+                .isInstanceOf(EnvelopeException.class);
+    }
+
+    @Test
+    void rejectsAnEmptyCountThatWouldAssertNothing() {
+        assertThatThrownBy(() -> EnvelopeParser.parse(minimal("steps:\n  - assert: { count: {} }\n")))
+                .isInstanceOf(EnvelopeException.class)
+                .hasMessageContaining("count");
+    }
+
+    @Test
+    void rejectsAnEnvelopeWithNoStepsThatWouldTestNothing() {
+        assertThatThrownBy(() -> EnvelopeParser.parse("name: n\ntier: smoke\npipeline: p.cyn.yml\n"))
+                .isInstanceOf(EnvelopeException.class)
+                .hasMessageContaining("steps");
+        assertThatThrownBy(() -> EnvelopeParser.parse(minimal("steps: []\n")))
+                .isInstanceOf(EnvelopeException.class)
+                .hasMessageContaining("steps");
+    }
+
+    @Test
+    void rejectsAFractionalRowCountRatherThanTruncatingIt() {
+        assertThatThrownBy(() -> EnvelopeParser.parse(minimal("seed:\n  t.o: { rows: 3.9 }\nsteps:\n  - start\n")))
+                .isInstanceOf(EnvelopeException.class)
+                .hasMessageContaining("3.9");
+    }
+
+    @Test
+    void rejectsNegativeRowCounts() {
+        assertThatThrownBy(() -> EnvelopeParser.parse(minimal("seed:\n  t.o: { rows: -5 }\nsteps:\n  - start\n")))
+                .isInstanceOf(EnvelopeException.class)
+                .hasMessageContaining("-5");
+        assertThatThrownBy(() -> EnvelopeParser.parse(minimal("steps:\n  - cdc: { t.o: insert -5 }\n")))
+                .isInstanceOf(EnvelopeException.class)
+                .hasMessageContaining("-5");
+        assertThatThrownBy(() -> EnvelopeParser.parse(minimal("steps:\n  - assert: { count: { t.o: -5 } }\n")))
+                .isInstanceOf(EnvelopeException.class)
+                .hasMessageContaining("-5");
+    }
+
+    @Test
+    void readsACdcRowCountBeyondIntRange() {
+        Envelope envelope = EnvelopeParser.parse(minimal("steps:\n  - cdc: { t.o: insert 5000000000 }\n"));
+
+        assertThat(envelope.steps())
+                .containsExactly(new Step.Cdc(new TableAlias("t", "o"), CdcOp.INSERT, 5_000_000_000L));
+    }
+
+    @Test
+    void namesAKeyThatYamlDidNotResolveToAString() {
+        assertThatThrownBy(() -> EnvelopeParser.parse(minimal("steps:\n  - await: { count: { t.o: 1 } }\non: 1\n")))
+                .isInstanceOf(EnvelopeException.class)
+                .hasMessageContaining("true");
+    }
+
+    @Test
+    void rejectsAStepCarryingMoreThanOneVerb() {
+        assertThatThrownBy(
+                        () -> EnvelopeParser.parse(minimal("steps:\n  - { await: { count: { t.o: 1 } }, assert: { count: { t.o: 1 } } }\n")))
+                .isInstanceOf(EnvelopeException.class);
+    }
+
+    @Test
+    void holdsTheStepsListImmutable() {
+        Envelope envelope = EnvelopeParser.parse(FIRST_EXAMPLE);
+
+        assertThat(envelope.steps()).isUnmodifiable();
+        assertThat(envelope.seed()).isUnmodifiable();
     }
 
     private static String minimal(String body) {
@@ -198,14 +292,6 @@ class EnvelopeParserTest {
     }
 
     private static String tier(String tier) {
-        return "name: n\ntier: " + tier + "\npipeline: p.cyn.yml\nsteps:\n  - run\n";
-    }
-
-    @Test
-    void exposesTheStepsInAStableList() {
-        Envelope envelope = EnvelopeParser.parse(FIRST_EXAMPLE);
-
-        assertThat(envelope.steps()).hasSize(7);
-        assertThat(List.copyOf(envelope.steps())).isEqualTo(envelope.steps());
+        return "name: n\ntier: " + tier + "\npipeline: p.cyn.yml\nsteps:\n  - start\n";
     }
 }

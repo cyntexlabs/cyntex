@@ -30,7 +30,7 @@ public interface TierBinding {
     void drive(String pipelineId, LifecycleVerb verb);
 
     /** Produces changes against a table while the pipeline runs. */
-    void cdc(TableAlias table, CdcOp op, int rows);
+    void cdc(TableAlias table, CdcOp op, long rows);
 
     /** Reads the current row count from the endpoint that owns the table. */
     long count(TableAlias table);

@@ -2,6 +2,8 @@ package io.cyntex.e2e;
 
 import io.cyntex.core.lifecycle.PipelineState;
 
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
@@ -15,25 +17,28 @@ import java.util.Map;
  */
 public sealed interface Matcher {
 
-    /** Row counts per table, read from the target endpoint itself. */
+    /**
+     * Row counts per table, read from the target endpoint itself. Declaration order is preserved,
+     * so the endpoints are read in the order written and a failure reads the same way twice.
+     */
     record Count(Map<TableAlias, Long> expected) implements Matcher {
         public Count {
-            expected = Map.copyOf(expected);
+            expected = Collections.unmodifiableMap(new LinkedHashMap<>(expected));
         }
     }
 
-    /** Lifecycle state per pipeline, read from the published observation. */
-    record State(Map<String, PipelineState> expected) implements Matcher {
-        public State {
-            expected = Map.copyOf(expected);
-        }
-    }
+    /**
+     * The lifecycle state of the pipeline this specification names. A specification references
+     * exactly one pipeline, and the executor already resolves its id through the product's parser,
+     * so naming it again here would only be an id to copy by hand and get wrong.
+     */
+    record State(PipelineState expected) implements Matcher {}
 
     static Matcher count(TableAlias table, long rows) {
         return new Count(Map.of(table, rows));
     }
 
-    static Matcher state(String pipelineId, PipelineState state) {
-        return new State(Map.of(pipelineId, state));
+    static Matcher state(PipelineState expected) {
+        return new State(expected);
     }
 }

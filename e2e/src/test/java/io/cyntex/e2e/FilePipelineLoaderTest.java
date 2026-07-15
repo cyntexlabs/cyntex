@@ -29,6 +29,15 @@ class FilePipelineLoaderTest {
                 - { source: tgt_mongo, write_mode: upsert }
             """;
 
+    private static final String SOURCE =
+            """
+            version: cyntex/v1
+            kind: source
+            id: src_mongo
+            connector: mongodb
+            config: { uri: "mongodb://127.0.0.1:27017/demo" }
+            """;
+
     @TempDir Path workspace;
 
     @Test
@@ -41,21 +50,14 @@ class FilePipelineLoaderTest {
     }
 
     @Test
-    void rejectsAReferenceToAResourceThatIsNotAPipeline() throws IOException {
-        write(
-                "src_mongo.cyn.yml",
-                """
-                version: cyntex/v1
-                kind: source
-                id: src_mongo
-                connector: mongodb
-                config: { uri: "mongodb://127.0.0.1:27017/demo" }
-                """);
+    void namesTheKindItFoundWhenTheReferenceIsNotAPipeline() throws IOException {
+        write("src_mongo.cyn.yml", SOURCE);
 
         assertThatThrownBy(() -> new FilePipelineLoader(workspace).resolvePipelineId("src_mongo.cyn.yml"))
                 .isInstanceOf(EnvelopeException.class)
-                .hasMessageContaining("src_mongo.cyn.yml")
-                .hasMessageContaining("pipeline");
+                // The kind is the computed part: asserting only the boilerplate would pass even if
+                // the parser reported no kind at all.
+                .hasMessage("src_mongo.cyn.yml must declare a pipeline, found kind: source");
     }
 
     @Test
@@ -66,12 +68,16 @@ class FilePipelineLoaderTest {
     }
 
     @Test
-    void surfacesAProductParseFailureAgainstTheReferencedFile() throws IOException {
+    void carriesTheProductDiagnosticIntoTheAuthoringError() throws IOException {
         write("broken.cyn.yml", "version: cyntex/v1\nkind: pipeline\nid: broken\nnonsense: true\n");
 
         assertThatThrownBy(() -> new FilePipelineLoader(workspace).resolvePipelineId("broken.cyn.yml"))
                 .isInstanceOf(EnvelopeException.class)
-                .hasMessageContaining("broken.cyn.yml");
+                .hasMessageContaining("broken.cyn.yml does not parse")
+                // The product's own coded diagnostic must survive into the message, otherwise the
+                // author is told only that something, somewhere, is wrong.
+                .hasMessageContaining("dsl.unknown-field")
+                .hasMessageContaining("nonsense");
     }
 
     private void write(String name, String content) throws IOException {
