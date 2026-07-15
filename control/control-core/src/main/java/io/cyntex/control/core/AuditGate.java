@@ -5,6 +5,7 @@ import io.cyntex.spi.store.AuditRecord;
 import io.cyntex.spi.store.AuditStore;
 
 import java.time.Clock;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.function.Supplier;
@@ -38,15 +39,33 @@ public final class AuditGate {
      * never runs. When {@code op} is not audited, {@code action} runs directly with no record.
      */
     public <T> T dispatch(Operation op, AuditContext ctx, Supplier<T> action) {
-        Objects.requireNonNull(op, "op");
         Objects.requireNonNull(ctx, "ctx");
+        return dispatchAll(op, List.of(ctx), action);
+    }
+
+    /**
+     * Runs {@code action} once under the audit gate for a batch that touches several resources. When
+     * {@code op} is audited, one record per context is written first — each resource the batch touches
+     * attributed by its own id — and only then does {@code action} run, once; a write failure on any of
+     * them refuses the whole batch ({@code control.audit-blocked}) and {@code action} never runs. An
+     * empty context list is a batch that touches nothing: it leaves no record and runs straight through,
+     * as does a non-audited operation.
+     *
+     * <p>The action stays a single call so a batch that lands as one atomic store write keeps that
+     * atomicity: the records fan out per resource, the effect does not.
+     */
+    public <T> T dispatchAll(Operation op, List<AuditContext> contexts, Supplier<T> action) {
+        Objects.requireNonNull(op, "op");
+        Objects.requireNonNull(contexts, "contexts");
         Objects.requireNonNull(action, "action");
         if (op.audited()) {
-            AuditRecord record = new AuditRecord(clock.instant(), ctx.principal(), op.id(), ctx.resourceId());
-            try {
-                auditStore.record(record);
-            } catch (RuntimeException cause) {
-                throw new CyntexException(ControlError.AUDIT_BLOCKED, Map.of("op", op.id()), cause);
+            for (AuditContext ctx : contexts) {
+                AuditRecord record = new AuditRecord(clock.instant(), ctx.principal(), op.id(), ctx.resourceId());
+                try {
+                    auditStore.record(record);
+                } catch (RuntimeException cause) {
+                    throw new CyntexException(ControlError.AUDIT_BLOCKED, Map.of("op", op.id()), cause);
+                }
             }
         }
         return action.get();

@@ -426,8 +426,8 @@ class PipelineApiTest {
         }
 
         @Bean
-        ApplyService applyService(ArtifactStore store) {
-            return new ApplyService(CyntexCatalog::load, store);
+        ApplyService applyService(ArtifactStore store, AuditGate auditGate) {
+            return new ApplyService(CyntexCatalog::load, store, auditGate);
         }
 
         @Bean

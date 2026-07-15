@@ -9,6 +9,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestAttribute;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -34,12 +35,13 @@ class ArtifactController {
 
     @Verb("artifact.apply")
     @PostMapping("/artifacts:apply")
-    ApplyResult apply(@RequestBody ApplyRequest request) {
+    ApplyResult apply(@RequestBody ApplyRequest request,
+                      @RequestAttribute(AuthInterceptor.PRINCIPAL_ATTRIBUTE) String principal) {
         // Refuse a body with no drafts array at the boundary as a coded 400, rather than letting a null trip
         // the service's bare invariant guard (a 500). A missing body is already a framework-level 400 upstream.
         List<ArtifactDraft> drafts = MalformedRequest.require(
                 request == null ? null : request.drafts(), "the request must carry a `drafts` array");
-        return applyService.apply(drafts);
+        return applyService.apply(principal, drafts);
     }
 
     @Verb("artifact.get")

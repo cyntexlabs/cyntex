@@ -9,9 +9,15 @@ import io.cyntex.core.dsl.DslParser;
 import io.cyntex.core.model.Resource;
 import io.cyntex.core.model.canonical.CanonicalHash;
 import io.cyntex.core.model.canonical.CanonicalWriter;
+import io.cyntex.core.common.CyntexException;
 import io.cyntex.spi.store.ArtifactStore;
+import io.cyntex.spi.store.AuditRecord;
+import io.cyntex.spi.store.AuditStore;
 import org.junit.jupiter.api.Test;
 
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -34,8 +40,30 @@ import static org.assertj.core.api.Assertions.catchThrowable;
  */
 class ApplyServiceTest {
 
+    private static final Clock FIXED_CLOCK = Clock.fixed(Instant.parse("2026-07-15T10:15:30Z"), ZoneOffset.UTC);
+
     private final RecordingArtifactStore store = new RecordingArtifactStore();
-    private final ApplyService service = new ApplyService(CyntexCatalog::load, store);
+    private final RecordingAuditStore auditStore = new RecordingAuditStore();
+    private final ApplyService service =
+            new ApplyService(CyntexCatalog::load, store, new AuditGate(auditStore, FIXED_CLOCK));
+
+    /** An audit store that captures every record it is asked to write. */
+    private static final class RecordingAuditStore implements AuditStore {
+        final List<AuditRecord> records = new ArrayList<>();
+
+        @Override
+        public void record(AuditRecord record) {
+            records.add(record);
+        }
+    }
+
+    /** An audit store that always fails, standing in for an unavailable audit backend. */
+    private static final class FailingAuditStore implements AuditStore {
+        @Override
+        public void record(AuditRecord record) {
+            throw new IllegalStateException("audit backend down");
+        }
+    }
 
     // A guaranteed-valid mysql source used as a pure connection (X18 dual-role: no mode / tables).
     private static final String TGT_MY = """
@@ -158,7 +186,7 @@ class ApplyServiceTest {
         List<ConnectorCatalogEntry> registered = new ArrayList<>();
         registered.add(CatalogEntryReader.read(acmeRow("cdc")));
         Supplier<CyntexCatalog> live = () -> CyntexCatalog.merged(CyntexCatalog.load(), List.copyOf(registered));
-        ApplyService liveService = new ApplyService(live, store);
+        ApplyService liveService = new ApplyService(live, store, new AuditGate(auditStore, FIXED_CLOCK));
 
         assertThatCode(() -> liveService.plan(List.of(draft(ACME_CDC_SOURCE)))).doesNotThrowAnyException();
 
@@ -242,13 +270,13 @@ class ApplyServiceTest {
 
     @Test
     void aNullCatalogIsRejected() {
-        assertThatThrownBy(() -> new ApplyService(null, store))
+        assertThatThrownBy(() -> new ApplyService(null, store, new AuditGate(auditStore, FIXED_CLOCK)))
                 .isInstanceOf(NullPointerException.class);
     }
 
     @Test
     void aNullStoreIsRejected() {
-        assertThatThrownBy(() -> new ApplyService(CyntexCatalog::load, null))
+        assertThatThrownBy(() -> new ApplyService(CyntexCatalog::load, null, new AuditGate(auditStore, FIXED_CLOCK)))
                 .isInstanceOf(NullPointerException.class);
     }
 
@@ -256,7 +284,7 @@ class ApplyServiceTest {
 
     @Test
     void applyToAnEmptyStoreCreatesTheResourceAndWritesOnce() {
-        ApplyResult result = service.apply(List.of(draft(TGT_MY)));
+        ApplyResult result = service.apply("alice", List.of(draft(TGT_MY)));
 
         assertThat(result.outcomes()).singleElement().satisfies(o -> {
             assertThat(o.id()).isEqualTo("tgt_my");
@@ -272,9 +300,9 @@ class ApplyServiceTest {
     void reapplyingIdenticalContentIsANoOpAndDoesNotWrite() {
         // The core no-op guarantee: applying the same resource twice writes only once; the second apply
         // reads the stored artifact, finds an equal content hash, and skips the store write.
-        service.apply(List.of(draft(TGT_MY)));
+        service.apply("alice", List.of(draft(TGT_MY)));
 
-        ApplyResult second = service.apply(List.of(draft(TGT_MY)));
+        ApplyResult second = service.apply("alice", List.of(draft(TGT_MY)));
 
         assertThat(second.outcomes()).singleElement()
                 .extracting(ArtifactOutcome::change).isEqualTo(ArtifactOutcome.Change.UNCHANGED);
@@ -292,9 +320,9 @@ class ApplyServiceTest {
                 connector: mysql
                 config: { password: My_2026, username: writer, host: 10.30.0.5 }
                 """;
-        service.apply(List.of(draft(TGT_MY)));
+        service.apply("alice", List.of(draft(TGT_MY)));
 
-        ApplyResult second = service.apply(List.of(draft(reordered)));
+        ApplyResult second = service.apply("alice", List.of(draft(reordered)));
 
         assertThat(second.outcomes()).singleElement()
                 .extracting(ArtifactOutcome::change).isEqualTo(ArtifactOutcome.Change.UNCHANGED);
@@ -310,9 +338,9 @@ class ApplyServiceTest {
                 connector: mysql
                 config: { host: 10.30.0.5, username: writer, password: Changed_2026 }
                 """;
-        service.apply(List.of(draft(TGT_MY)));
+        service.apply("alice", List.of(draft(TGT_MY)));
 
-        ApplyResult second = service.apply(List.of(draft(changed)));
+        ApplyResult second = service.apply("alice", List.of(draft(changed)));
 
         assertThat(second.outcomes()).singleElement()
                 .extracting(ArtifactOutcome::change).isEqualTo(ArtifactOutcome.Change.UPDATED);
@@ -324,7 +352,7 @@ class ApplyServiceTest {
 
     @Test
     void aMultiResourceBatchUpsertsEachByIdInSubmissionOrder() {
-        ApplyResult result = service.apply(List.of(draft(SRC_ORA), draft(PIPELINE), draft(TGT_MY)));
+        ApplyResult result = service.apply("alice", List.of(draft(SRC_ORA), draft(PIPELINE), draft(TGT_MY)));
 
         assertThat(result.outcomes()).extracting(ArtifactOutcome::id)
                 .containsExactly("src_ora", "ora2my_ods", "tgt_my");
@@ -337,10 +365,10 @@ class ApplyServiceTest {
     void aMixedBatchWritesOnlyTheChangedAndNewResources() {
         // Seed tgt_my. Then apply a batch of [tgt_my unchanged, src_ora new]: only the new resource is
         // written — the no-op is decided per artifact, not per batch.
-        service.apply(List.of(draft(TGT_MY)));
+        service.apply("alice", List.of(draft(TGT_MY)));
         assertThat(store.saveCount).isEqualTo(1);
 
-        ApplyResult result = service.apply(List.of(draft(TGT_MY), draft(SRC_ORA_STANDALONE)));
+        ApplyResult result = service.apply("alice", List.of(draft(TGT_MY), draft(SRC_ORA_STANDALONE)));
 
         assertThat(result.outcomes()).extracting(ArtifactOutcome::id).containsExactly("tgt_my", "src_ora");
         assertThat(result.outcomes()).extracting(ArtifactOutcome::change)
@@ -355,7 +383,7 @@ class ApplyServiceTest {
         // write-failure half is asserted by aWriteFailureMidBatchLeavesTheStoreUnchanged.
         String bad = TGT_MY + "bogus_field: 1\n";
 
-        Throwable t = catchThrowable(() -> service.apply(List.of(draft(SRC_ORA), draft(bad))));
+        Throwable t = catchThrowable(() -> service.apply("alice", List.of(draft(SRC_ORA), draft(bad))));
 
         assertThat(t).isInstanceOf(DslException.class);
         assertThat(store.saveCount).as("a validation failure writes nothing").isZero();
@@ -371,7 +399,7 @@ class ApplyServiceTest {
         // rolls the batch back and nothing is stored — not even the first, earlier-ordered resource.
         store.failOnId = "tgt_my";
 
-        Throwable t = catchThrowable(() -> service.apply(List.of(draft(SRC_ORA), draft(TGT_MY))));
+        Throwable t = catchThrowable(() -> service.apply("alice", List.of(draft(SRC_ORA), draft(TGT_MY))));
 
         assertThat(t).isInstanceOf(RuntimeException.class);
         assertThat(store.get("src_ora")).as("the earlier-ordered write is rolled back, not left partial").isEmpty();
@@ -383,18 +411,82 @@ class ApplyServiceTest {
     void applyWritesTheChangedSetAsOneAtomicBatch() {
         // Two new resources in one apply are written as a single atomic batch, not one write per
         // artifact: the store records exactly one batch carrying both ids in submission order.
-        service.apply(List.of(draft(SRC_ORA), draft(TGT_MY)));
+        service.apply("alice", List.of(draft(SRC_ORA), draft(TGT_MY)));
 
         assertThat(store.saveAllBatches).containsExactly(List.of("src_ora", "tgt_my"));
+    }
+
+    // ---- no audit, no execute: apply is an audited write and leaves a record per changed artifact ----
+
+    @Test
+    void applyRecordsOneAuditEntryPerChangedArtifactAttributedToItsOwnId() {
+        // artifact.apply is a registered audited verb, so the write must leave an audit record — and the
+        // record's resourceId names the artifact it changed, so the log answers "who changed which one".
+        service.apply("alice", List.of(draft(SRC_ORA), draft(TGT_MY)));
+
+        assertThat(auditStore.records).hasSize(2);
+        assertThat(auditStore.records).allSatisfy(record -> {
+            assertThat(record.operationId()).isEqualTo("artifact.apply");
+            assertThat(record.principal()).isEqualTo("alice");
+        });
+        assertThat(auditStore.records).extracting(AuditRecord::resourceId)
+                .containsExactly("src_ora", "tgt_my");
+    }
+
+    @Test
+    void applyRecordsNoAuditEntryForAnUnchangedArtifact() {
+        // The no-op changes nothing, so it is not an auditable effect: re-applying identical content
+        // leaves no second record, exactly as it performs no second write.
+        service.apply("alice", List.of(draft(TGT_MY)));
+        assertThat(auditStore.records).hasSize(1);
+
+        service.apply("alice", List.of(draft(TGT_MY)));
+
+        assertThat(auditStore.records)
+                .as("a no-op apply mutates nothing and so records nothing")
+                .hasSize(1);
+    }
+
+    @Test
+    void aMixedBatchRecordsOnlyTheChangedArtifacts() {
+        service.apply("alice", List.of(draft(TGT_MY)));
+        auditStore.records.clear();
+
+        service.apply("alice", List.of(draft(TGT_MY), draft(SRC_ORA_STANDALONE)));
+
+        assertThat(auditStore.records).extracting(AuditRecord::resourceId)
+                .as("the audit log mirrors the write batch — only what actually changed")
+                .containsExactly("src_ora");
+    }
+
+    @Test
+    void anAuditWriteFailureRefusesTheApplyAndLeavesTheStoreUntouched() {
+        // No audit, no execute: if the record cannot be written the apply is refused with a coded
+        // control.audit-blocked and nothing reaches the artifact store.
+        ApplyService refusing = new ApplyService(
+                CyntexCatalog::load, store, new AuditGate(new FailingAuditStore(), FIXED_CLOCK));
+
+        Throwable t = catchThrowable(() -> refusing.apply("alice", List.of(draft(TGT_MY))));
+
+        assertThat(t).isInstanceOf(CyntexException.class);
+        assertThat(((CyntexException) t).code()).isEqualTo(ControlError.AUDIT_BLOCKED);
+        assertThat(store.saveCount).as("an unaudited apply does not execute").isZero();
+        assertThat(store.get("tgt_my")).isEmpty();
+    }
+
+    @Test
+    void aNullAuditGateIsRejected() {
+        assertThatThrownBy(() -> new ApplyService(CyntexCatalog::load, store, null))
+                .isInstanceOf(NullPointerException.class);
     }
 
     @Test
     void applyExcludesUnchangedResourcesFromTheWriteBatch() {
         // Seed tgt_my, then apply [tgt_my unchanged, src_ora new]: the one atomic batch carries only the
         // new resource — the unchanged one is not rewritten.
-        service.apply(List.of(draft(TGT_MY)));
+        service.apply("alice", List.of(draft(TGT_MY)));
 
-        service.apply(List.of(draft(TGT_MY), draft(SRC_ORA_STANDALONE)));
+        service.apply("alice", List.of(draft(TGT_MY), draft(SRC_ORA_STANDALONE)));
 
         assertThat(store.saveAllBatches).containsExactly(List.of("tgt_my"), List.of("src_ora"));
     }
@@ -403,10 +495,10 @@ class ApplyServiceTest {
     void anAllNoOpBatchPerformsNoWrite() {
         // A batch whose every member is unchanged writes nothing: the changed set is empty, so the one
         // atomic batch apply performs carries no resources.
-        service.apply(List.of(draft(SRC_ORA), draft(TGT_MY)));
+        service.apply("alice", List.of(draft(SRC_ORA), draft(TGT_MY)));
         int writesAfterSeed = store.saveCount;
 
-        ApplyResult result = service.apply(List.of(draft(SRC_ORA), draft(TGT_MY)));
+        ApplyResult result = service.apply("alice", List.of(draft(SRC_ORA), draft(TGT_MY)));
 
         assertThat(result.outcomes()).extracting(ArtifactOutcome::change)
                 .containsOnly(ArtifactOutcome.Change.UNCHANGED);
