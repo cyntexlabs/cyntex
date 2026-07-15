@@ -2,6 +2,8 @@ package io.cyntex.e2e;
 
 import io.cyntex.core.common.JsonReader;
 import io.cyntex.core.common.JsonWriter;
+import io.cyntex.core.lifecycle.LifecycleVerb;
+import io.cyntex.core.lifecycle.PipelineState;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -11,6 +13,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 
@@ -65,10 +68,17 @@ final class ControlPlane {
         credential = token;
     }
 
-    /** Applies one resource document, named by the file it came from. */
-    void apply(String source, String content) {
-        String body = JsonWriter.write(Map.of("drafts", List.of(Map.of("source", source, "content", content))));
-        expect(send(authed("/api/artifacts:apply", body)), 200, "apply " + source);
+    /**
+     * Applies resource documents as one batch, each named by the file it came from. One call, not one
+     * per file: the product resolves references within the submitted set, so resources that name each
+     * other have to be submitted together.
+     */
+    void apply(Map<String, String> contentBySource) {
+        List<Map<String, String>> drafts = contentBySource.entrySet().stream()
+                .map(entry -> Map.of("source", entry.getKey(), "content", entry.getValue()))
+                .toList();
+        String body = JsonWriter.write(Map.of("drafts", drafts));
+        expect(send(authed("/api/artifacts:apply", body)), 200, "apply " + contentBySource.keySet());
     }
 
     /** The ids the server holds - read back from the server, which is the truth, not from the files sent. */
@@ -83,6 +93,42 @@ final class ControlPlane {
                 .map(each -> each instanceof Map<?, ?> m ? m.get("id") : null)
                 .map(String::valueOf)
                 .toList();
+    }
+
+    /** Registers a connector's runtime jar; the product makes this idempotent by content hash. */
+    void registerConnector(String connectorId, byte[] jar) {
+        String body = JsonWriter.write(Map.of("artifact", Base64.getEncoder().encodeToString(jar)));
+        expect(send(authed("/api/connectors:register", body)), 200, "register the " + connectorId + " connector");
+    }
+
+    /** Discovers a source's model, which is what a target table is later derived from. */
+    void discoverSchema(String resourceId, String connectorId, Map<String, Object> settings) {
+        String body = JsonWriter.write(
+                Map.of("id", resourceId, "connectorId", connectorId, "settings", settings));
+        expect(send(authed("/api/connections:discover-schema", body)), 200, "discover the model of " + resourceId);
+    }
+
+    /**
+     * Records a lifecycle intent. The verb's own spelling comes from the product's enum, so the wire
+     * word cannot drift from the word the product accepts.
+     */
+    void lifecycle(String pipelineId, LifecycleVerb verb) {
+        expect(send(authed("/api/pipelines/" + pipelineId + ":" + verb.id(), "")),
+                200, verb.id() + " " + pipelineId);
+    }
+
+    /**
+     * The published lifecycle state. Before the first convergence pass there is no observation at all,
+     * and the product says so with a coded 404; reporting that as some state would invent a reading.
+     */
+    PipelineState state(String pipelineId) {
+        HttpResponse<String> response = send(authedGet("/api/pipelines/" + pipelineId + "/status"));
+        expect(response, 200, "read the status of " + pipelineId);
+        if (!(JsonReader.parse(response.body()) instanceof Map<?, ?> map)
+                || !(map.get("state") instanceof String state)) {
+            throw new AssertionError("status carried no state: " + response.body());
+        }
+        return PipelineState.valueOf(state);
     }
 
     private HttpRequest get(String path) {

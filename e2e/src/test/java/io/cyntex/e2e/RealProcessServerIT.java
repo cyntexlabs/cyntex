@@ -3,6 +3,8 @@ package io.cyntex.e2e;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
+import java.util.Map;
+
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
@@ -38,7 +40,7 @@ class RealProcessServerIT {
             assertThat(control.healthy()).isTrue();
 
             control.bootstrapAndLogin("e2e", "e2e-password");
-            control.apply("e2e_probe.cyn.yml", SOURCE);
+            control.apply(Map.of("e2e_probe.cyn.yml", SOURCE));
 
             assertThat(control.artifactIds()).contains("e2e_probe");
         }

@@ -3,6 +3,8 @@ package io.cyntex.e2e;
 import io.cyntex.core.lifecycle.LifecycleVerb;
 import io.cyntex.core.lifecycle.PipelineState;
 
+import java.util.List;
+
 /**
  * How one tier reaches the product under test. The same specification runs on every binding, so
  * this is the whole fidelity axis: an in-process binding boots the product inside this JVM, a
@@ -17,8 +19,15 @@ public interface TierBinding {
     /** Registers a connector's runtime jar; idempotent by content hash. */
     void registerConnector(String connectorId);
 
-    /** Applies one product resource file, by path relative to the specification. */
-    void applyResource(String resourceFile);
+    /**
+     * Applies product resource files, by path relative to the specification, as one batch.
+     *
+     * <p>The batch is deliberate, not a convenience: the product resolves references within the set
+     * submitted together, so a pipeline and the source it names by id must arrive in the same apply
+     * or the reference points at nothing. Applying them one at a time would fail on the product's own
+     * contract, so the seam takes the list the specification wrote.
+     */
+    void applyResources(List<String> resourceFiles);
 
     /** Discovers and persists a source model, feeding target-table creation. */
     void discoverSchema(String resourceId);

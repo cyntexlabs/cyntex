@@ -1,10 +1,14 @@
 # Minimal CI: the merge-blocking build gate.
-#   mvn verify — compile + unit tests + enforcer rules + ArchUnit ring rules
+#   mvn verify — compile + unit tests + enforcer rules + ArchUnit ring rules + specifications
 # Docs frontmatter validation (gen-index --check) lives with the docs in the
 # separate private repo and is not run here. The zero-agent-footprint gate is a
 # separate workflow (no-agent-footprint.yml).
-# Deliberately excluded for now: native-image build (pinned to local darwin-arm64 until D5),
-# connector catalog, e2e.
+# Specifications (e2e/*IT) run here against real containers: this runner has a Docker daemon, and
+# the e2e module fails rather than skips when one is missing, so a green build here means they ran.
+# On a developer machine they skip instead — and note Docker 29 rejects the API version the client
+# negotiates by default, so running them locally needs -Dapi.version=1.44.
+# Deliberately excluded for now: native-image build (pinned to local darwin-arm64 until D5) and the
+# connector catalog.
 name: CI
 
 on:

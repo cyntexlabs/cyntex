@@ -43,10 +43,18 @@ public final class E2eExecutor {
         }
     }
 
-    /** Strict order: a resource may not be applied before the connector it names is registered. */
+    /**
+     * Strict order: a resource may not be applied before the connector it names is registered, and a
+     * model may not be discovered before the source declaring it exists. The resources themselves go in
+     * one batch, because that is the closure the product resolves references within.
+     */
     private void provision(Setup setup) {
         setup.connectors().forEach(binding::registerConnector);
-        setup.apply().forEach(binding::applyResource);
+        if (!setup.apply().isEmpty()) {
+            // A specification that applies nothing gets no apply: an empty batch would be a round trip
+            // that asks the product for nothing.
+            binding.applyResources(setup.apply());
+        }
         setup.discover().forEach(binding::discoverSchema);
     }
 

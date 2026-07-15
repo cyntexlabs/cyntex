@@ -47,8 +47,9 @@ class E2eExecutorTest {
         assertThat(binding.calls)
                 .containsExactly(
                         "register:mongodb",
-                        "apply:src_mongo.cyn.yml",
-                        "apply:tgt_mongo.cyn.yml",
+                        // One apply, not one per file: the product resolves references within the set
+                        // submitted together, so a pipeline and its source must arrive in the same batch.
+                        "apply:[src_mongo.cyn.yml, tgt_mongo.cyn.yml]",
                         "discover:src_mongo",
                         "seed:src_mongo.orders=3",
                         "drive:START");
@@ -213,8 +214,8 @@ class E2eExecutorTest {
         }
 
         @Override
-        public void applyResource(String resourceFile) {
-            calls.add("apply:" + resourceFile);
+        public void applyResources(List<String> resourceFiles) {
+            calls.add("apply:" + resourceFiles);
         }
 
         @Override
