@@ -45,9 +45,11 @@ dsl.forbidden-field
 dsl.illegal-expression
 dsl.illegal-value
 dsl.invalid-config-value
+dsl.malformed-interpolation
 dsl.malformed-yaml
 dsl.missing-reference
 dsl.mode-mismatch
+dsl.undefined-variable
 dsl.unknown-field
 dsl.unsupported-mode
 engine.no-such-job

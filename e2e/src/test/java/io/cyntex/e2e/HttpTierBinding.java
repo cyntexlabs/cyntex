@@ -2,6 +2,7 @@ package io.cyntex.e2e;
 
 import io.cyntex.core.dsl.DslException;
 import io.cyntex.core.dsl.DslParser;
+import io.cyntex.core.dsl.Interpolator;
 import io.cyntex.core.lifecycle.LifecycleVerb;
 import io.cyntex.core.lifecycle.PipelineState;
 import io.cyntex.core.model.Resource;
@@ -14,6 +15,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.function.UnaryOperator;
 
 /**
  * Binds a specification to a running product over its HTTP surface.
@@ -37,10 +39,20 @@ final class HttpTierBinding implements TierBinding {
     private final MongoEndpoints endpoints;
     private final Map<String, SourceResource> sourcesById = new LinkedHashMap<>();
 
-    HttpTierBinding(ControlPlane control, Path workspace, MongoEndpoints endpoints) {
+    /**
+     * What a specification's {@code ${...}} references resolve to. The harness is the client here, and
+     * the client is the side that interpolates, so the values are the harness's own to supply — which is
+     * what lets a checked-in resource name an endpoint whose address is only known once a container is
+     * up. It also works identically on both tiers: an in-process server shares this JVM, whose real
+     * environment no test could set anyway.
+     */
+    private final UnaryOperator<String> env;
+
+    HttpTierBinding(ControlPlane control, Path workspace, MongoEndpoints endpoints, UnaryOperator<String> env) {
         this.control = control;
         this.workspace = workspace;
         this.endpoints = endpoints;
+        this.env = env;
     }
 
     @Override
@@ -126,11 +138,26 @@ final class HttpTierBinding implements TierBinding {
         return uri;
     }
 
+    /**
+     * Reads a resource and resolves its references, exactly as the CLI does before an apply — so what the
+     * product is handed here is what an author's own apply would hand it.
+     *
+     * <p>The resolved text is then used for both halves of the harness's job: it goes to the product, and
+     * it is what {@link #rememberEndpoint} reads the endpoint address out of. One substitution feeds both,
+     * so the address the harness dials cannot drift from the one the product was given.
+     */
     private String read(String resourceFile) {
+        String yaml;
         try {
-            return Files.readString(workspace.resolve(resourceFile));
+            yaml = Files.readString(workspace.resolve(resourceFile));
         } catch (IOException e) {
             throw new EnvelopeException("cannot read the resource referenced as " + resourceFile, e);
+        }
+        try {
+            return Interpolator.interpolate(yaml, env);
+        } catch (DslException e) {
+            throw new EnvelopeException(resourceFile + " has a reference that does not resolve: "
+                    + e.getMessage(), e);
         }
     }
 

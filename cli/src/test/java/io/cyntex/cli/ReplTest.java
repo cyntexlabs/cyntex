@@ -62,6 +62,17 @@ class ReplTest {
         return new Harness(new Repl(cl, workdir, controlPlane, prompter), sink);
     }
 
+    /** A harness whose interpolation environment is the given map rather than the real process's. */
+    private static Harness harness(Path workdir, ControlPlaneClient controlPlane, Prompter prompter,
+                                   Map<String, String> env) {
+        CommandLine cl = Cli.newCommandLine();
+        StringWriter sink = new StringWriter();
+        PrintWriter pw = new PrintWriter(sink);
+        cl.setOut(pw);
+        cl.setErr(pw);
+        return new Harness(new Repl(cl, workdir, controlPlane, prompter, env::get), sink);
+    }
+
     /**
      * A network-free stand-in that answers healthy only for the given base URLs and records probes. The
      * connected verbs return their canned outcome when the target base is healthy and {@link
@@ -96,6 +107,8 @@ class ReplTest {
         List<String> watchStates = List.of();
         List<List<RemoteLogLine>> followBatches = List.of();
         final List<String> applyCalls = new ArrayList<>();
+        /** The drafts each apply carried, kept whole: what reaches the wire is the thing under test. */
+        final List<List<LocalDraft>> appliedDrafts = new ArrayList<>();
         final List<String> getCalls = new ArrayList<>();
         final List<String> listCalls = new ArrayList<>();
         final List<String> testCalls = new ArrayList<>();
@@ -137,6 +150,7 @@ class ReplTest {
         @Override
         public ApplyOutcome apply(URI baseUrl, String credential, List<LocalDraft> drafts) {
             applyCalls.add(credential + "@" + baseUrl + " x" + drafts.size());
+            appliedDrafts.add(List.copyOf(drafts));
             return healthy.contains(baseUrl) ? applyOutcome : new ApplyOutcome.Unreachable();
         }
 
@@ -800,6 +814,15 @@ class ReplTest {
     private static Harness onlineSession(Path workdir, FakeControlPlane client) {
         client.loginOutcome = new LoginOutcome.Success("jwt-tok");
         Harness h = harness(workdir, client, new ScriptedPrompter("pw"));
+        h.repl().dispatch("connect node1:7900");
+        h.repl().dispatch("login alice");
+        return h;
+    }
+
+    /** An authenticated session whose interpolation reads {@code env} instead of the process environment. */
+    private static Harness onlineSession(Path workdir, FakeControlPlane client, Map<String, String> env) {
+        client.loginOutcome = new LoginOutcome.Success("jwt-tok");
+        Harness h = harness(workdir, client, new ScriptedPrompter("pw"), env);
         h.repl().dispatch("connect node1:7900");
         h.repl().dispatch("login alice");
         return h;
@@ -1859,6 +1882,43 @@ class ReplTest {
         // one apply call carrying the three ws-valid drafts to the landing node with the credential
         assertThat(client.applyCalls).hasSize(1);
         assertThat(client.applyCalls.get(0)).startsWith("jwt-tok@http://node1:7900 x3");
+    }
+
+    @Test
+    void applySubstitutesReferencesFromTheEnvironmentBeforeSendingTheDrafts(@TempDir Path base) throws Exception {
+        Files.createDirectory(base.resolve("source"));
+        Files.writeString(base.resolve("source").resolve("tgt.cyn.yml"),
+                "version: cyntex/v1\nkind: source\nid: tgt\nconnector: mongodb\n"
+                        + "config: { uri: \"${MONGO_URI}\" }\n");
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.applyOutcome = new ApplyOutcome.Applied(List.of(new ApplyOutcome.Item("tgt", "source", "CREATED")));
+        Harness h = onlineSession(base, client, Map.of("MONGO_URI", "mongodb://127.0.0.1:27017/demo"));
+
+        assertThat(h.repl().dispatch("apply")).isTrue();
+
+        // the value reaches the wire, not the reference: the server is handed a config it can dial
+        assertThat(client.appliedDrafts).hasSize(1);
+        String sent = client.appliedDrafts.get(0).get(0).content();
+        assertThat(sent).contains("mongodb://127.0.0.1:27017/demo").doesNotContain("${");
+    }
+
+    @Test
+    void applyRefusesAnUndefinedVariableAndSendsNothing(@TempDir Path base) throws Exception {
+        Files.createDirectory(base.resolve("source"));
+        Files.writeString(base.resolve("source").resolve("tgt.cyn.yml"),
+                "version: cyntex/v1\nkind: source\nid: tgt\nconnector: mongodb\n"
+                        + "config: { uri: \"${MONGO_URI}\" }\n");
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        Harness h = onlineSession(base, client, Map.of());
+        int mark = h.sink().toString().length();
+
+        assertThat(h.repl().dispatch("apply")).isTrue();
+
+        String out = h.sink().toString().substring(mark);
+        assertThat(out).contains("dsl.undefined-variable").contains("MONGO_URI").contains("tgt.cyn.yml");
+        // nothing left the client: a reference that cannot be resolved is not the server's problem to
+        // discover, and a literal ${...} on the wire would surface as a connector failure far from here
+        assertThat(client.applyCalls).isEmpty();
     }
 
     @Test

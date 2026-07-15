@@ -83,6 +83,12 @@ dsl.invalid-config-value:
 dsl.malformed-yaml:
   message: "Malformed YAML: {detail}."
   solution: "Fix the YAML syntax; the line and column point at the problem."
+dsl.undefined-variable:
+  message: "Variable '{name}' is not set, and the reference to it gives no default."
+  solution: "Set '{name}' in the environment you apply from, or give the reference a fallback with the ${var:NAME:default} form."
+dsl.malformed-interpolation:
+  message: "Reference '{ref}' is not a form the grammar defines."
+  solution: "A reference names a variable, as in ${var:NAME:default} for one with a fallback; a lone dollar sign is ordinary text."
 lifecycle.illegal-transition:
   message: "Cannot {verb} a pipeline in state {from}."
   solution: "Only certain actions are valid from each state; check the pipeline's current state first."

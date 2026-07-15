@@ -34,7 +34,11 @@ class DslErrorTest {
                 "dsl.config-type-mismatch",
                 "dsl.invalid-config-value",
                 // pre-semantic syntax error — no corpus witness (a syntax error cannot be well-formed)
-                "dsl.malformed-yaml");
+                "dsl.malformed-yaml",
+                // pre-semantic interpolation errors — no corpus witness either, since they are raised on
+                // raw text before the parse and turn on the environment, not on the document
+                "dsl.undefined-variable",
+                "dsl.malformed-interpolation");
     }
 
     @Test
@@ -56,6 +60,9 @@ class DslErrorTest {
                 .containsExactlyInAnyOrder("connector", "field", "value", "allowed", "path");
         // malformed-yaml is pre-semantic: it carries only the parser detail, no field path
         assertThat(DslError.MALFORMED_YAML.placeholders()).containsExactlyInAnyOrder("detail");
+        // the interpolation codes are pre-semantic too: the offending variable / reference, no field path
+        assertThat(DslError.UNDEFINED_VARIABLE.placeholders()).containsExactlyInAnyOrder("name");
+        assertThat(DslError.MALFORMED_INTERPOLATION.placeholders()).containsExactlyInAnyOrder("ref");
     }
 
     @Test

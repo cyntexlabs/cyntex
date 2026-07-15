@@ -10,7 +10,9 @@ import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.Map;
 import java.util.function.Function;
+import java.util.function.UnaryOperator;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -61,13 +63,13 @@ class TierBindingsIT {
     void theSameSpecificationRunsOnEveryTier(Tiers tier) {
         String database = "e2e_both_" + tier.name().toLowerCase();
         String endpointUri = SharedMongo.replicaSetUrl(database);
-        writeWorkspace(endpointUri);
+        writeWorkspace();
 
         try (ServerHandle server = tier.launcher.apply(SharedMongo.replicaSetUrl(database + "_store"));
                 MongoEndpoints endpoints = new MongoEndpoints()) {
             ControlPlane control = new ControlPlane(server.baseUrl());
             control.bootstrapAndLogin("e2e", "e2e-password");
-            HttpTierBinding binding = new HttpTierBinding(control, workspace, endpoints);
+            HttpTierBinding binding = new HttpTierBinding(control, workspace, endpoints, envFor(endpointUri));
 
             new E2eExecutor(binding, new FilePipelineLoader(workspace), TIMEOUT, POLL)
                     .execute(EnvelopeParser.parse(specification()));
@@ -85,13 +87,14 @@ class TierBindingsIT {
     @EnumSource(Tiers.class)
     void everyTierRefusesToReadAnEndpointTheSpecificationNeverApplied(Tiers tier) {
         String database = "e2e_unapplied_" + tier.name().toLowerCase();
-        writeWorkspace(SharedMongo.replicaSetUrl(database));
+        writeWorkspace();
 
         try (ServerHandle server = tier.launcher.apply(SharedMongo.replicaSetUrl(database + "_store"));
                 MongoEndpoints endpoints = new MongoEndpoints()) {
             ControlPlane control = new ControlPlane(server.baseUrl());
             control.bootstrapAndLogin("e2e", "e2e-password");
-            HttpTierBinding binding = new HttpTierBinding(control, workspace, endpoints);
+            HttpTierBinding binding = new HttpTierBinding(
+                    control, workspace, endpoints, envFor(SharedMongo.replicaSetUrl(database)));
 
             assertThatThrownBy(() -> binding.count(new TableAlias("never_applied", "orders")))
                     .isInstanceOf(EnvelopeException.class)
@@ -113,13 +116,14 @@ class TierBindingsIT {
     @EnumSource(Tiers.class)
     void awaitWaitsOutAPipelineThatHasPublishedNoObservation(Tiers tier) {
         String database = "e2e_unobserved_" + tier.name().toLowerCase();
-        writeWorkspace(SharedMongo.replicaSetUrl(database));
+        writeWorkspace();
 
         try (ServerHandle server = tier.launcher.apply(SharedMongo.replicaSetUrl(database + "_store"));
                 MongoEndpoints endpoints = new MongoEndpoints()) {
             ControlPlane control = new ControlPlane(server.baseUrl());
             control.bootstrapAndLogin("e2e", "e2e-password");
-            HttpTierBinding binding = new HttpTierBinding(control, workspace, endpoints);
+            HttpTierBinding binding = new HttpTierBinding(
+                    control, workspace, endpoints, envFor(SharedMongo.replicaSetUrl(database)));
 
             long start = System.nanoTime();
 
@@ -170,16 +174,17 @@ class TierBindingsIT {
                 """;
     }
 
-    private void writeWorkspace(String endpointUri) {
-        // The endpoint's address is only known once the container is up, so the resource carries the
-        // real URI rather than a placeholder: the product has no interpolation to resolve one.
+    private void writeWorkspace() {
+        // The endpoint's address is only known once the container is up, and the resource names it the
+        // way an author would: a ${...} reference the loading side resolves. What is checked in stays
+        // legal product DSL, and the address stays out of it.
         write("tgt_mongo.cyn.yml", """
                 version: cyntex/v1
                 kind: source
                 id: tgt_mongo
                 connector: mongodb
-                config: { uri: "%s" }
-                """.formatted(endpointUri));
+                config: { uri: "${MONGO_URI}" }
+                """);
         write("pipeline.cyn.yml", """
                 version: cyntex/v1
                 kind: pipeline
@@ -190,6 +195,14 @@ class TierBindingsIT {
                   sync:
                     - source: tgt_mongo
                 """);
+    }
+
+    /**
+     * The environment the specification's references resolve against — supplied by the harness, which is
+     * the client and therefore the interpolating side. A real author's shell plays this part.
+     */
+    private static UnaryOperator<String> envFor(String endpointUri) {
+        return Map.of("MONGO_URI", endpointUri)::get;
     }
 
     private void write(String name, String content) {

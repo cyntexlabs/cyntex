@@ -94,6 +94,28 @@ class CliTest {
     }
 
     @Test
+    void validateJudgesAWorkspaceWithoutResolvingItsReferences(@TempDir Path ws) throws Exception {
+        // validate is the offline verb: it reads no environment, so a reference stays opaque to it and a
+        // workspace that carries one still validates. That is what lets a check run somewhere the
+        // variables are not set — a build box, a reviewer's laptop — and it is the standing reason the
+        // capability rules skip a value they cannot see. Resolution belongs to apply, which is the verb
+        // that has an environment to resolve from.
+        Files.createDirectory(ws.resolve("source"));
+        Files.writeString(ws.resolve("source").resolve("src.cyn.yml"), """
+                version: cyntex/v1
+                kind: source
+                id: src
+                connector: mongodb
+                config: { uri: "${MONGO_URI}" }
+                """);
+
+        Run r = run("validate", ws.toString());
+
+        assertThat(r.code()).isZero();
+        assertThat(r.out()).startsWith("valid:");
+    }
+
+    @Test
     void validateRejectsAnInvalidWorkspaceWithCodeAndLocation() {
         Run r = run("validate", resource("ws-invalid").toString());
         assertThat(r.code()).isEqualTo(1);
