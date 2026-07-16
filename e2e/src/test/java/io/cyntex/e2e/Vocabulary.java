@@ -42,9 +42,6 @@ final class Vocabulary {
     /** Changes a cdc step can produce. */
     static final SortedSet<String> CDC_OPERATIONS = sorted(CdcOp.values(), Vocabulary::lowerName);
 
-    /** CI lanes a specification can belong to. */
-    static final SortedSet<String> TIERS = sorted(Tier.values(), Vocabulary::lowerName);
-
     /** States the {@code state} matcher can expect, as the product publishes them. */
     static final SortedSet<String> PIPELINE_STATES = sorted(PipelineState.values(), Enum::name);
 

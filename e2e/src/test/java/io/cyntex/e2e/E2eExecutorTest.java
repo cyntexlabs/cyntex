@@ -42,7 +42,6 @@ class E2eExecutorTest {
         execute(
                 """
                 name: n
-                tier: smoke
                 setup:
                   connectors: [mongodb]
                   apply: [src_mongo.cyn.yml, tgt_mongo.cyn.yml]
@@ -214,7 +213,7 @@ class E2eExecutorTest {
     }
 
     private static String minimal(String body) {
-        return "name: n\ntier: smoke\npipeline: p.cyn.yml\n" + body;
+        return "name: n\npipeline: p.cyn.yml\n" + body;
     }
 
     /** Records what the executor asked for, and can vary a reading over successive polls. */

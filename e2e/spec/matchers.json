@@ -55,20 +55,6 @@
       "description": "Produces update changes."
     }
   ],
-  "tiers": [
-    {
-      "word": "full",
-      "description": "The full matrix, nightly."
-    },
-    {
-      "word": "perf",
-      "description": "Performance baselines, on their own lane."
-    },
-    {
-      "word": "smoke",
-      "description": "Runs on every pull request; must stay minutes-fast."
-    }
-  ],
   "pipelineStates": [
     "COMPLETED",
     "NEW",
@@ -78,7 +64,6 @@
   ],
   "topLevelKeys": [
     "name",
-    "tier",
     "setup",
     "pipeline",
     "seed",

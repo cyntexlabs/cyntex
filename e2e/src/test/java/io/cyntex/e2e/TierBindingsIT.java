@@ -149,7 +149,6 @@ class TierBindingsIT {
     private String specification() {
         return """
                 name: both-tiers-see-the-same-endpoint
-                tier: smoke
                 setup:
                   apply: [tgt_mongo.cyn.yml, pipeline.cyn.yml]
                 pipeline: pipeline.cyn.yml
@@ -166,7 +165,6 @@ class TierBindingsIT {
     private String unstartedSpecification() {
         return """
                 name: an-unstarted-pipeline-publishes-no-observation
-                tier: smoke
                 setup:
                   apply: [tgt_mongo.cyn.yml, pipeline.cyn.yml]
                 pipeline: pipeline.cyn.yml

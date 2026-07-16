@@ -14,7 +14,7 @@ import java.util.List;
  * @param seed the initial data laid down before the first step runs
  */
 public record Envelope(
-        String name, Tier tier, Setup setup, String pipeline, List<Seed> seed, List<Step> steps) {
+        String name, Setup setup, String pipeline, List<Seed> seed, List<Step> steps) {
 
     public Envelope {
         seed = List.copyOf(seed);

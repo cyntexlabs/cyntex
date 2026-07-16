@@ -9,15 +9,15 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * The envelope is a frozen authoring surface: once published it is a long-term commitment, and it
- * evolves by adding facets, never by breaking what already parses. These tests are what holds that
- * line, so they read the surface exactly as an author writes it.
+ * grows by adding facets. Dropping a key breaks every specification that already writes it, so it
+ * happens only as a deliberate decision and never as a side effect of tidying up. These tests are
+ * what holds that line, so they read the surface exactly as an author writes it.
  */
 class EnvelopeParserTest {
 
     private static final String FIRST_EXAMPLE =
             """
             name: mongo-to-mongo-first-sync
-            tier: smoke
             setup:
               connectors: [mongodb]
               apply: [src_mongo.cyn.yml, tgt_mongo.cyn.yml]
@@ -40,7 +40,6 @@ class EnvelopeParserTest {
         Envelope envelope = EnvelopeParser.parse(FIRST_EXAMPLE);
 
         assertThat(envelope.name()).isEqualTo("mongo-to-mongo-first-sync");
-        assertThat(envelope.tier()).isEqualTo(Tier.SMOKE);
         assertThat(envelope.pipeline()).isEqualTo("mongo2mongo.cyn.yml");
         assertThat(envelope.setup().connectors()).containsExactly("mongodb");
         assertThat(envelope.setup().apply()).containsExactly("src_mongo.cyn.yml", "tgt_mongo.cyn.yml");
@@ -136,24 +135,29 @@ class EnvelopeParserTest {
                 .containsExactly(new Step.Await(Matcher.count(new TableAlias("src", "orders.2026"), 1L)));
     }
 
+    /**
+     * A lane word is not a harmless leftover. Nothing in the run selects a lane from the envelope, so
+     * an author writing one would be describing a choice that is not taken - the surface says so out
+     * loud rather than reading the word and discarding it.
+     */
     @Test
-    void rejectsAnUnknownTier() {
+    void rejectsALaneWordRatherThanReadingOneNothingSelects() {
         assertThatThrownBy(
-                        () -> EnvelopeParser.parse("name: n\ntier: nightly\npipeline: p.cyn.yml\nsteps:\n  - start\n"))
+                        () -> EnvelopeParser.parse("name: n\ntier: smoke\npipeline: p.cyn.yml\nsteps:\n  - start\n"))
                 .isInstanceOf(EnvelopeException.class)
-                .hasMessageContaining("nightly");
+                .hasMessageContaining("tier");
     }
 
     @Test
     void rejectsAnEnvelopeWithoutAName() {
-        assertThatThrownBy(() -> EnvelopeParser.parse("tier: smoke\npipeline: p.cyn.yml\nsteps:\n  - start\n"))
+        assertThatThrownBy(() -> EnvelopeParser.parse("pipeline: p.cyn.yml\nsteps:\n  - start\n"))
                 .isInstanceOf(EnvelopeException.class)
                 .hasMessageContaining("name");
     }
 
     @Test
     void rejectsAnEnvelopeWithoutAPipeline() {
-        assertThatThrownBy(() -> EnvelopeParser.parse("name: n\ntier: smoke\nsteps:\n  - start\n"))
+        assertThatThrownBy(() -> EnvelopeParser.parse("name: n\nsteps:\n  - start\n"))
                 .isInstanceOf(EnvelopeException.class)
                 .hasMessageContaining("pipeline");
     }
@@ -163,13 +167,6 @@ class EnvelopeParserTest {
         assertThatThrownBy(() -> EnvelopeParser.parse(minimal("steps:\n  - cdc: { t.orders: truncate 1 }\n")))
                 .isInstanceOf(EnvelopeException.class)
                 .hasMessageContaining("truncate");
-    }
-
-    @Test
-    void readsTheTierVocabularyInFull() {
-        assertThat(EnvelopeParser.parse(tier("smoke")).tier()).isEqualTo(Tier.SMOKE);
-        assertThat(EnvelopeParser.parse(tier("full")).tier()).isEqualTo(Tier.FULL);
-        assertThat(EnvelopeParser.parse(tier("perf")).tier()).isEqualTo(Tier.PERF);
     }
 
     @Test
@@ -216,7 +213,7 @@ class EnvelopeParserTest {
 
     @Test
     void rejectsADuplicateTopLevelKey() {
-        assertThatThrownBy(() -> EnvelopeParser.parse("name: first\nname: second\ntier: smoke\npipeline: p.cyn.yml\nsteps:\n  - start\n"))
+        assertThatThrownBy(() -> EnvelopeParser.parse("name: first\nname: second\npipeline: p.cyn.yml\nsteps:\n  - start\n"))
                 .isInstanceOf(EnvelopeException.class);
     }
 
@@ -229,7 +226,7 @@ class EnvelopeParserTest {
 
     @Test
     void rejectsAnEnvelopeWithNoStepsThatWouldTestNothing() {
-        assertThatThrownBy(() -> EnvelopeParser.parse("name: n\ntier: smoke\npipeline: p.cyn.yml\n"))
+        assertThatThrownBy(() -> EnvelopeParser.parse("name: n\npipeline: p.cyn.yml\n"))
                 .isInstanceOf(EnvelopeException.class)
                 .hasMessageContaining("steps");
         assertThatThrownBy(() -> EnvelopeParser.parse(minimal("steps: []\n")))
@@ -288,10 +285,6 @@ class EnvelopeParserTest {
     }
 
     private static String minimal(String body) {
-        return "name: n\ntier: smoke\npipeline: p.cyn.yml\n" + body;
-    }
-
-    private static String tier(String tier) {
-        return "name: n\ntier: " + tier + "\npipeline: p.cyn.yml\nsteps:\n  - start\n";
+        return "name: n\npipeline: p.cyn.yml\n" + body;
     }
 }

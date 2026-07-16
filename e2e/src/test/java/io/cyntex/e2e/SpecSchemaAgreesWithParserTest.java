@@ -68,7 +68,6 @@ class SpecSchemaAgreesWithParserTest {
         // is already gone, so no schema can see it. The parser refuses it; nothing here can.
         String duplicate = """
                 name: n
-                tier: smoke
                 pipeline: p.cyn.yml
                 steps:
                   - assert: { count: { t.o: 1 } }
@@ -89,7 +88,6 @@ class SpecSchemaAgreesWithParserTest {
                 // The smallest thing worth running.
                 """
                 name: minimal
-                tier: smoke
                 pipeline: p.cyn.yml
                 steps:
                   - start
@@ -97,7 +95,6 @@ class SpecSchemaAgreesWithParserTest {
                 // Every facet at once, which is the shape the first example takes.
                 """
                 name: everything
-                tier: smoke
                 setup:
                   connectors: [mongodb]
                   apply: [src.cyn.yml, tgt.cyn.yml]
@@ -118,7 +115,6 @@ class SpecSchemaAgreesWithParserTest {
                 // A table name may carry dots; only the first one separates the resource id.
                 """
                 name: dotted-table
-                tier: full
                 pipeline: p.cyn.yml
                 seed:
                   src.orders.2026: { rows: 1 }
@@ -128,7 +124,6 @@ class SpecSchemaAgreesWithParserTest {
                 // Counting several tables in one matcher.
                 """
                 name: many-tables
-                tier: perf
                 pipeline: p.cyn.yml
                 steps:
                   - assert: { count: { a.one: 0, b.two: 3 } }
@@ -140,7 +135,6 @@ class SpecSchemaAgreesWithParserTest {
                 // A key nobody serves.
                 """
                 name: n
-                tier: smoke
                 pipeline: p.cyn.yml
                 expect: { count: { t.o: 1 } }
                 steps:
@@ -149,7 +143,6 @@ class SpecSchemaAgreesWithParserTest {
                 // A word with no source behind it.
                 """
                 name: n
-                tier: smoke
                 pipeline: p.cyn.yml
                 steps:
                   - await: { synced: true }
@@ -157,15 +150,15 @@ class SpecSchemaAgreesWithParserTest {
                 // A verb the product does not have.
                 """
                 name: n
-                tier: smoke
                 pipeline: p.cyn.yml
                 steps:
                   - restart
                 """,
-                // A lane that does not exist.
+                // A lane word. Nothing selects a lane from a specification, so naming one is not a
+                // harmless leftover: it would be a choice the author believes is being taken.
                 """
                 name: n
-                tier: nightly
+                tier: smoke
                 pipeline: p.cyn.yml
                 steps:
                   - start
@@ -173,7 +166,6 @@ class SpecSchemaAgreesWithParserTest {
                 // A change no cdc step can produce.
                 """
                 name: n
-                tier: smoke
                 pipeline: p.cyn.yml
                 steps:
                   - cdc: { t.orders: truncate 1 }
@@ -181,7 +173,6 @@ class SpecSchemaAgreesWithParserTest {
                 // Rows cannot run backwards.
                 """
                 name: n
-                tier: smoke
                 pipeline: p.cyn.yml
                 steps:
                   - assert: { count: { t.o: -5 } }
@@ -189,13 +180,11 @@ class SpecSchemaAgreesWithParserTest {
                 // A specification with no steps checks nothing.
                 """
                 name: n
-                tier: smoke
                 pipeline: p.cyn.yml
                 steps: []
                 """,
                 // A name is not optional.
                 """
-                tier: smoke
                 pipeline: p.cyn.yml
                 steps:
                   - start
@@ -203,14 +192,12 @@ class SpecSchemaAgreesWithParserTest {
                 // Neither is the pipeline it exercises.
                 """
                 name: n
-                tier: smoke
                 steps:
                   - start
                 """,
                 // An alias without a resource id addresses nothing.
                 """
                 name: n
-                tier: smoke
                 pipeline: p.cyn.yml
                 steps:
                   - assert: { count: { orders: 1 } }

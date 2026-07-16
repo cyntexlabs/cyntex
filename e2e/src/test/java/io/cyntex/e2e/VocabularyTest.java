@@ -27,11 +27,6 @@ class VocabularyTest {
     }
 
     @Test
-    void tiersAreTheLanesTheEnumDeclares() {
-        assertThat(Vocabulary.TIERS).containsExactly("full", "perf", "smoke");
-    }
-
-    @Test
     void matcherWordsAreTheOnesTheParserAccepts() {
         assertThat(Vocabulary.MATCHERS).containsExactly("count", "state");
     }
@@ -46,7 +41,7 @@ class VocabularyTest {
         // The envelope record is the shape the parser must produce, so its components are the keys -
         // a key list written out by hand could disagree with the record the parser fills.
         assertThat(Vocabulary.TOP_LEVEL_KEYS)
-                .containsExactly("name", "tier", "setup", "pipeline", "seed", "steps");
+                .containsExactly("name", "setup", "pipeline", "seed", "steps");
     }
 
     @Test

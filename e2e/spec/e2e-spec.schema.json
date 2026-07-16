@@ -7,7 +7,6 @@
   "additionalProperties": false,
   "required": [
     "name",
-    "tier",
     "pipeline",
     "steps"
   ],
@@ -15,15 +14,6 @@
     "name": {
       "type": "string",
       "description": "What this specification is called."
-    },
-    "tier": {
-      "type": "string",
-      "description": "Which CI lane this specification belongs to.",
-      "enum": [
-        "full",
-        "perf",
-        "smoke"
-      ]
     },
     "setup": {
       "$ref": "#/$defs/setup",

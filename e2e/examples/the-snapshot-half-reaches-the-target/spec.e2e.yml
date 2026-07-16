@@ -18,7 +18,6 @@
 # is what forbids that - its counts are below what a degraded filter carries - so the two are
 # load-bearing together and neither is sufficient alone.
 name: the-snapshot-half-reaches-the-target
-tier: smoke
 setup:
   connectors: [e2e_file]
   apply: [src_file.cyn.yml, tgt_file.cyn.yml, pipeline.cyn.yml]

@@ -21,7 +21,6 @@
 # Four seeded, not three: with three, the appending run rests on two at the second await - the number it
 # is asked for - and passes. The constraint is the seed size, not the predicate.
 name: rows-cross-from-a-source-file-to-a-target-file
-tier: smoke
 setup:
   connectors: [e2e_file]
   apply: [src_file.cyn.yml, tgt_file.cyn.yml, pipeline.cyn.yml]

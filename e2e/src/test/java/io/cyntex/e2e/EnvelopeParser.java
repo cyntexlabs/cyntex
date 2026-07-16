@@ -34,7 +34,6 @@ public final class EnvelopeParser {
         rejectUnknownKeys(root.keySet(), Set.copyOf(Vocabulary.TOP_LEVEL_KEYS), "envelope");
         return new Envelope(
                 requiredString(root, "name"),
-                tier(requiredString(root, "tier")),
                 setup(root.get("setup")),
                 requiredString(root, "pipeline"),
                 seed(root.get("seed")),
@@ -222,14 +221,6 @@ public final class EnvelopeParser {
             throw new EnvelopeException("a table alias reads '<resourceId>.<table>', found: " + alias);
         }
         return new TableAlias(alias.substring(0, dot), alias.substring(dot + 1));
-    }
-
-    private static Tier tier(String tier) {
-        try {
-            return Tier.valueOf(tier.toUpperCase(Locale.ROOT));
-        } catch (IllegalArgumentException e) {
-            throw new EnvelopeException("unknown tier: " + tier + "; known tiers are smoke, full, perf");
-        }
     }
 
     private static void rejectUnknownKeys(Set<String> present, Set<String> known, String where) {

@@ -40,7 +40,7 @@ final class SpecGenerator {
                         + "generated from the executor, so it says what the parser accepts.");
         root.put("type", "object");
         root.put("additionalProperties", false);
-        root.put("required", List.of("name", "tier", "pipeline", "steps"));
+        root.put("required", List.of("name", "pipeline", "steps"));
         root.put("properties", properties());
         root.put("$defs", defs());
         return SpecJson.write(root);
@@ -57,7 +57,6 @@ final class SpecGenerator {
         root.put("matchers", listing(Vocabulary.MATCHERS, SpecGenerator::matcherDescription));
         root.put("steps", stepListing());
         root.put("cdcOperations", listing(Vocabulary.CDC_OPERATIONS, op -> "Produces " + op + " changes."));
-        root.put("tiers", listing(Vocabulary.TIERS, SpecGenerator::tierDescription));
         root.put("pipelineStates", List.copyOf(Vocabulary.PIPELINE_STATES));
         root.put("topLevelKeys", List.copyOf(Vocabulary.TOP_LEVEL_KEYS));
         root.put("setupKeys", List.copyOf(Vocabulary.SETUP_KEYS));
@@ -67,9 +66,6 @@ final class SpecGenerator {
     private static Map<String, Object> properties() {
         Map<String, Object> properties = new LinkedHashMap<>();
         properties.put("name", scalar("string", "What this specification is called."));
-        Map<String, Object> tier = scalar("string", "Which CI lane this specification belongs to.");
-        tier.put("enum", List.copyOf(Vocabulary.TIERS));
-        properties.put("tier", tier);
         properties.put("setup", ref("setup", "The bootstrap a real endpoint needs before a pipeline can name it."));
         properties.put(
                 "pipeline",
@@ -276,14 +272,6 @@ final class SpecGenerator {
             case CDC -> "Produces changes against a seeded table while the pipeline runs.";
             case AWAIT -> "Polls a matcher until it holds or the bound expires.";
             case ASSERT -> "Checks a matcher once, now.";
-        };
-    }
-
-    private static String tierDescription(String tier) {
-        return switch (Tier.valueOf(tier.toUpperCase(java.util.Locale.ROOT))) {
-            case SMOKE -> "Runs on every pull request; must stay minutes-fast.";
-            case FULL -> "The full matrix, nightly.";
-            case PERF -> "Performance baselines, on their own lane.";
         };
     }
 
