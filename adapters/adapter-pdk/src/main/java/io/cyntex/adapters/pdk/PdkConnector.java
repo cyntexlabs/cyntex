@@ -95,10 +95,23 @@ final class PdkConnector implements AutoCloseable {
 
     private static void gateApiLevel(String connectorId, ConnectorRef ref) {
         LevelResolution level = PdkLevelResolver.resolve(ref.pdkApiVersion(), ref.requiredLevel());
-        if (level.outcome() == LevelOutcome.INCOMPATIBLE) {
-            throw new CyntexException(ConnectorError.API_LEVEL_INCOMPATIBLE,
+        // A switch expression so a new outcome fails to compile here rather than falling through to
+        // loadable — this gate is the one place an unrecognized level must never silently pass.
+        CyntexException refusal = switch (level.outcome()) {
+            case INCOMPATIBLE -> new CyntexException(ConnectorError.API_LEVEL_INCOMPATIBLE,
                     Map.of("connector", connectorId, "required", level.requiredLevel(), "provided", level.engineLevel()),
                     null);
+            // The version resolves to no row: a Cyntex-side registry gap, refused with a code that names
+            // the version rather than the bare crash the strict level lookup would raise. resolve() only
+            // returns this when a version was declared, so ref.pdkApiVersion() is present to name.
+            case UNKNOWN_VERSION -> new CyntexException(ConnectorError.API_LEVEL_UNKNOWN,
+                    Map.of("connector", connectorId, "version", ref.pdkApiVersion()),
+                    null);
+            // Loadable: the declared requirement fits, or nothing was declared to judge against.
+            case COMPATIBLE, UNDECLARED -> null;
+        };
+        if (refusal != null) {
+            throw refusal;
         }
     }
 

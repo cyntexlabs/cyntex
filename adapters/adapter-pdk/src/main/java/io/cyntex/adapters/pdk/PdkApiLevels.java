@@ -1,6 +1,7 @@
 package io.cyntex.adapters.pdk;
 
 import java.util.Map;
+import java.util.OptionalInt;
 
 /**
  * The Cyntex-side registry mapping a PDK API version to its compatibility level, and the level this
@@ -10,17 +11,24 @@ import java.util.Map;
  *
  * <p>Build-number drift is API-equivalent: a version resolves by its {@code major.minor.patch} base,
  * so {@code 2.0.8}, {@code 2.0.8-SNAPSHOT} and a timestamped {@code 2.0.8-20260609.043233-3} are one
- * and the same level. A version with no row is a registry gap, not a compatibility verdict — it fails
- * loudly so the missing row gets added, rather than being guessed compatible or incompatible.
+ * and the same level. A version with no row is a registry gap, not a compatibility verdict: for a
+ * connector's declared version {@link #levelOf} reports the gap so the load path can refuse it with a
+ * coded, actionable diagnosis (add the missing row, or use a recognized build); for the bridge's own
+ * baseline {@link #level} keeps crashing loudly, because a bridge that cannot place the version it was
+ * built against is a build defect, not an operator's connector.
  */
 public final class PdkApiLevels {
 
     /**
-     * The version→level table. Seeded with the one frozen baseline the bridge is built against;
-     * append a row per new upstream API version. Append-only: an existing base version keeps its
-     * level (renumbering would silently re-judge every connector).
+     * The version→level table. Holds the frozen baseline the bridge is built against plus the inherited
+     * connector build lines that share its API contract; append a row per new upstream API version.
+     * Append-only: an existing base version keeps its level (renumbering would silently re-judge every
+     * connector). {@code 2.0.5} / {@code 2.0.7} / {@code 2.0.8} are one level because they are API-
+     * equivalent under PDK's {@code 2.0.x} backward-compatibility line.
      */
     private static final Map<String, Integer> LEVELS = Map.of(
+            "2.0.5", 1,
+            "2.0.7", 1,
             "2.0.8", 1);
 
     /** The frozen baseline the bridge compiles and runs against. */
@@ -42,19 +50,27 @@ public final class PdkApiLevels {
     }
 
     /**
-     * The compatibility level for a PDK API version, resolved by its base.
+     * The compatibility level for a PDK API version, resolved by its base, or empty when the base has
+     * no registered row. This is the lookup a connector's declared version takes: an empty result is a
+     * registry gap the load path turns into a coded refusal, never a bare crash on operator data.
+     */
+    public static OptionalInt levelOf(String version) {
+        Integer level = LEVELS.get(baseVersion(version));
+        return level == null ? OptionalInt.empty() : OptionalInt.of(level);
+    }
+
+    /**
+     * The compatibility level for a PDK API version, resolved by its base. This is the strict variant
+     * the bridge takes for its OWN baseline: an unregistered base is a build defect and crashes loudly.
+     * A connector's declared version goes through {@link #levelOf} instead, so operator data never
+     * bare-crashes here.
      *
-     * @throws IllegalStateException if the base version has no registered level — a Cyntex-side
-     *     registry gap to be closed by adding a row, not a condition to launder into a verdict.
+     * @throws IllegalStateException if the base version has no registered level — a Cyntex-side build
+     *     defect for the baseline, not a condition to launder into a verdict.
      */
     public static int level(String version) {
-        String base = baseVersion(version);
-        Integer level = LEVELS.get(base);
-        if (level == null) {
-            throw new IllegalStateException(
-                    "no registered PDK API level for version " + version + " (base " + base
-                            + "); add a row to the Cyntex-side level registry");
-        }
-        return level;
+        return levelOf(version).orElseThrow(() -> new IllegalStateException(
+                "no registered PDK API level for version " + version + " (base " + baseVersion(version)
+                        + "); add a row to the Cyntex-side level registry"));
     }
 }

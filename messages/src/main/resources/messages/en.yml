@@ -152,6 +152,9 @@ connector.spec-invalid:
 connector.api-level-incompatible:
   message: "Connector '{connector}' requires PDK API level {required} but this engine provides level {provided}."
   solution: "Use a connector build compatible with API level {provided}, or upgrade the engine."
+connector.api-level-unknown:
+  message: "Connector '{connector}' declares PDK API version {version}, which this engine build does not recognize."
+  solution: "Use a connector built against a PDK API version this engine registers, or add {version} to the Cyntex-side level table if it is API-compatible."
 connector.projection-failed:
   message: "Connector '{connector}' produced an event that could not be projected: {detail}."
   solution: "This is a bridge-level projection failure between the connector and the event envelope."

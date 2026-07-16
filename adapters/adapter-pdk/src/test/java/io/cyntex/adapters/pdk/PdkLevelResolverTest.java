@@ -7,9 +7,10 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * The PDK API-level resolve contract: judge a connector's declared level requirement against the
- * level this bridge provides, as a pure three-state decision. It only judges and names the levels;
- * turning an incompatible verdict into a refuse-to-load coded error is the load path's job (the
- * connector error domain), so this stays a dependency-free pure function testable in isolation.
+ * level this bridge provides, as a pure four-state decision (compatible / incompatible / unrecognized
+ * version / undeclared). It only judges and names the levels; turning a refusal verdict into a coded
+ * refuse-to-load error is the load path's job (the connector error domain), so this stays a
+ * dependency-free pure function testable in isolation.
  */
 class PdkLevelResolverTest {
 
@@ -85,20 +86,54 @@ class PdkLevelResolverTest {
         assertThat(r.requiredLevel()).isEqualTo(tooNew);
     }
 
-    // ---- registry gaps and malformed input are bare-crash programmer/ops errors, never a verdict ----
+    // ---- the inherited connector build lines resolve at the baseline level ----
 
     @Test
-    void unmappedDeclaredVersionIsARegistryGapNotAVerdict() {
-        // A version the Cyntex-side table has no row for cannot be judged; that is an ops gap
-        // (add a row), a bare crash — not a silent compatible/incompatible guess.
-        assertThatThrownBy(() -> PdkLevelResolver.resolve("9.9.9", null))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("9.9.9");
+    void theInheritedConnectorVersionsResolveToTheBaselineLevel() {
+        // 2.0.5 (mysql) and 2.0.7 (mongodb) are the two inherited connector build lines; they share the
+        // baseline's API contract, so they resolve compatible at the same level rather than "too new".
+        for (String version : new String[] {"2.0.5", "2.0.5-SNAPSHOT", "2.0.7", "2.0.7-SNAPSHOT"}) {
+            LevelResolution r = PdkLevelResolver.resolve(version, null);
+            assertThat(r.outcome()).as(version).isEqualTo(LevelOutcome.COMPATIBLE);
+            assertThat(r.requiredLevel()).as(version).isEqualTo(ENGINE);
+        }
     }
+
+    // ---- an unrecognized declared version is a verdict (UNKNOWN_VERSION), not a bare crash ----
+
+    @Test
+    void unmappedDeclaredVersionResolvesToUnknownRatherThanCrashing() {
+        // A connector's declared version the Cyntex-side table has no row for cannot be placed on the
+        // level axis, but it is operator data — it gets a verdict the load path renders as a coded
+        // refusal, never a bare stack (the earlier contract crashed here). No level is derived.
+        LevelResolution r = PdkLevelResolver.resolve("9.9.9", null);
+        assertThat(r.outcome()).isEqualTo(LevelOutcome.UNKNOWN_VERSION);
+        assertThat(r.compatible()).isFalse();
+        assertThat(r.requiredLevel()).isNull();
+        assertThat(r.engineLevel()).isEqualTo(ENGINE);
+    }
+
+    @Test
+    void theNonThrowingLookupReportsTheGapRatherThanThrowing() {
+        assertThat(PdkApiLevels.levelOf("9.9.9")).isEmpty();
+        assertThat(PdkApiLevels.levelOf("2.0.8")).hasValue(ENGINE);
+    }
+
+    // ---- malformed input and the bridge's own baseline stay bare-crash programmer/build errors ----
 
     @Test
     void malformedDeclaredLevelIsAProgrammerErrorNotAVerdict() {
         assertThatThrownBy(() -> PdkLevelResolver.resolve(null, "not-an-int"))
                 .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void theStrictBaselineLevelLookupStillCrashesForAnUnregisteredBase() {
+        // The strict variant is what the bridge takes for its OWN baseline: an unregistered base is a
+        // build defect, not operator data, and must keep crashing loudly. Softening the connector path
+        // to a verdict does not soften this one.
+        assertThatThrownBy(() -> PdkApiLevels.level("9.9.9"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("9.9.9");
     }
 }

@@ -18,6 +18,7 @@ cli.verb-not-implemented
 connector.ambiguous-connector-class
 connector.ambiguous-registration
 connector.api-level-incompatible
+connector.api-level-unknown
 connector.capture-failed
 connector.class-not-found
 connector.discover-failed
