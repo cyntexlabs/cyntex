@@ -1,0 +1,12 @@
+name: the-snapshot-half-reaches-the-target
+tier: smoke
+setup:
+  connectors: [e2e_file]
+  apply: [src_file.cyn.yml, tgt_file.cyn.yml, pipeline.cyn.yml]
+  discover: [src_file]
+pipeline: pipeline.cyn.yml
+seed:
+  src_file.orders: { rows: 3 }
+steps:
+  - start
+  - await: { count: { tgt_file.orders: 3 } }
