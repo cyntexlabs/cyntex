@@ -1,0 +1,14 @@
+name: rows-cross-from-a-source-file-to-a-target-file
+tier: smoke
+setup:
+  connectors: [e2e_file]
+  apply: [src_file.cyn.yml, tgt_file.cyn.yml, pipeline.cyn.yml]
+  discover: [src_file]
+pipeline: pipeline.cyn.yml
+seed:
+  src_file.orders: { rows: 3 }
+steps:
+  - start
+  - await: { count: { tgt_file.orders: 3 } }
+  - cdc: { src_file.orders: insert 2 }
+  - await: { count: { tgt_file.orders: 5 } }

@@ -1,0 +1,10 @@
+version: cyntex/v1
+kind: pipeline
+id: e2e_pipeline
+source: src_file
+transforms:
+  - { id: all_orders, from: [orders], type: filter, expr: "true" }
+serve:
+  from: all_orders
+  sync:
+    - source: tgt_file

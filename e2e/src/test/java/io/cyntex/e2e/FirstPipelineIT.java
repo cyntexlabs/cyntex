@@ -7,9 +7,6 @@ import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 
-import java.io.IOException;
-import java.io.UncheckedIOException;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.Map;
@@ -31,6 +28,11 @@ import static org.assertj.core.api.Assertions.assertThat;
  * source row's table, so a single directory would have the pipeline write {@code orders.csv} back over
  * the file the harness seeded - and the count would then read the harness's own rows and pass without a
  * single row having crossed the product.
+ *
+ * <p>The specification and the three resources it names are read from the checked-in example rather
+ * than written here. An example is what an author copies before writing their own, so the one that is
+ * published has to be the one that runs: a sample kept beside the executor rather than inside it drifts
+ * the moment the executor moves, and it drifts looking authoritative.
  */
 class FirstPipelineIT {
 
@@ -40,8 +42,8 @@ class FirstPipelineIT {
     private static final long SEEDED = 3;
     private static final long INSERTED = 2;
 
-    @TempDir
-    private Path workspace;
+    /** The published example, read from the working tree - these bytes are the ones under test. */
+    private static final Path WORKSPACE = Examples.workspace("rows-cross-from-a-source-file-to-a-target-file");
 
     @TempDir
     private Path connectorJars;
@@ -105,17 +107,16 @@ class FirstPipelineIT {
     @EnumSource(Tiers.class)
     void rowsCrossFromASourceFileToATargetFile(Tiers tier) {
         String store = SharedMongo.replicaSetUrl("e2e_first_" + tier.name().toLowerCase() + "_store");
-        writeWorkspace();
 
         try (ServerHandle server = tier.launcher.apply(store);
                 Endpoints files = new FileEndpoints()) {
             ControlPlane control = new ControlPlane(server.baseUrl());
             control.bootstrapAndLogin("e2e", "e2e-password");
             HttpTierBinding binding = new HttpTierBinding(
-                    control, workspace, Map.of(E2eConnectorJar.CONNECTOR_ID, files), env());
+                    control, WORKSPACE, Map.of(E2eConnectorJar.CONNECTOR_ID, files), env());
 
-            new E2eExecutor(binding, new FilePipelineLoader(workspace), TIMEOUT, POLL)
-                    .execute(EnvelopeParser.parse(specification()));
+            new E2eExecutor(binding, new FilePipelineLoader(WORKSPACE), TIMEOUT, POLL)
+                    .execute(EnvelopeParser.parse(Examples.read(WORKSPACE.resolve("spec.e2e.yml"))));
 
             // The awaits above counted through the binding, which finds a table's directory by reading the
             // resource the specification applied. This reads the target directory by the path this test
@@ -125,73 +126,10 @@ class FirstPipelineIT {
         }
     }
 
-    /** The specification under test: identical text for both tiers, by construction. */
-    private String specification() {
-        return """
-                name: rows-cross-from-a-source-file-to-a-target-file
-                tier: smoke
-                setup:
-                  connectors: [e2e_file]
-                  apply: [src_file.cyn.yml, tgt_file.cyn.yml, pipeline.cyn.yml]
-                  discover: [src_file]
-                pipeline: pipeline.cyn.yml
-                seed:
-                  src_file.orders: { rows: 3 }
-                steps:
-                  - start
-                  - await: { count: { tgt_file.orders: 3 } }
-                  - cdc: { src_file.orders: insert 2 }
-                  - await: { count: { tgt_file.orders: 5 } }
-                """;
-    }
-
-    /**
-     * The workspace an author would write: legal product DSL naming its endpoints by reference, with the
-     * addresses supplied by the loading side.
-     */
-    private void writeWorkspace() {
-        write("src_file.cyn.yml", """
-                version: cyntex/v1
-                kind: source
-                id: src_file
-                connector: e2e_file
-                config: { uri: "${SRC_DIR}" }
-                mode: cdc
-                tables: [ orders ]
-                """);
-        write("tgt_file.cyn.yml", """
-                version: cyntex/v1
-                kind: source
-                id: tgt_file
-                connector: e2e_file
-                config: { uri: "${TGT_DIR}" }
-                """);
-        write("pipeline.cyn.yml", """
-                version: cyntex/v1
-                kind: pipeline
-                id: e2e_pipeline
-                source: src_file
-                transforms:
-                  - { id: all_orders, from: [orders], type: filter, expr: "true" }
-                serve:
-                  from: all_orders
-                  sync:
-                    - source: tgt_file
-                """);
-    }
-
-    /** The harness is the client, so the addresses its checked-in references resolve to are its own. */
+    /** The harness is the client, so the addresses the published references resolve to are its own. */
     private UnaryOperator<String> env() {
         return Map.of(
                 "SRC_DIR", sourceDirectory.toString(),
                 "TGT_DIR", targetDirectory.toString())::get;
-    }
-
-    private void write(String name, String content) {
-        try {
-            Files.writeString(workspace.resolve(name), content);
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        }
     }
 }
