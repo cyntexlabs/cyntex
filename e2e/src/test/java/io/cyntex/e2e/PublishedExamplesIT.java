@@ -16,6 +16,8 @@ import java.util.function.Function;
 import java.util.function.UnaryOperator;
 import java.util.stream.Stream;
 
+import static org.assertj.core.api.Assertions.assertThat;
+
 /**
  * Runs every published example, on every tier.
  *
@@ -27,15 +29,21 @@ import java.util.stream.Stream;
  * exactly like the examples that do run. Discovering them is what forbids that: to publish one is to run
  * it.
  *
- * <p>Executing the specification is the assertion. Its awaits are bounded and read the real target
+ * <p>Executing the specification is most of the assertion. Its awaits are bounded and read the target
  * through the harness, so a run that returns is a run whose every await held; the executor throws
  * otherwise. What each example is for, and why its numbers are what they are, is written in the example
  * itself - it is the file an author opens.
  *
- * <p>Nothing here reads a count and compares it to a number this class knows. That check used to close
- * each run, guarding against a harness that resolved an alias to the wrong directory and counted the rows
- * it had seeded itself. It is a property of one piece of harness code, identical for every example, so it
- * is proven once and directly, without a pipeline.
+ * <p>The count it settles on is then read again, by the path this class handed out rather than by the
+ * alias the example named. Every await resolves its address out of the example's own resource, so an
+ * example whose target names the source's address counts the rows the harness seeded itself: it settles
+ * on the first poll, before the product has emitted anything, and is green with the connector deleted.
+ * Resolving faithfully is not enough when the resource is what is wrong - a faithful lookup returns the
+ * wrong directory just as faithfully - so the last word belongs to an address the example cannot name.
+ *
+ * <p>That read is what obliges an example to settle on a count, and to mean the target by it. The
+ * obligation is small and it is checked: an example that never settles fails before it runs, rather than
+ * quietly skipping the one assertion that does not take its word for anything.
  */
 class PublishedExamplesIT {
 
@@ -96,6 +104,13 @@ class PublishedExamplesIT {
     @MethodSource("everyPublishedExampleOnEveryTier")
     void thePublishedExampleRuns(Path specification, Tiers tier) {
         Path workspace = specification.getParent();
+        Envelope envelope = EnvelopeParser.parse(Examples.read(specification));
+
+        Map<TableAlias, Long> settled = theCountItSettlesOn(envelope);
+        assertThat(settled)
+                .as("%s never settles on a count, so nothing outside its own addressing could check it",
+                        specification)
+                .isNotEmpty();
 
         try (ServerHandle server = tier.launcher.apply(SharedMongo.replicaSetUrl(store(workspace, tier)));
                 Endpoints files = new FileEndpoints()) {
@@ -104,9 +119,33 @@ class PublishedExamplesIT {
             HttpTierBinding binding = new HttpTierBinding(
                     control, workspace, Map.of(E2eConnectorJar.CONNECTOR_ID, files), env());
 
-            new E2eExecutor(binding, new FilePipelineLoader(workspace), TIMEOUT, POLL)
-                    .execute(EnvelopeParser.parse(Examples.read(specification)));
+            new E2eExecutor(binding, new FilePipelineLoader(workspace), TIMEOUT, POLL).execute(envelope);
+
+            settled.forEach((alias, rows) -> assertThat(files.count(targetDirectory.toString(), alias.table()))
+                    .as("%s settles on %s rows in %s, read there by the address it named; this reads the "
+                            + "target this run handed out, which it cannot name", specification, rows, alias)
+                    .isEqualTo(rows));
         }
+    }
+
+    /**
+     * The count an example settles on: the last one it awaits or asserts, which is the reading it claims
+     * is final. Read backwards because the earlier counts are waypoints - the first example passes through
+     * two on the way to three - and only the last one describes a target at rest.
+     */
+    private static Map<TableAlias, Long> theCountItSettlesOn(Envelope envelope) {
+        for (int index = envelope.steps().size() - 1; index >= 0; index--) {
+            Matcher matcher = switch (envelope.steps().get(index)) {
+                case Step.Await await -> await.matcher();
+                case Step.Assertion assertion -> assertion.matcher();
+                case Step.Lifecycle ignored -> null;
+                case Step.Cdc ignored -> null;
+            };
+            if (matcher instanceof Matcher.Count count) {
+                return count.expected();
+            }
+        }
+        return Map.of();
     }
 
     /** Mongo refuses a database name longer than this, and says so only once a run is already underway. */
