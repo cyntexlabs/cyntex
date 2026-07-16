@@ -18,9 +18,12 @@ import java.util.List;
  * with it by construction. Two independent readers of one format is the whole point: the format is
  * the contract, and it is plain enough to read by eye when a specification disagrees.
  *
- * <p>Row shape mirrors the Mongo driver's - an id and a sequence - for the same reason it does there:
- * the {@code seed} generator vocabulary is not decided yet, so what a specification may depend on is
- * only that seeding N rows produces N rows, deterministically.
+ * <p>Row shape mirrors the Mongo driver's - an id and a sequence. The {@code seed} generator vocabulary
+ * is still only {@code rows: N}, but what a specification may depend on is now more than the count: the
+ * ids are the whole numbers 1..N, and an insert continues them. A published example that filters has to
+ * name something in a row to filter on, and a predicate that cannot say which rows it drops witnesses
+ * nothing. Widening the generator later is free; changing what these ids are is not, and would be read
+ * here first.
  */
 final class FileEndpoints implements Endpoints {
 

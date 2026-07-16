@@ -2,9 +2,10 @@ version: cyntex/v1
 kind: pipeline
 id: e2e_pipeline
 source: src_file
+settings: { read_mode: snapshot_and_cdc }
 transforms:
-  - { id: all_orders, from: [orders], type: filter, expr: "true" }
+  - { id: even_orders, from: [orders], type: filter, expr: "int(after.id) % 2 == 0" }
 serve:
-  from: all_orders
+  from: even_orders
   sync:
     - source: tgt_file

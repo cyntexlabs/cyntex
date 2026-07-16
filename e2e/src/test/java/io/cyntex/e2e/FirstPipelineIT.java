@@ -39,8 +39,13 @@ class FirstPipelineIT {
     private static final Duration TIMEOUT = Duration.ofSeconds(60);
     private static final Duration POLL = Duration.ofMillis(200);
 
-    private static final long SEEDED = 3;
-    private static final long INSERTED = 2;
+    /**
+     * What the published example keeps, not what it seeds: the filter admits even ids, so this is
+     * |{2,4,6}| of the six rows the source ends up holding. Counted rather than derived - it is not a
+     * function of the seed size, and a seed changed without recounting it would assert an arithmetic
+     * that no longer holds.
+     */
+    private static final long KEPT_TOTAL = 3;
 
     /** The published example, read from the working tree - these bytes are the ones under test. */
     private static final Path WORKSPACE = Examples.workspace("rows-cross-from-a-source-file-to-a-target-file");
@@ -95,13 +100,18 @@ class FirstPipelineIT {
      * <p>The count is the assertion, and it is the only one that could be. A pipeline whose connector
      * emits nothing still reaches {@code RUNNING}, so a specification that awaited the state would pass
      * over an empty pipeline; and the target file does not exist at all until the product creates it, so
-     * a count that reaches three is three rows that were read, carried and written.
+     * a count that reaches two is two rows that were read, carried and written.
      *
-     * <p>Five, not eight: the tail has no offset to resume from and replays the three seeded rows on top
-     * of the snapshot's, so the sink is handed eight rows and keeps five. That is the overlap the
-     * product's snapshot-to-cdc seam leaves, and the upsert absorbing it is what this number asserts.
-     * The key it absorbs on is derived from the discovered source model - so a run that discovered
-     * nothing would append instead and count eight.
+     * <p>Every number here is smaller than the rows that were seeded, and that gap is the point: the
+     * filter admits even ids, so a transform quietly reduced to an identity would carry four and then
+     * six. Neither is ever two or three, and the target only grows, so such a run cannot reach either
+     * number late - it fails rather than lags.
+     *
+     * <p>Three, not five: the tail has no offset to resume from and replays the four seeded rows on top
+     * of the snapshot's, so the sink is handed five rows - two, two again, and one - and keeps three.
+     * That is the overlap the product's snapshot-to-cdc seam leaves, and the upsert absorbing it is what
+     * this number asserts. The key it absorbs on is derived from the discovered source model, so a run
+     * that discovered nothing would append instead and climb two, four, five - never resting on three.
      */
     @ParameterizedTest
     @EnumSource(Tiers.class)
@@ -122,7 +132,7 @@ class FirstPipelineIT {
             // resource the specification applied. This reads the target directory by the path this test
             // chose, so a binding that had been counting the source's own seeded file all along - the one
             // way every count above could hold without a row moving - cannot reach here.
-            assertThat(files.count(targetDirectory.toString(), "orders")).isEqualTo(SEEDED + INSERTED);
+            assertThat(files.count(targetDirectory.toString(), "orders")).isEqualTo(KEPT_TOTAL);
         }
     }
 
