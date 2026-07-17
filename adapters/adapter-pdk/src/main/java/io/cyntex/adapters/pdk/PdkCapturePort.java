@@ -12,10 +12,14 @@ import io.cyntex.spi.capture.FieldSchema;
 import io.cyntex.spi.capture.Subscription;
 import io.cyntex.spi.capture.TableSchema;
 import io.tapdata.entity.event.TapEvent;
+import io.tapdata.entity.event.control.ControlEvent;
 import io.tapdata.entity.schema.TapTable;
 import io.tapdata.pdk.apis.consumer.StreamReadConsumer;
 import io.tapdata.pdk.apis.functions.connector.source.BatchReadFunction;
 import io.tapdata.pdk.apis.functions.connector.source.StreamReadFunction;
+import io.tapdata.pdk.apis.functions.connector.source.TimestampToStreamOffsetFunction;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -37,6 +41,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * to this port.
  */
 public final class PdkCapturePort implements CapturePort {
+
+    private static final Logger LOG = LoggerFactory.getLogger(PdkCapturePort.class);
 
     private static final int BATCH_SIZE = 1000;
     private static final int SAMPLE_SIZE = 10;
@@ -199,18 +205,45 @@ public final class PdkCapturePort implements CapturePort {
         try {
             connector.underLoader(() -> {
                 connector.connector().init(connector.context());
+                // streamRead is handed only stream names, so the connector reads each changed table's
+                // schema off the context's table map and its resume position off the offset argument -
+                // neither is assembled by open(). Discover-and-fill the tables onto the context the way the
+                // snapshot read does, and derive a current stream position, or the tail cannot decode a
+                // change (null table map) or even position (a null offset drives a schema-only recovery
+                // that has no stored offset to recover from).
+                Map<String, TapTable> tables = byId(discoverTables(connector, config.streams()));
+                tables.values().forEach(connector::fillFieldTypes);
+                connector.context().setTableMap(tables::get);
+                Object startOffset = startOffset(connector);
                 StreamReadConsumer consumer = StreamReadConsumer.create((events, offset) -> {
                     for (TapEvent event : events) {
+                        // A change stream also carries control events (heartbeats and the like) that signal
+                        // the tail is alive but carry no row; they are not decodable changes, so skip them.
+                        if (event instanceof ControlEvent) {
+                            continue;
+                        }
                         listener.onEvent(TapEventCodec.decodeChange(event));
                     }
                 });
-                stream.streamRead(connector.context(), config.streams(), null, BATCH_SIZE, consumer);
+                stream.streamRead(connector.context(), config.streams(), startOffset, BATCH_SIZE, consumer);
                 return null;
             });
-        } catch (Throwable ignore) {
-            // The cdc stream runs asynchronously: delivering a stream failure to the caller, and the
-            // backpressure that bounds it, belong to the runtime that owns stream execution, not the port.
+        } catch (Throwable t) {
+            // The cdc stream runs on this daemon thread; its failure cannot be returned to the caller, and
+            // the capture SPI has no error channel for the runtime to observe it yet - a coded, observable
+            // stream failure that drives the pipeline into an error state is a later step. Until then, log
+            // it rather than discard it silently, so a stream that dies is at least visible in the logs.
+            LOG.warn("cdc stream for connector {} stopped on a failure", connector.connectorId(), t);
         }
+    }
+
+    /**
+     * The connector's current stream position, so the tail resumes from now rather than driving a
+     * schema-only recovery that has no stored offset. Null when the connector declares no offset function.
+     */
+    private static Object startOffset(PdkConnector connector) throws Throwable {
+        TimestampToStreamOffsetFunction offset = connector.functions().getTimestampToStreamOffsetFunction();
+        return offset == null ? null : offset.timestampToStreamOffset(connector.context(), null);
     }
 
     /** Runs a read action under the connector loader, mapping a connector-side failure to a code. */
