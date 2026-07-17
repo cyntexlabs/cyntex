@@ -9,6 +9,7 @@ import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.utils.DataMap;
 import io.tapdata.pdk.apis.TapConnector;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
+import io.tapdata.pdk.apis.entity.ConnectorCapabilities;
 import io.tapdata.pdk.apis.functions.ConnectorFunctions;
 import io.tapdata.pdk.apis.spec.TapNodeSpecification;
 
@@ -29,6 +30,12 @@ import java.util.Map;
  * only synthetic connectors that bind to the frozen contract alone.
  */
 final class PdkConnector implements AutoCloseable {
+
+    /** The runtime env key naming the host's deployment identity, which a connector's runtime reads. */
+    private static final String DEPLOYMENT_IDENTITY_KEY = "app_type";
+
+    /** Cyntex hosts connectors as a standalone, on-premise deployment (not a cloud tenant). */
+    private static final String DEPLOYMENT_IDENTITY = "DAAS";
 
     /** A connector-driving action that may throw the connector's own {@code Throwable}. */
     interface Action<T> {
@@ -59,6 +66,7 @@ final class PdkConnector implements AutoCloseable {
      * API level, a missing / non-connector class, or an un-instantiable connector.
      */
     static PdkConnector open(String connectorId, ConnectorRef ref, Map<String, Object> settings) {
+        ensureDeploymentIdentity();
         gateApiLevel(connectorId, ref);
 
         ConnectorClassLoader loader;
@@ -94,6 +102,10 @@ final class PdkConnector implements AutoCloseable {
             // and the drive; the context leaves them null, so give it live ones or the first touch NPEs.
             context.setStateMap(new InMemoryStateMap());
             context.setGlobalStateMap(new InMemoryStateMap());
+            // A connector reads its capability alternatives off the context during the drive; the context
+            // leaves them null, so give it an empty set or the first read NPEs. Empty means no overrides:
+            // the connector uses its own default capability behaviour, which is the L1 intent.
+            context.setConnectorCapabilities(ConnectorCapabilities.create());
             PdkConnector result = new PdkConnector(
                     connectorId, loader, connector, functions, context, dataTypesFrom(ref.spec()));
             opened = true;
@@ -104,6 +116,22 @@ final class PdkConnector implements AutoCloseable {
             if (!opened) {
                 closeQuietly(loader);
             }
+        }
+    }
+
+    /**
+     * Declares the host's deployment identity to the PDK runtime before any connector is driven. A real
+     * connector's runtime reads {@code app_type} to choose its on-premise vs cloud behaviour and crashes
+     * constructing its writer when it finds it blank; a synthetic connector never reads it. The host
+     * declares itself a standalone deployment, set once and only when neither an environment variable nor a
+     * system property already chose one, so an operator override (or a cloud host) stands. The runtime reads
+     * an environment variable ahead of the property, so a set property is only consulted when no variable is
+     * present, exactly as this gap-fill assumes.
+     */
+    private static void ensureDeploymentIdentity() {
+        if (System.getenv(DEPLOYMENT_IDENTITY_KEY) == null
+                && System.getProperty(DEPLOYMENT_IDENTITY_KEY) == null) {
+            System.setProperty(DEPLOYMENT_IDENTITY_KEY, DEPLOYMENT_IDENTITY);
         }
     }
 

@@ -18,9 +18,46 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 class PdkConnectorTest {
 
+    private static final String APP_TYPE = "app_type";
+
     private static ConnectorRef ref(Path dir) {
         return new ConnectorRef(
                 List.of(Synthetic.discoverableSource(dir)), "synthetic.Discoverable", "2.0.8", null);
+    }
+
+    @Test
+    void openingAConnectorDeclaresTheHostDeploymentIdentityWhenTheHostChoseNone(@TempDir Path dir) {
+        String saved = System.getProperty(APP_TYPE);
+        System.clearProperty(APP_TYPE);
+        try (PdkConnector connector = PdkConnector.open("demo", ref(dir), Map.of())) {
+            // A real connector's runtime reads its deployment identity (app_type) to pick on-prem vs cloud
+            // behaviour and crashes constructing its writer when it is blank. Opening any connector declares
+            // the host identity, so a real connector never meets a blank one. Cyntex hosts as standalone.
+            assertThat(System.getProperty(APP_TYPE)).isEqualTo("DAAS");
+        } finally {
+            restore(APP_TYPE, saved);
+        }
+    }
+
+    @Test
+    void openingAConnectorLeavesAnAlreadyChosenDeploymentIdentityInPlace(@TempDir Path dir) {
+        String saved = System.getProperty(APP_TYPE);
+        System.setProperty(APP_TYPE, "DRS");
+        try (PdkConnector connector = PdkConnector.open("demo", ref(dir), Map.of())) {
+            // An operator or a cloud host may have chosen a deployment identity already; the host default
+            // fills a gap only, it never overrides a chosen one.
+            assertThat(System.getProperty(APP_TYPE)).isEqualTo("DRS");
+        } finally {
+            restore(APP_TYPE, saved);
+        }
+    }
+
+    private static void restore(String key, String value) {
+        if (value == null) {
+            System.clearProperty(key);
+        } else {
+            System.setProperty(key, value);
+        }
     }
 
     @Test
@@ -68,6 +105,16 @@ class PdkConnectorTest {
             connector.fillFieldTypes(table);
 
             assertThat(table.getNameFieldMap().get("id").getTapType()).isNull();
+        }
+    }
+
+    @Test
+    void theDrivingContextCarriesConnectorCapabilities(@TempDir Path dir) {
+        try (PdkConnector connector = PdkConnector.open("demo", ref(dir), Map.of())) {
+            // A connector reads its capability alternatives off the context during the drive; a null set is
+            // an NPE the moment it reads one. An empty set means no overrides - the connector's own defaults.
+            assertThat(connector.context().getConnectorCapabilities())
+                    .as("driving context connector capabilities").isNotNull();
         }
     }
 
