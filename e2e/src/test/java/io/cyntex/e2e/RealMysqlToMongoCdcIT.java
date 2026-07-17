@@ -3,7 +3,8 @@ package io.cyntex.e2e;
 import io.cyntex.core.lifecycle.LifecycleVerb;
 
 import org.junit.jupiter.api.BeforeAll;
-import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.testcontainers.containers.MySQLContainer;
 import org.testcontainers.utility.DockerImageName;
 
@@ -13,10 +14,10 @@ import java.sql.PreparedStatement;
 import java.sql.Statement;
 import java.time.Duration;
 import java.util.LinkedHashMap;
+import java.util.Locale;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /**
  * The witness that a real PDK connector carries the CDC / change-stream half across two databases.
@@ -27,9 +28,14 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
  * watch the binlog tail carry them to Mongo. The pipeline admits both a snapshot read ({@code op=r})
  * and a cdc insert ({@code op=i}), so the count crosses from the seeded N to N+M as the tail delivers.
  *
+ * <p>Run on both fidelity tiers like the snapshot witness: embedded in this JVM, and against the
+ * shipped boot jar in its own process - the connector loaded by the fat-jar the product ships, whose
+ * manifest must carry the open its cglib config binding needs.
+ *
  * <p>Gated on a directory of real connector jars ({@code -Dcyntex.e2e.connectors-dir}) and Docker,
- * exactly like the snapshot witness. Needs binlog CDC on the source, so it grants the connector's
- * user MySQL replication privileges (mysql:8 has binlog/ROW/server-id on by default).
+ * exactly like the snapshot witness: naming no directory skips, naming one whose jars do not resolve
+ * fails rather than skips. Needs binlog CDC on the source, so it grants the connector's user MySQL
+ * replication privileges (mysql:8 has binlog/ROW/server-id on by default).
  */
 class RealMysqlToMongoCdcIT {
 
@@ -44,22 +50,24 @@ class RealMysqlToMongoCdcIT {
     @BeforeAll
     static void requireDockerAndRealConnectors() {
         DockerGate.require();
-        assumeTrue(
-                realConnectorAvailable("mysql") && realConnectorAvailable("mongodb"),
-                "no -Dcyntex.e2e.connectors-dir with mysql + mongodb jars; skipping the real-connector run");
+        RealConnectorGate.require("mysql", "mongodb");
     }
 
-    @Test
-    void realMysqlCdcRowsReachRealMongo() throws Exception {
+    @ParameterizedTest
+    @EnumSource(Tiers.class)
+    void realMysqlCdcRowsReachRealMongo(Tiers tier) throws Exception {
         try (MySQLContainer<?> mysql = new MySQLContainer<>(DockerImageName.parse("mysql:8.0"))) {
             mysql.start();
             seedMysqlOrders(mysql, SEEDED_ROWS);
             grantReplication(mysql);
 
-            String storeUri = SharedMongo.replicaSetUrl("real_cdc_store");
-            String targetUri = SharedMongo.replicaSetUrl("real_cdc_target");
+            // One store and one target per tier: sharing them would let a later tier read the rows an
+            // earlier one already landed and pass on the first poll without the connector writing a thing.
+            String suffix = tier.name().toLowerCase(Locale.ROOT);
+            String storeUri = SharedMongo.replicaSetUrl("real_cdc_store_" + suffix);
+            String targetUri = SharedMongo.replicaSetUrl("real_cdc_target_" + suffix);
 
-            try (ServerHandle server = InProcessServer.start(storeUri);
+            try (ServerHandle server = tier.launch(storeUri);
                     MongoEndpoints mongo = new MongoEndpoints()) {
                 ControlPlane control = new ControlPlane(server.baseUrl());
                 control.bootstrapAndLogin("e2e", "e2e-password");
@@ -199,14 +207,6 @@ class RealMysqlToMongoCdcIT {
                   sync:
                     - source: tgt_mongo
                 """;
-    }
-
-    private static boolean realConnectorAvailable(String connectorId) {
-        try {
-            return ConnectorJars.bytesFor(connectorId).length > 0;
-        } catch (RuntimeException notAvailable) {
-            return false;
-        }
     }
 
     private static void sleep() {

@@ -11,7 +11,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.Map;
-import java.util.function.Function;
 import java.util.function.UnaryOperator;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -45,19 +44,6 @@ class TierBindingsIT {
         DockerGate.require();
     }
 
-    /** The fidelity axis, and the only thing that differs between the runs below. */
-    private enum Tiers {
-
-        IN_PROCESS(InProcessServer::start),
-        REAL_PROCESS(RealProcessServer::start);
-
-        private final Function<String, ServerHandle> launcher;
-
-        Tiers(Function<String, ServerHandle> launcher) {
-            this.launcher = launcher;
-        }
-    }
-
     @ParameterizedTest
     @EnumSource(Tiers.class)
     void theSameSpecificationRunsOnEveryTier(Tiers tier) {
@@ -65,7 +51,7 @@ class TierBindingsIT {
         String endpointUri = SharedMongo.replicaSetUrl(database);
         writeWorkspace();
 
-        try (ServerHandle server = tier.launcher.apply(SharedMongo.replicaSetUrl(database + "_store"));
+        try (ServerHandle server = tier.launch(SharedMongo.replicaSetUrl(database + "_store"));
                 MongoEndpoints endpoints = new MongoEndpoints()) {
             ControlPlane control = new ControlPlane(server.baseUrl());
             control.bootstrapAndLogin("e2e", "e2e-password");
@@ -90,7 +76,7 @@ class TierBindingsIT {
         String database = "e2e_unapplied_" + tier.name().toLowerCase();
         writeWorkspace();
 
-        try (ServerHandle server = tier.launcher.apply(SharedMongo.replicaSetUrl(database + "_store"));
+        try (ServerHandle server = tier.launch(SharedMongo.replicaSetUrl(database + "_store"));
                 MongoEndpoints endpoints = new MongoEndpoints()) {
             ControlPlane control = new ControlPlane(server.baseUrl());
             control.bootstrapAndLogin("e2e", "e2e-password");
@@ -119,7 +105,7 @@ class TierBindingsIT {
         String database = "e2e_unobserved_" + tier.name().toLowerCase();
         writeWorkspace();
 
-        try (ServerHandle server = tier.launcher.apply(SharedMongo.replicaSetUrl(database + "_store"));
+        try (ServerHandle server = tier.launch(SharedMongo.replicaSetUrl(database + "_store"));
                 MongoEndpoints endpoints = new MongoEndpoints()) {
             ControlPlane control = new ControlPlane(server.baseUrl());
             control.bootstrapAndLogin("e2e", "e2e-password");

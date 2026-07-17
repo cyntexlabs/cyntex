@@ -12,7 +12,6 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.Locale;
 import java.util.Map;
-import java.util.function.Function;
 import java.util.function.UnaryOperator;
 import java.util.stream.Stream;
 
@@ -81,19 +80,6 @@ class PublishedExamplesIT {
         }
     }
 
-    /** The fidelity axis, and the only thing that differs between the runs of one example. */
-    private enum Tiers {
-
-        IN_PROCESS(InProcessServer::start),
-        REAL_PROCESS(RealProcessServer::start);
-
-        private final Function<String, ServerHandle> launcher;
-
-        Tiers(Function<String, ServerHandle> launcher) {
-            this.launcher = launcher;
-        }
-    }
-
     static Stream<Arguments> everyPublishedExampleOnEveryTier() {
         return Examples.specifications().stream()
                 .flatMap(specification -> Stream.of(Tiers.values())
@@ -112,7 +98,7 @@ class PublishedExamplesIT {
                         specification)
                 .isNotEmpty();
 
-        try (ServerHandle server = tier.launcher.apply(SharedMongo.replicaSetUrl(store(workspace, tier)));
+        try (ServerHandle server = tier.launch(SharedMongo.replicaSetUrl(store(workspace, tier)));
                 Endpoints files = new FileEndpoints()) {
             ControlPlane control = new ControlPlane(server.baseUrl());
             control.bootstrapAndLogin("e2e", "e2e-password");

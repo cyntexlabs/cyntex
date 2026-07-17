@@ -22,6 +22,30 @@ final class ConnectorJars {
     private ConnectorJars() {
     }
 
+    /**
+     * Whether a connectors directory has been named at all - the signal that a real-connector run was
+     * intended. Whether the jars in it actually resolve is a separate question {@link #bytesFor}
+     * answers; a named-but-broken directory is the case a gate must fail on rather than skip.
+     */
+    static boolean directoryNamed() {
+        String configured = System.getProperty(DIRECTORY_PROPERTY);
+        return configured != null && !configured.isBlank();
+    }
+
+    /**
+     * Whether the named directory resolves exactly one jar for the connector id, without reading it.
+     * The gate uses this to decide run-vs-fail; {@link #bytesFor} then reads the bytes to register, so
+     * this avoids loading whole jars only to test existence.
+     */
+    static boolean resolves(String connectorId) {
+        try {
+            find(directory(), connectorId);
+            return true;
+        } catch (RuntimeException notResolvable) {
+            return false;
+        }
+    }
+
     /** The bytes of the jar whose file name begins with the connector id. */
     static byte[] bytesFor(String connectorId) {
         Path directory = directory();

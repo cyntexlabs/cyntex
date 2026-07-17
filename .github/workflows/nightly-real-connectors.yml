@@ -1,0 +1,54 @@
+# Real-connector witness lane (manual for now).
+#
+# Runs the real-connector end-to-end witnesses - RealMysqlToMongoSnapshotIT and RealMysqlToMongoCdcIT -
+# across both fidelity tiers: the product embedded in the test JVM, and the shipped boot jar in its own
+# process. They drive two real Tapdata connectors (MySQL, MongoDB), so they need a Docker daemon for
+# the databases and a directory of the real connector jars. The default CI build skips them (no jars);
+# this lane is where they are meant to run.
+#
+# Not scheduled yet, on purpose. The connector jars are not published where a hosted runner can fetch
+# them, so this stays workflow_dispatch until a runner that stages them exists (the connectors_dir
+# input names their location on that runner). When one does, uncomment the schedule below. The gate
+# fails rather than skips when the named directory does not resolve both jars, so a triggered run that
+# cannot get them reports red - never a green build that verified nothing.
+name: Real connectors
+
+on:
+  workflow_dispatch:
+    inputs:
+      connectors_dir:
+        description: "Directory on the runner holding the mysql + mongodb connector jars"
+        required: true
+        type: string
+  # schedule:
+  #   - cron: "0 3 * * *"   # enable once a runner stages the connector jars
+
+concurrency:
+  group: real-connectors-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  real-connectors:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require a connectors directory
+        # required:true does not reject an emptied field, and an empty value would make the gate skip -
+        # a hollow green, the outcome this lane exists to prevent. Fail fast instead.
+        run: test -n "${{ inputs.connectors_dir }}" || { echo "connectors_dir must be a non-empty path on the runner" >&2; exit 1; }
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+      - name: Real-connector witnesses on both tiers
+        # Docker 29 rejects the API version testcontainers negotiates by default, so pin it. The surefire
+        # selector matches nothing, so only the two failsafe witnesses run; the connector gate fails
+        # rather than skips if connectors_dir does not resolve both jars.
+        run: >
+          mvn -B -pl e2e -am verify
+          -Dapi.version=1.44
+          -Dcyntex.e2e.connectors-dir="${{ inputs.connectors_dir }}"
+          -Dtest=ZzzNoSuchSurefireSelector -Dsurefire.failIfNoSpecifiedTests=false
+          -Dit.test=RealMysqlToMongoSnapshotIT,RealMysqlToMongoCdcIT
+          -Dfailsafe.failIfNoSpecifiedTests=false

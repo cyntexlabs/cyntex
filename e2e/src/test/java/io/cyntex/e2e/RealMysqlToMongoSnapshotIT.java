@@ -3,7 +3,8 @@ package io.cyntex.e2e;
 import io.cyntex.core.lifecycle.LifecycleVerb;
 
 import org.junit.jupiter.api.BeforeAll;
-import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.testcontainers.containers.MySQLContainer;
 import org.testcontainers.utility.DockerImageName;
 
@@ -13,10 +14,10 @@ import java.sql.PreparedStatement;
 import java.sql.Statement;
 import java.time.Duration;
 import java.util.LinkedHashMap;
+import java.util.Locale;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /**
  * The witness that a real PDK connector moves real rows across two databases through the product.
@@ -31,14 +32,21 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
  *
  * <p>Snapshot only on purpose: this is the smallest real crossing, batch-read to sink with no change
  * stream, so it needs no binlog and no replication grant and rests on nothing but the connector reading
- * a table and the sink writing one. The change-stream half is a later step.
+ * a table and the sink writing one. The change-stream half is {@link RealMysqlToMongoCdcIT}.
+ *
+ * <p>Run on both fidelity tiers. Embedded in this JVM, and - the one that matters here - against the
+ * shipped boot jar in its own process: that is the connector loaded by the fat-jar the product actually
+ * ships, whose manifest must carry the open its cglib config binding needs. The embedded tier gets that
+ * open from the test fork instead, so it cannot witness a deliverable that omits it.
  *
  * <p>Gated on a directory of real connector jars ({@code -Dcyntex.e2e.connectors-dir}, the same
- * property the harness registers from), so the default build - which has no such jars - skips it and
- * stays green. Docker is required for both databases; run it with:
+ * property the harness registers from) and on Docker for both databases. Naming no directory skips it,
+ * so the default build stays green; naming one whose jars do not resolve fails rather than skips, so a
+ * run meant to happen cannot pass by quietly not happening. The real-process tier launches the boot
+ * jar, so the app module has to be built too ({@code -am}). Run it with:
  *
  * <pre>
- *   mvn -pl e2e verify -Dapi.version=1.44 \
+ *   mvn -pl e2e -am verify -Dapi.version=1.44 \
  *     -Dcyntex.e2e.connectors-dir=/path/to/connectors
  * </pre>
  */
@@ -53,21 +61,23 @@ class RealMysqlToMongoSnapshotIT {
     @BeforeAll
     static void requireDockerAndRealConnectors() {
         DockerGate.require();
-        assumeTrue(
-                realConnectorAvailable("mysql") && realConnectorAvailable("mongodb"),
-                "no -Dcyntex.e2e.connectors-dir with mysql + mongodb jars; skipping the real-connector run");
+        RealConnectorGate.require("mysql", "mongodb");
     }
 
-    @Test
-    void realMysqlSnapshotRowsReachRealMongo() throws Exception {
+    @ParameterizedTest
+    @EnumSource(Tiers.class)
+    void realMysqlSnapshotRowsReachRealMongo(Tiers tier) throws Exception {
         try (MySQLContainer<?> mysql = new MySQLContainer<>(DockerImageName.parse("mysql:8.0"))) {
             mysql.start();
             seedMysqlOrders(mysql, SEEDED_ROWS);
 
-            String storeUri = SharedMongo.replicaSetUrl("real_mysql_store");
-            String targetUri = SharedMongo.replicaSetUrl("real_mysql_target");
+            // One store and one target per tier: sharing them would let a later tier read the rows an
+            // earlier one already landed and pass on the first poll without the connector writing a thing.
+            String suffix = tier.name().toLowerCase(Locale.ROOT);
+            String storeUri = SharedMongo.replicaSetUrl("real_mysql_store_" + suffix);
+            String targetUri = SharedMongo.replicaSetUrl("real_mysql_target_" + suffix);
 
-            try (ServerHandle server = InProcessServer.start(storeUri);
+            try (ServerHandle server = tier.launch(storeUri);
                     MongoEndpoints mongo = new MongoEndpoints()) {
                 ControlPlane control = new ControlPlane(server.baseUrl());
                 control.bootstrapAndLogin("e2e", "e2e-password");
@@ -185,14 +195,6 @@ class RealMysqlToMongoSnapshotIT {
                   sync:
                     - source: tgt_mongo
                 """;
-    }
-
-    private static boolean realConnectorAvailable(String connectorId) {
-        try {
-            return ConnectorJars.bytesFor(connectorId).length > 0;
-        } catch (RuntimeException notAvailable) {
-            return false;
-        }
     }
 
     private static void sleep() {
