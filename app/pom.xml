@@ -116,6 +116,20 @@
       <artifactId>adapter-pdk</artifactId>
       <version>${revision}</version>
     </dependency>
+    <!-- The PDK runtime, on the host classpath so a real connector's base class can bootstrap TapRuntime
+         through the host loader (a single-arg Class.forName resolved by the host, not the isolated
+         connector loader). Runtime scope, not compile: adapter-pdk still compiles against the frozen API
+         only (rule R3 is an import lock, untouched by a runtime dependency). This is the one place the
+         runtime enters a shipped artifact; the connector plugins themselves never do (they load in
+         isolation at runtime). Load-bearing though compile-invisible — no app source references it, yet a
+         real connector will not construct without it; do not remove it as unused, and do not downgrade it
+         to test scope (that drops it from the boot jar). PdkRuntimeInBootJarIT guards its presence in the
+         packaged boot jar. Version managed by the platform BOM. -->
+    <dependency>
+      <groupId>io.tapdata</groupId>
+      <artifactId>tapdata-pdk-runner</artifactId>
+      <scope>runtime</scope>
+    </dependency>
     <dependency>
       <groupId>io.cyntex</groupId>
       <artifactId>adapter-mongo-store</artifactId>
@@ -211,6 +225,13 @@
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-failsafe-plugin</artifactId>
+        <configuration>
+          <!-- The packaged boot jar, handed to the boot-jar guard IT so it can assert the PDK runtime is
+               bundled into the shipped artifact (repackage runs in package, before integration-test). -->
+          <systemPropertyVariables>
+            <cyntex.app.boot-jar>${project.build.directory}/${project.build.finalName}-boot.jar</cyntex.app.boot-jar>
+          </systemPropertyVariables>
+        </configuration>
         <executions>
           <execution>
             <goals>

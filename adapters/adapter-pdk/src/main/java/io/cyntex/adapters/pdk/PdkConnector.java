@@ -19,8 +19,9 @@ import java.util.Map;
  *
  * <p>The connector is driven with its own class loader installed as the thread context loader, the way
  * a real connector reaches its isolated runtime; {@link #close()} closes that loader. Constructing a
- * real connector can bootstrap the PDK runtime, which the host must make reachable — until then this
- * drives synthetic connectors that bind only to the frozen contract.
+ * real connector bootstraps the PDK runtime through the host loader, so the host must carry it: the
+ * assembly root does, so a real connector constructs here. A build whose host omits the runtime drives
+ * only synthetic connectors that bind to the frozen contract alone.
  */
 final class PdkConnector implements AutoCloseable {
 
