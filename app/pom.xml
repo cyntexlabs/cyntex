@@ -219,6 +219,24 @@
 
   <build>
     <plugins>
+      <!-- Stamp Add-Opens into the jar manifest so the shipped boot jar opens java.base/java.lang to
+           unnamed modules under a bare `java -jar` (the spring-boot repackage below preserves the jar
+           manifest's own entries). A real PDK connector binds its configuration through cglib, which
+           reflects into ClassLoader.defineClass; JDK 17+ denies that without this open and the
+           connector fails at construction. The launcher script sets the same flag for the unpacked
+           distribution; this manifest entry covers launching the fat-jar directly. -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-jar-plugin</artifactId>
+        <configuration>
+          <archive>
+            <manifestEntries>
+              <Add-Opens>java.base/java.lang</Add-Opens>
+            </manifestEntries>
+          </archive>
+        </configuration>
+      </plugin>
+
       <!-- Testcontainers-backed witness tests (*IT) run in the integration-test phase, so `mvn test`
            stays fast and `mvn verify` exercises them. Each is annotated to skip automatically where
            Docker is unavailable, so a Docker-less build stays green. -->
