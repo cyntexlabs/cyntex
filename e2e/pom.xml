@@ -109,6 +109,21 @@
       <artifactId>mongodb</artifactId>
       <scope>test</scope>
     </dependency>
+    <!-- The source half of the real-connector crossing: a real MySQL to seed and snapshot-read. Test
+         scope, and gated at runtime on the connector jars being supplied, so the default build neither
+         pulls a database up nor needs one. The JDBC driver below is the harness's own seed path only -
+         the registered connector jar carries its own driver on an isolated loader, never this one. -->
+    <dependency>
+      <groupId>org.testcontainers</groupId>
+      <artifactId>mysql</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>com.mysql</groupId>
+      <artifactId>mysql-connector-j</artifactId>
+      <version>8.4.0</version>
+      <scope>test</scope>
+    </dependency>
     <dependency>
       <groupId>org.testcontainers</groupId>
       <artifactId>junit-jupiter</artifactId>
@@ -146,6 +161,12 @@
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-failsafe-plugin</artifactId>
         <configuration>
+          <!-- The in-process tier hosts real PDK connectors inside this fork's JVM, and their runtime
+               loads connection config through cglib, which reflects into java.lang.ClassLoader to define
+               generated classes - blocked on JDK 17+ unless java.lang is opened. The shipped server
+               carries the same opening in its launcher; the in-process tier must match it, or a real
+               connector's very first init fails here with an ExceptionInInitializerError. -->
+          <argLine>--add-opens java.base/java.lang=ALL-UNNAMED</argLine>
           <systemPropertyVariables>
             <!-- Where the reactor puts the service deliverable. The real-process tier drives this file
                  rather than a classpath, which is the whole of its fidelity claim; the app module is

@@ -125,6 +125,23 @@ class PdkCapturePortTest {
     }
 
     @Test
+    void snapshotHandsTheConnectorItsDiscoveredTableNotABareName(@TempDir Path dir) throws Exception {
+        // A real connector builds its read from the table's own columns - a mysql SELECT names them - and
+        // handed a bare name with no columns it reads nothing or fails outright. This connector emits one
+        // row per column of the table it is given, and its discovery reports a single column; so a snapshot
+        // that read through a bare name would yield zero, and one through the discovered table yields one.
+        Path jar = Synthetic.tableAwareSource(dir);
+        PdkCapturePort port = new PdkCapturePort(provisioner(jar, "synthetic.TableAware", null));
+        List<Envelope> got = new ArrayList<>();
+        try (CaptureBatch batch = port.snapshot(config("t1"))) {
+            while (batch.hasNext()) {
+                got.add(batch.next());
+            }
+        }
+        assertThat(got).hasSize(1);
+    }
+
+    @Test
     void snapshotWithoutExplicitStreamsInitsTheConnectorExactlyOnce(@TempDir Path dir) throws Exception {
         // Empty streams means "every stream": the drive discovers the stream names and reads them. It
         // must init the connector once, not once for discovery and again for the read — the connector

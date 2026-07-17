@@ -93,6 +93,25 @@ final class Synthetic {
         return SyntheticJar.compileToJar(dir, "synthetic.EmittingSource", source("EmittingSource", "", register));
     }
 
+    /**
+     * A source whose batchRead emits one row per column of the table it is handed, so a read through a
+     * bare, fieldless table yields nothing. The scaffold's discovery reports one-column {@code t1}, so a
+     * drive that passes the discovered table reads one row and a drive that passes a bare name reads zero.
+     */
+    static Path tableAwareSource(Path dir) {
+        String register = ""
+                + "functions.supportBatchRead((context, table, offset, size, consumer) -> {"
+                + "  List<TapEvent> evs = new ArrayList<>();"
+                + "  int n = (table.getNameFieldMap() == null) ? 0 : table.getNameFieldMap().size();"
+                + "  for (int i = 0; i < n; i++) {"
+                + "    Map<String,Object> r = new LinkedHashMap<>(); r.put(\"id\", i);"
+                + "    evs.add(TapInsertRecordEvent.create().table(\"t1\").referenceTime(1L).after(r));"
+                + "  }"
+                + "  consumer.accept(evs, null);"
+                + "});";
+        return SyntheticJar.compileToJar(dir, "synthetic.TableAware", source("TableAware", "", register));
+    }
+
     /** A connector whose constructor throws — instantiation fails, a load failure. */
     static Path ctorThrowsSource(Path dir) {
         return SyntheticJar.compileToJar(dir, "synthetic.CtorThrows",

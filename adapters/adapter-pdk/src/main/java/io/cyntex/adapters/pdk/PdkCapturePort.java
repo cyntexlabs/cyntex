@@ -18,6 +18,7 @@ import io.tapdata.pdk.apis.functions.connector.source.BatchReadFunction;
 import io.tapdata.pdk.apis.functions.connector.source.StreamReadFunction;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -126,14 +127,33 @@ public final class PdkCapturePort implements CapturePort {
     /** Inits the connector once, then batch-reads the configured streams (or every discovered stream). */
     private List<TapEvent> batchRead(PdkConnector connector, CaptureConfig config, BatchReadFunction batch) throws Throwable {
         connector.connector().init(connector.context());
+        // A connector builds its read from the table's own columns, so it is handed the table as
+        // discovered - with its fields - not a bare name. Discovery does not re-init: init has run.
+        Map<String, TapTable> discovered = byId(discoverTables(connector, config.streams()));
         List<String> streams = config.streams().isEmpty()
-                ? names(discoverTables(connector, List.of())) : config.streams();
+                ? new ArrayList<>(discovered.keySet()) : config.streams();
         List<TapEvent> raw = new ArrayList<>();
         for (String stream : streams) {
-            batch.batchRead(connector.context(), new TapTable(stream), null, BATCH_SIZE,
-                    (events, offset) -> raw.addAll(events));
+            TapTable table = discovered.get(stream);
+            if (table == null) {
+                throw new IllegalStateException(
+                        "stream " + stream + " was requested but the connector did not discover it");
+            }
+            // The connector reads by each field's PDK type, which discovery leaves unset; fill it from the
+            // connector's own type mapping before the read, or the read meets a null field type.
+            connector.fillFieldTypes(table);
+            batch.batchRead(connector.context(), table, null, BATCH_SIZE, (events, offset) -> raw.addAll(events));
         }
         return raw;
+    }
+
+    /** Indexes discovered tables by id, keeping discovery order. */
+    private static Map<String, TapTable> byId(List<TapTable> tables) {
+        Map<String, TapTable> byId = new LinkedHashMap<>();
+        for (TapTable table : tables) {
+            byId.put(table.getId(), table);
+        }
+        return byId;
     }
 
     /** Inits the connector and discovers the given streams (empty = all). */

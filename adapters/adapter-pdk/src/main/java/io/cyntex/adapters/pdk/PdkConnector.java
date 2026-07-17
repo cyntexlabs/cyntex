@@ -1,13 +1,18 @@
 package io.cyntex.adapters.pdk;
 
 import io.cyntex.core.common.CyntexException;
+import io.cyntex.core.common.JsonReader;
 import io.tapdata.entity.codec.TapCodecsRegistry;
+import io.tapdata.entity.conversion.impl.TableFieldTypesGeneratorImpl;
+import io.tapdata.entity.mapping.DefaultExpressionMatchingMap;
+import io.tapdata.entity.schema.TapTable;
 import io.tapdata.entity.utils.DataMap;
 import io.tapdata.pdk.apis.TapConnector;
 import io.tapdata.pdk.apis.context.TapConnectorContext;
 import io.tapdata.pdk.apis.functions.ConnectorFunctions;
 import io.tapdata.pdk.apis.spec.TapNodeSpecification;
 
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
@@ -35,14 +40,17 @@ final class PdkConnector implements AutoCloseable {
     private final TapConnector connector;
     private final ConnectorFunctions functions;
     private final TapConnectorContext context;
+    private final DefaultExpressionMatchingMap dataTypesMap;
 
     private PdkConnector(String connectorId, ConnectorClassLoader loader, TapConnector connector,
-                         ConnectorFunctions functions, TapConnectorContext context) {
+                         ConnectorFunctions functions, TapConnectorContext context,
+                         DefaultExpressionMatchingMap dataTypesMap) {
         this.connectorId = connectorId;
         this.loader = loader;
         this.connector = connector;
         this.functions = functions;
         this.context = context;
+        this.dataTypesMap = dataTypesMap;
     }
 
     /**
@@ -82,7 +90,12 @@ final class PdkConnector implements AutoCloseable {
             }
             TapConnectorContext context = new TapConnectorContext(
                     new TapNodeSpecification(), DataMap.create(settings), null, new SilentLog());
-            PdkConnector result = new PdkConnector(connectorId, loader, connector, functions, context);
+            // A connector reaches per-run scratch through the context's state maps during init, discovery
+            // and the drive; the context leaves them null, so give it live ones or the first touch NPEs.
+            context.setStateMap(new InMemoryStateMap());
+            context.setGlobalStateMap(new InMemoryStateMap());
+            PdkConnector result = new PdkConnector(
+                    connectorId, loader, connector, functions, context, dataTypesFrom(ref.spec()));
             opened = true;
             return result;
         } finally {
@@ -144,6 +157,40 @@ final class PdkConnector implements AutoCloseable {
 
     ConnectorFunctions functions() {
         return functions;
+    }
+
+    /**
+     * Fills each field's PDK type ({@code tapType}) from its declared database type using the connector's
+     * {@code dataTypes} mapping. A connector's read builds on the field's tapType - a mysql snapshot reads
+     * its date columns by it - and a discovered field carries only its database type string until this
+     * runs. A connector with no spec, or none declaring dataTypes, leaves the fields as discovered.
+     */
+    void fillFieldTypes(TapTable table) {
+        if (dataTypesMap == null || table.getNameFieldMap() == null) {
+            return;
+        }
+        new TableFieldTypesGeneratorImpl().autoFill(table.getNameFieldMap(), dataTypesMap);
+    }
+
+    /**
+     * Builds the connector's database-type-to-PDK-type mapping from its spec's {@code dataTypes} object,
+     * or null when the spec is absent or declares none. Runs on the host with the host's json reader over
+     * the raw spec text, not under the connector loader.
+     */
+    private static DefaultExpressionMatchingMap dataTypesFrom(String spec) {
+        if (spec == null || !(JsonReader.parse(spec) instanceof Map<?, ?> root)
+                || !(root.get("dataTypes") instanceof Map<?, ?> dataTypes)) {
+            return null;
+        }
+        Map<String, DataMap> byExpression = new LinkedHashMap<>();
+        for (Map.Entry<?, ?> entry : dataTypes.entrySet()) {
+            if (entry.getKey() instanceof String expression && entry.getValue() instanceof Map<?, ?> config) {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> configMap = (Map<String, Object>) config;
+                byExpression.put(expression, DataMap.create(configMap));
+            }
+        }
+        return byExpression.isEmpty() ? null : new DefaultExpressionMatchingMap(byExpression);
     }
 
     TapConnectorContext context() {
