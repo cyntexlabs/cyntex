@@ -12,6 +12,7 @@ import java.time.ZoneOffset;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static io.cyntex.core.lifecycle.PipelineState.COMPLETED;
+import static io.cyntex.core.lifecycle.PipelineState.FAILED;
 import static io.cyntex.core.lifecycle.PipelineState.NEW;
 import static io.cyntex.core.lifecycle.PipelineState.PAUSED;
 import static io.cyntex.core.lifecycle.PipelineState.RUNNING;
@@ -235,6 +236,52 @@ class PipelineConvergerTest {
 
         converger.markCompleted("p1");
 
+        assertThat(actuator.calls()).containsExactly("stop:p1");
+    }
+
+    @Test
+    @DisplayName("a running pipeline whose job has died converges to FAILED, carries the cause, and stops it")
+    void aDeadJobConvergesToFailed() {
+        converge(RUNNING); // actual now RUNNING
+        actuator.reset();
+        RuntimeException cause = new RuntimeException("sink write failed");
+        actuator.failWith(cause);
+
+        ConvergeResult result = converger.converge("p1");
+
+        assertThat(result.status()).isEqualTo(ConvergeStatus.FAILED);
+        assertThat(result.failure()).contains(cause);
+        assertThat(state.read("p1").orElseThrow().stateJson()).isEqualTo(StateJson.of(FAILED));
+        // The dead job's capture is torn down: driving to FAILED actuates a stop over it.
+        assertThat(actuator.calls()).containsExactly("stop:p1");
+    }
+
+    @Test
+    @DisplayName("a failed pipeline is not re-driven toward a still-RUNNING target, so a dead job is not restarted")
+    void aFailedPipelineIsNotRestarted() {
+        converge(RUNNING);
+        actuator.failWith(new RuntimeException("sink write failed"));
+        converger.converge("p1"); // drives to FAILED
+        actuator.reset();
+
+        ConvergeResult again = converger.converge("p1"); // desired still RUNNING, job still failed
+
+        assertThat(again.status()).isEqualTo(CONVERGED);
+        assertThat(state.read("p1").orElseThrow().stateJson()).isEqualTo(StateJson.of(FAILED));
+        assertThat(actuator.calls()).isEmpty(); // no restart of the dead job on every tick
+    }
+
+    @Test
+    @DisplayName("stopping a failed pipeline clears it to STOPPED so a fresh start can run it again")
+    void stoppingAFailedPipelineRecoversIt() {
+        converge(RUNNING);
+        actuator.failWith(new RuntimeException("sink write failed"));
+        converger.converge("p1"); // drives to FAILED
+        actuator.reset();
+
+        converge(STOPPED); // user stop: desired -> STOPPED
+
+        assertThat(state.read("p1").orElseThrow().stateJson()).isEqualTo(StateJson.of(STOPPED));
         assertThat(actuator.calls()).containsExactly("stop:p1");
     }
 

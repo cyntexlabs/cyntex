@@ -57,6 +57,7 @@
   ],
   "pipelineStates": [
     "COMPLETED",
+    "FAILED",
     "NEW",
     "PAUSED",
     "RUNNING",

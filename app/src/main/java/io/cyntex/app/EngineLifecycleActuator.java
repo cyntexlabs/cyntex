@@ -4,6 +4,7 @@ import io.cyntex.runtime.engine.Engine;
 import io.cyntex.runtime.scheduler.LifecycleActuator;
 
 import java.util.Objects;
+import java.util.Optional;
 
 /**
  * Binds the converge loop's lifecycle actuator seam to the Jet execution engine and the source-side capture
@@ -52,5 +53,10 @@ final class EngineLifecycleActuator implements LifecycleActuator {
     public void stop(String pipelineId) {
         engine.cancel(pipelineId);
         captureCoordinator.stopCapture(pipelineId);
+    }
+
+    @Override
+    public Optional<Throwable> failure(String pipelineId) {
+        return engine.failureOf(pipelineId);
     }
 }

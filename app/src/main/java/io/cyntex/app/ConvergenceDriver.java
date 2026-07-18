@@ -1,5 +1,7 @@
 package io.cyntex.app;
 
+import io.cyntex.runtime.scheduler.ConvergeResult;
+import io.cyntex.runtime.scheduler.ConvergeStatus;
 import io.cyntex.runtime.scheduler.ObservationPublisher;
 import io.cyntex.runtime.scheduler.PipelineConverger;
 import io.cyntex.spi.store.DesiredStore;
@@ -37,7 +39,13 @@ final class ConvergenceDriver {
             // tail per pipeline. Cleared per pipeline so the slot never leaks onto the next one or an idle tick.
             MDC.put(PipelineLogAppender.PIPELINE_ID_MDC_KEY, pipelineId);
             try {
-                converger.converge(pipelineId);
+                ConvergeResult result = converger.converge(pipelineId);
+                if (result.status() == ConvergeStatus.FAILED) {
+                    // The job died on its own; the converge side moved the pipeline to the observable
+                    // FAILED state. Log the cause so a dead job is not the silent "found 0" it used to be.
+                    LOG.warn("Pipeline {} entered FAILED: its data-plane job died", pipelineId,
+                            result.failure().orElse(null));
+                }
                 publisher.publish(pipelineId);
             } catch (RuntimeException e) {
                 LOG.warn("Reconcile pass for pipeline {} failed; retrying on the next tick", pipelineId, e);

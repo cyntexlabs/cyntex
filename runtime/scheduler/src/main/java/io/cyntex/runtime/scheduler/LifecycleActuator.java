@@ -1,5 +1,7 @@
 package io.cyntex.runtime.scheduler;
 
+import java.util.Optional;
+
 /**
  * Turns a converged lifecycle transition into the matching data-plane job operation. The converge
  * side owns the state decision and calls the verb here that the transition implies; the binding drives
@@ -25,4 +27,11 @@ public interface LifecycleActuator {
 
     /** Ends the pipeline's job. */
     void stop(String pipelineId);
+
+    /**
+     * The failure of the pipeline's job if it died on its own, or empty while it runs, has no job, or
+     * was ended by a stop. This is how the converge loop observes a job that failed after it started:
+     * a stop's own cancellation is not a failure and must not be reported as one.
+     */
+    Optional<Throwable> failure(String pipelineId);
 }

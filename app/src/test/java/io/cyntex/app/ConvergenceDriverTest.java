@@ -5,6 +5,7 @@ import io.cyntex.core.lifecycle.DesiredState;
 import io.cyntex.core.lifecycle.StateJson;
 import io.cyntex.core.logging.LogLine;
 import io.cyntex.core.logging.RingBufferLogSink;
+import io.cyntex.runtime.scheduler.LifecycleActuator;
 import io.cyntex.runtime.scheduler.ObservationPublisher;
 import io.cyntex.runtime.scheduler.PipelineConverger;
 import org.junit.jupiter.api.Test;
@@ -14,7 +15,9 @@ import org.slf4j.MDC;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.Optional;
 
+import static io.cyntex.core.lifecycle.PipelineState.FAILED;
 import static io.cyntex.core.lifecycle.PipelineState.RUNNING;
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -85,5 +88,67 @@ class ConvergenceDriverTest {
         assertThat(sink.tail("broken")).extracting(LogLine::level).containsExactly("WARN");
         // The attribution slot is cleared after the pass, so an unrelated later log is not misattributed.
         assertThat(MDC.get("pipeline_id")).isNull();
+    }
+
+    @Test
+    void aPipelineWhoseJobDiedIsDrivenToFailedAndLogged() {
+        // A job that dies on its own does not throw into the reconcile pass — the converge side moves the
+        // pipeline to FAILED and returns it. The driver must log that, so a dead job is no longer the
+        // silent "found 0" it used to be, and the observable state reflects the failure.
+        RingBufferLogSink sink = new RingBufferLogSink(8, 8);
+        Logger driverLogger = (Logger) LoggerFactory.getLogger(ConvergenceDriver.class);
+        PipelineLogAppender appender = new PipelineLogAppender(sink);
+        appender.setContext(driverLogger.getLoggerContext());
+        appender.start();
+        driverLogger.addAppender(appender);
+
+        FailingActuator actuator = new FailingActuator();
+        PipelineConverger converger =
+                new PipelineConverger(desired, state, actuator, Clock.fixed(T0, ZoneOffset.UTC));
+        ConvergenceDriver driver =
+                new ConvergenceDriver(converger, desired, new ObservationPublisher(state, observations));
+        try {
+            desired.save(new DesiredState("orders", RUNNING, "rev-1"));
+            driver.reconcile(); // orders -> RUNNING while the job is healthy
+            actuator.failWith(new RuntimeException("sink write failed"));
+
+            driver.reconcile(); // the job has died: orders -> FAILED, and the driver logs it
+        } finally {
+            driverLogger.detachAppender(appender);
+            appender.stop();
+        }
+
+        assertThat(sink.tail("orders")).extracting(LogLine::level).contains("WARN");
+        assertThat(state.read("orders").orElseThrow().stateJson()).isEqualTo(StateJson.of(FAILED));
+    }
+
+    /** A no-op actuator whose failure() a test can arm, to drive a pipeline to FAILED without a real job. */
+    private static final class FailingActuator implements LifecycleActuator {
+        private Throwable failure;
+
+        void failWith(Throwable cause) {
+            this.failure = cause;
+        }
+
+        @Override
+        public void start(String pipelineId) {
+        }
+
+        @Override
+        public void pause(String pipelineId) {
+        }
+
+        @Override
+        public void resume(String pipelineId) {
+        }
+
+        @Override
+        public void stop(String pipelineId) {
+        }
+
+        @Override
+        public Optional<Throwable> failure(String pipelineId) {
+            return Optional.ofNullable(failure);
+        }
     }
 }

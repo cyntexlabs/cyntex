@@ -99,6 +99,39 @@ class EngineTest {
     }
 
     @Test
+    void failureOf_reports_the_cause_of_a_job_that_died_on_its_own() {
+        Engine engine = new Engine(member);
+        engine.submit("orders-pipe", failingDag());
+        awaitStatus(member.getJet().getJob("orders-pipe"), JobStatus.FAILED);
+
+        assertThat(engine.failureOf("orders-pipe"))
+                .get()
+                .satisfies(cause -> assertThat(cause).hasStackTraceContaining("boom in the source"));
+    }
+
+    @Test
+    void failureOf_is_empty_for_a_job_a_stop_cancelled_so_a_stop_is_not_a_failure() {
+        Engine engine = new Engine(member);
+        engine.submit("orders-pipe", foreverDag());
+        Job job = member.getJet().getJob("orders-pipe");
+        awaitStatus(job, JobStatus.RUNNING);
+        engine.cancel("orders-pipe");
+        awaitStatus(job, JobStatus.FAILED); // Jet marks a cancelled job FAILED, but it did not fail on its own
+
+        assertThat(engine.failureOf("orders-pipe")).isEmpty();
+    }
+
+    @Test
+    void failureOf_is_empty_while_a_job_is_running_and_for_an_unknown_pipeline() {
+        Engine engine = new Engine(member);
+        engine.submit("orders-pipe", foreverDag());
+        awaitStatus(member.getJet().getJob("orders-pipe"), JobStatus.RUNNING);
+
+        assertThat(engine.failureOf("orders-pipe")).isEmpty();
+        assertThat(engine.failureOf("ghost")).isEmpty();
+    }
+
+    @Test
     void submit_is_idempotent_and_does_not_start_a_second_job() {
         Engine engine = new Engine(member);
         engine.submit("orders-pipe", foreverDag());
@@ -193,6 +226,27 @@ class EngineTest {
         dag.newVertex("forever", ProcessorMetaSupplier.forceTotalParallelismOne(
                 ProcessorSupplier.of((SupplierEx<Processor>) ForeverSource::new)));
         return dag;
+    }
+
+    /** A one-vertex DAG whose only processor throws, so the job fails on its own with that cause. */
+    private static DAG failingDag() {
+        DAG dag = new DAG();
+        dag.newVertex("boom", ProcessorMetaSupplier.forceTotalParallelismOne(
+                ProcessorSupplier.of((SupplierEx<Processor>) FailingSource::new)));
+        return dag;
+    }
+
+    /** Throws on its first run, so the job it belongs to fails on its own rather than being cancelled. */
+    private static final class FailingSource extends AbstractProcessor {
+        @Override
+        public boolean isCooperative() {
+            return false;
+        }
+
+        @Override
+        public boolean complete() {
+            throw new RuntimeException("boom in the source");
+        }
     }
 
     /** Emits nothing and never signals completion; a stand-in for an unbounded source. */

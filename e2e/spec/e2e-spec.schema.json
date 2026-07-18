@@ -185,6 +185,7 @@
               "description": "The lifecycle state of the pipeline this specification names. A specification names exactly one, so the state is written on its own.",
               "enum": [
                 "COMPLETED",
+                "FAILED",
                 "NEW",
                 "PAUSED",
                 "RUNNING",

@@ -52,6 +52,6 @@ class VocabularyTest {
     @Test
     void pipelineStatesAreTheProductsOwn() {
         assertThat(Vocabulary.PIPELINE_STATES)
-                .containsExactly("COMPLETED", "NEW", "PAUSED", "RUNNING", "STOPPED");
+                .containsExactly("COMPLETED", "FAILED", "NEW", "PAUSED", "RUNNING", "STOPPED");
     }
 }
