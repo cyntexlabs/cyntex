@@ -15,12 +15,14 @@ import java.util.Map;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.entry;
 
 /**
  * The runtime observation publisher reads a pipeline's converged actual state and writes it out as the
  * pipeline's latest observation, so the control read faces have a store-backed projection to read. L1
- * publishes the state only (metrics and snapshot are empty until their sources are wired), and a
- * pipeline with no checkpoint yet is left unobserved rather than published as an empty doc.
+ * wires the errorCount metric from the actual state (0 healthy, 1 when FAILED); the remaining metrics are
+ * absent and the snapshot dataset is published empty (no source yet). A pipeline with no checkpoint yet is
+ * left unobserved rather than published as an empty doc.
  */
 class ObservationPublisherTest {
 
@@ -39,9 +41,36 @@ class ObservationPublisherTest {
         Observation published = observations.read("orders").orElseThrow();
         assertThat(published.pipelineId()).isEqualTo("orders");
         assertThat(published.state()).isEqualTo(PipelineState.RUNNING);
-        // L1 has no metric or snapshot source wired yet: they are published empty (unavailable), not faked.
-        assertThat(published.metrics()).isEmpty();
+        // errorCount is wired from the actual state: a healthy pipeline reports zero errors. The snapshot
+        // source is not wired yet, so it is published empty (unavailable), not faked.
+        assertThat(published.metrics()).containsOnly(entry("errorCount", 0L));
         assertThat(published.snapshot()).isEmpty();
+    }
+
+    @Test
+    void publishesAnErrorCountOfOneWhenThePipelineHasFailed() {
+        state.seed("orders", PipelineState.FAILED);
+
+        publisher.publish("orders");
+
+        Observation published = observations.read("orders").orElseThrow();
+        assertThat(published.state()).isEqualTo(PipelineState.FAILED);
+        // A dead data-plane job is one observable error; every other state reports zero.
+        assertThat(published.metrics()).containsOnly(entry("errorCount", 1L));
+    }
+
+    @Test
+    void errorCountDropsBackToZeroWhenAFailedPipelineRecovers() {
+        state.seed("orders", PipelineState.FAILED);
+        publisher.publish("orders");
+        assertThat(observations.read("orders").orElseThrow().metrics()).containsOnly(entry("errorCount", 1L));
+
+        // Recovery goes through STOPPED (stop -> start); the gauge tracks the current state, not a running
+        // total, so a non-FAILED state reports zero rather than accumulating the earlier failure.
+        state.seed("orders", PipelineState.STOPPED);
+        publisher.publish("orders");
+
+        assertThat(observations.read("orders").orElseThrow().metrics()).containsOnly(entry("errorCount", 0L));
     }
 
     @Test
