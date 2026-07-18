@@ -152,6 +152,7 @@ final class SpecGenerator {
             forms.add(
                     switch (word) {
                         case COUNT -> keyed(word.word(), countBody());
+                        case ERROR_COUNT -> keyed(word.word(), errorCountBody());
                         case STATE -> keyed(word.word(), stateBody());
                     });
         }
@@ -191,6 +192,12 @@ final class SpecGenerator {
         body.put("propertyNames", Map.of("pattern", ALIAS_PATTERN));
         body.put("additionalProperties", rows);
         return body;
+    }
+
+    private static Map<String, Object> errorCountBody() {
+        Map<String, Object> count = scalar("integer", "The published error count the pipeline is expected to show.");
+        count.put("minimum", 0);
+        return count;
     }
 
     private static Map<String, Object> stateBody() {
@@ -263,6 +270,8 @@ final class SpecGenerator {
         return switch (MatcherWord.valueOf(word.toUpperCase(java.util.Locale.ROOT))) {
             case COUNT -> "Rows present at an endpoint, read from the endpoint itself rather than from "
                     + "the product's record of what it wrote.";
+            case ERROR_COUNT -> "The pipeline's published error count, read from the metrics face: one "
+                    + "while it is FAILED, zero otherwise.";
             case STATE -> "The pipeline's published lifecycle state, read from the observation face.";
         };
     }

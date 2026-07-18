@@ -52,4 +52,10 @@ public interface TierBinding {
      * it, so "nothing yet" is the honest answer for that window and a wait is entitled to sit through it.
      */
     Optional<PipelineState> state(String pipelineId);
+
+    /**
+     * Reads the published error count of a pipeline from its metrics face, or empty when it has published
+     * no observation yet - the same unobserved window {@link #state} sits through, answered the same way.
+     */
+    Optional<Long> errorCount(String pipelineId);
 }

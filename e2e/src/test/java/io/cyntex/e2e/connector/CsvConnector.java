@@ -69,6 +69,14 @@ public class CsvConnector implements TapConnector {
     /** The setting naming the directory this connector reads and writes: a plain filesystem path. */
     private static final String URI = "uri";
 
+    /**
+     * A test affordance: when set truthy on a target connection, every write is rejected. It exists so a
+     * specification can drive a sink that fails and assert the product's observable-error path end to end -
+     * a dead data-plane job becoming a FAILED state and an error count. A sink that never fails cannot
+     * witness that path, and the connectors a release ships are not here to fail on demand.
+     */
+    private static final String FAIL_WRITES = "fail_writes";
+
     private static final String SUFFIX = ".csv";
 
     /** Every column is text: a comma-separated file declares no types, so inventing one would be a lie. */
@@ -216,6 +224,12 @@ public class CsvConnector implements TapConnector {
      */
     private WriteListResult<TapRecordEvent> write(
             TapConnectionContext context, List<TapRecordEvent> events, TapTable target) {
+        if (writesRejected(context)) {
+            // The product wraps whatever a connector's write throws into a coded write failure, so the type
+            // here is immaterial; what matters is that the batch does not complete.
+            throw new IllegalStateException(
+                    "the '" + FAIL_WRITES + "' setting makes this sink reject every write");
+        }
         Path file = file(context, target.getId());
         List<String> key = primaryKeyOf(target);
         Map<String, Map<String, Object>> byKey = new LinkedHashMap<>();
@@ -394,6 +408,14 @@ public class CsvConnector implements TapConnector {
 
     private static Path file(TapConnectionContext context, String table) {
         return directory(context).resolve(table + SUFFIX);
+    }
+
+    /** Whether this connection is configured to reject every write. Off unless a target opts in. */
+    private static boolean writesRejected(TapConnectionContext context) {
+        Object flag = context.getConnectionConfig() == null
+                ? null
+                : context.getConnectionConfig().getObject(FAIL_WRITES);
+        return flag != null && Boolean.parseBoolean(String.valueOf(flag));
     }
 
     private static Path directory(TapConnectionContext context) {

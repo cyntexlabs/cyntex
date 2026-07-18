@@ -138,6 +138,18 @@ final class ControlPlane {
     }
 
     /**
+     * The published error count, or empty when the pipeline has published no observation yet.
+     *
+     * <p>Empty is a reading and not a failure, on the same terms {@link #state} is: the metrics face answers
+     * the product's own {@code monitor.no-observation} code for a pipeline no convergence pass has reached,
+     * and a wait exists to sit through exactly that window.
+     */
+    Optional<Long> errorCount(String pipelineId) {
+        HttpResponse<String> response = send(authedGet("/api/pipelines/" + pipelineId + "/metrics"));
+        return interpretErrorCount(response.statusCode(), response.body(), pipelineId);
+    }
+
+    /**
      * What a status answer is allowed to mean. Only the product's own {@code monitor.no-observation} code
      * reads as "nothing published yet"; every other refusal stays loud, another code's 404 included. A rule
      * written on the status alone would let a route that 404s for its own reasons pass for a pipeline that
@@ -157,6 +169,31 @@ final class ControlPlane {
             throw new AssertionError("status carried no state: " + body);
         }
         return Optional.of(PipelineState.valueOf(state));
+    }
+
+    /**
+     * What a metrics answer is allowed to mean, read exactly the way a status answer is: only the product's
+     * own {@code monitor.no-observation} code reads as "nothing published yet", and every other refusal stays
+     * loud. A published observation always carries the errorCount metric - the runtime derives it from the
+     * actual state - so a 200 that omits it is a regression of that contract, surfaced rather than waited out
+     * as though the pipeline were merely slow to converge.
+     */
+    static Optional<Long> interpretErrorCount(int status, String body, String pipelineId) {
+        if (status == 404 && MonitorError.NO_OBSERVATION.code().equals(codeOf(body))) {
+            return Optional.empty();
+        }
+        if (status != 200) {
+            throw new AssertionError(
+                    "could not read the metrics of " + pipelineId + ": expected HTTP 200, got " + status
+                            + " - " + body);
+        }
+        if (!(JsonReader.parse(body) instanceof Map<?, ?> map) || !(map.get("metrics") instanceof Map<?, ?> metrics)) {
+            throw new AssertionError("metrics answer carried no metrics: " + body);
+        }
+        if (!(metrics.get("errorCount") instanceof Number errorCount)) {
+            throw new AssertionError("metrics carried no errorCount: " + body);
+        }
+        return Optional.of(errorCount.longValue());
     }
 
     /**

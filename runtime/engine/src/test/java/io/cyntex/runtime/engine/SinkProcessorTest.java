@@ -160,6 +160,27 @@ class SinkProcessorTest {
         }).isSameAs(boom);
     }
 
+    @Test
+    void surfaces_a_failed_write_while_idle_without_further_input_or_completion() throws Exception {
+        // The sink reads from a streaming source that never completes, so complete() is never called; and a
+        // batch that fails may be the last one, so no later process() call arrives to reap it either. Left to
+        // those two alone, a failed write would sit unsurfaced and the job would stay RUNNING while moving no
+        // data - an error hiding behind a healthy-looking state, the exact thing this must not do. Jet's idle
+        // hook is what closes that gap: it runs when the inbox is empty, so the failure is surfaced there.
+        SinkFailure boom = new SinkFailure("target refused the batch");
+        SinkProcessor processor = init(new SinkProcessor(new FailingWriter(boom), 4, 1024));
+
+        TestInbox inbox = new TestInbox();
+        inbox.add(event(1));
+        processor.process(0, inbox);
+
+        assertThatThrownBy(() -> {
+            for (int i = 0; i < 10_000; i++) {
+                processor.tryProcess();
+            }
+        }).isSameAs(boom);
+    }
+
     // ---- sink-ack contiguous acked-prefix watermark -------------------------------------------
 
     @Test

@@ -177,6 +177,20 @@
           "type": "object",
           "additionalProperties": false,
           "required": [
+            "error_count"
+          ],
+          "properties": {
+            "error_count": {
+              "type": "integer",
+              "description": "The published error count the pipeline is expected to show.",
+              "minimum": 0
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
             "state"
           ],
           "properties": {

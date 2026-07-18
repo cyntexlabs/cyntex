@@ -188,6 +188,7 @@ public final class EnvelopeParser {
         Map.Entry<String, Object> only = mapping.entrySet().iterator().next();
         return switch (matcherWord(only.getKey())) {
             case COUNT -> count(only.getValue());
+            case ERROR_COUNT -> new Matcher.ErrorCount(rowCount(only.getValue(), "error_count"));
             case STATE -> new Matcher.State(pipelineState(only.getValue()));
         };
     }

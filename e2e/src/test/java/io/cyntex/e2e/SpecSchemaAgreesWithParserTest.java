@@ -127,6 +127,14 @@ class SpecSchemaAgreesWithParserTest {
                 pipeline: p.cyn.yml
                 steps:
                   - assert: { count: { a.one: 0, b.two: 3 } }
+                """,
+                // The error-count matcher, a whole number written on its own like the state matcher.
+                """
+                name: error-count
+                pipeline: p.cyn.yml
+                steps:
+                  - await: { state: FAILED }
+                  - assert: { error_count: 1 }
                 """);
     }
 
@@ -176,6 +184,13 @@ class SpecSchemaAgreesWithParserTest {
                 pipeline: p.cyn.yml
                 steps:
                   - assert: { count: { t.o: -5 } }
+                """,
+                // Neither can an error count.
+                """
+                name: n
+                pipeline: p.cyn.yml
+                steps:
+                  - assert: { error_count: -1 }
                 """,
                 // A specification with no steps checks nothing.
                 """

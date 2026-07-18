@@ -154,9 +154,10 @@ class CaptureToSinkAckFrontierTest {
         actuator.start(PIPELINE);
         try {
             // Feed four cdc changes one at a time, each awaited at the sink so it lands in its own batch:
-            // positions w1, w2, w3, w4 in feed order. Reaping a settled batch (which advances the watermark)
-            // happens on the next input, so by the time the fourth change is written the third's batch has
-            // reaped and closed w2. The durable acked prefix reaches w2; w3 and w4 stay pending.
+            // positions w1, w2, w3, w4 in feed order. Every settled batch is reaped - on the next input while
+            // they arrive, and on the idle hook once the tail goes quiet after the last one - so the durable
+            // acked prefix settles at its lag-by-one frontier: w1..w3 are acked, and only w4 is held open,
+            // since nothing strictly higher than it has settled to close it.
             gatedSource.feed(change(0));
             awaitSinkSize(1);
             gatedSource.feed(change(1));
@@ -166,9 +167,9 @@ class CaptureToSinkAckFrontierTest {
             gatedSource.feed(change(3));
             awaitSinkSize(4);
 
-            awaitSinkAck(meta, chainId, "w2");
-            // The last two positions must not be acked: w4 is held open and w3's batch has not reaped.
-            assertThat(ackedPosition(meta, chainId)).isEqualTo("w2");
+            awaitSinkAck(meta, chainId, "w3");
+            // w4 is held open by the lag-by-one rule: nothing strictly higher has settled to close it.
+            assertThat(ackedPosition(meta, chainId)).isEqualTo("w3");
         } finally {
             actuator.stop(PIPELINE);
         }

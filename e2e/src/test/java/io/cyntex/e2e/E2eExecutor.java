@@ -111,6 +111,7 @@ public final class E2eExecutor {
         return switch (matcher) {
             case Matcher.Count count -> countMismatch(count.expected());
             case Matcher.State state -> stateMismatch(state.expected(), pipelineId);
+            case Matcher.ErrorCount errorCount -> errorCountMismatch(errorCount.expected(), pipelineId);
         };
     }
 
@@ -141,6 +142,25 @@ public final class E2eExecutor {
         return Optional.of(
                 pipelineId
                         + " expected "
+                        + expected
+                        + ", found "
+                        + actual.map(Object::toString).orElse("no published observation"));
+    }
+
+    /**
+     * Reads the same unobserved window as {@link #stateMismatch} the same way: a pipeline that has published
+     * no observation reads as a mismatch, never as a failure, so an {@code await} sits through the window
+     * between a start intent and the first convergence pass. "nothing published" is named apart from a wrong
+     * count because the two fail for different reasons.
+     */
+    private Optional<String> errorCountMismatch(long expected, String pipelineId) {
+        Optional<Long> actual = binding.errorCount(pipelineId);
+        if (actual.filter(published -> published == expected).isPresent()) {
+            return Optional.empty();
+        }
+        return Optional.of(
+                pipelineId
+                        + " expected error count "
                         + expected
                         + ", found "
                         + actual.map(Object::toString).orElse("no published observation"));

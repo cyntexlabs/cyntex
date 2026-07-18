@@ -89,6 +89,21 @@ class EnvelopeParserTest {
     }
 
     @Test
+    void parsesTheErrorCountMatcherAsAWholeNumberWrittenOnItsOwn() {
+        Envelope envelope = EnvelopeParser.parse(minimal("steps:\n  - assert: { error_count: 1 }\n"));
+
+        assertThat(envelope.steps())
+                .containsExactly(new Step.Assertion(Matcher.errorCount(1L)));
+    }
+
+    @Test
+    void rejectsANegativeErrorCount() {
+        assertThatThrownBy(() -> EnvelopeParser.parse(minimal("steps:\n  - assert: { error_count: -1 }\n")))
+                .isInstanceOf(EnvelopeException.class)
+                .hasMessageContaining("error_count");
+    }
+
+    @Test
     void acceptsAssertAndAwaitCarryingTheSameMatcherVocabulary() {
         Envelope awaited = EnvelopeParser.parse(minimal("steps:\n  - await: { count: { t.orders: 1 } }\n"));
         Envelope asserted = EnvelopeParser.parse(minimal("steps:\n  - assert: { count: { t.orders: 1 } }\n"));

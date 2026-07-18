@@ -152,6 +152,47 @@ class E2eExecutorTest {
     }
 
     @Test
+    void awaitsTheErrorCountOfThePipelineResolvedFromTheEnvelope() {
+        binding.errorCounts(0L, 0L, 1L);
+
+        execute(minimal("steps:\n  - await: { error_count: 1 }\n"));
+
+        assertThat(binding.errorCountReads).isEqualTo(3);
+        // The metrics read must address the pipeline the envelope names, not a hand-copied id.
+        assertThat(binding.errorCountedPipelineIds).containsOnly(PIPELINE_ID);
+    }
+
+    @Test
+    void awaitsThroughAPipelineThatHasPublishedNoObservationYetForTheErrorCount() {
+        // The same window the state matcher sits through: a start intent is recorded and there is nothing
+        // published to read until the first convergence pass lands. An unpublished reading is "not yet", so a
+        // wait for an error count can still wait for a start.
+        binding.errorCountsUnobservedThen(1L);
+
+        execute(minimal("steps:\n  - start\n  - await: { error_count: 1 }\n"));
+
+        assertThat(binding.errorCountReads).isEqualTo(2);
+    }
+
+    @Test
+    void reportsAnUnpublishedObservationAsTheErrorCountReadingRatherThanACount() {
+        binding.errorCountNeverObserved();
+
+        assertThatThrownBy(() -> execute(minimal("steps:\n  - assert: { error_count: 1 }\n")))
+                .isInstanceOf(AssertionError.class)
+                .hasMessageContaining("mongo2mongo expected error count 1, found no published observation");
+    }
+
+    @Test
+    void reportsTheErrorCountMismatchAgainstTheResolvedPipeline() {
+        binding.errorCounts(0L);
+
+        assertThatThrownBy(() -> execute(minimal("steps:\n  - assert: { error_count: 1 }\n")))
+                .isInstanceOf(AssertionError.class)
+                .hasMessageContaining("mongo2mongo expected error count 1, found 0");
+    }
+
+    @Test
     void producesCdcChangesAgainstTheNamedTable() {
         execute(minimal("steps:\n  - cdc: { src_mongo.orders: insert 10 }\n"));
 
@@ -226,7 +267,10 @@ class E2eExecutorTest {
         private final Map<TableAlias, List<Long>> countSeries = new HashMap<>();
         private final Map<TableAlias, AtomicInteger> countCursor = new HashMap<>();
         private List<Optional<PipelineState>> stateSeries = List.of(Optional.of(PipelineState.RUNNING));
+        private List<Optional<Long>> errorCountSeries = List.of(Optional.of(0L));
+        private final List<String> errorCountedPipelineIds = new ArrayList<>();
         private int stateReads;
+        private int errorCountReads;
         private int countReads;
 
         void countsOverTime(TableAlias table, Long... readings) {
@@ -236,6 +280,24 @@ class E2eExecutorTest {
 
         void states(PipelineState... readings) {
             stateSeries = Stream.of(readings).map(Optional::of).toList();
+        }
+
+        void errorCounts(Long... readings) {
+            errorCountSeries = Stream.of(readings).map(Optional::of).toList();
+        }
+
+        /** Publishes no observation on the first read, then these counts: the window a real start opens. */
+        void errorCountsUnobservedThen(Long... readings) {
+            errorCountSeries =
+                    Stream.concat(
+                                    Stream.of(Optional.<Long>empty()),
+                                    Stream.of(readings).map(Optional::of))
+                            .toList();
+        }
+
+        /** Publishes nothing, ever: a pipeline no convergence pass has reached. */
+        void errorCountNeverObserved() {
+            errorCountSeries = List.of(Optional.empty());
         }
 
         /** Publishes nothing on the first read, then these states: the window a real start opens. */
@@ -297,6 +359,13 @@ class E2eExecutorTest {
             statedPipelineIds.add(pipelineId);
             int index = stateReads++;
             return stateSeries.get(Math.min(index, stateSeries.size() - 1));
+        }
+
+        @Override
+        public Optional<Long> errorCount(String pipelineId) {
+            errorCountedPipelineIds.add(pipelineId);
+            int index = errorCountReads++;
+            return errorCountSeries.get(Math.min(index, errorCountSeries.size() - 1));
         }
     }
 }

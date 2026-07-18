@@ -7,6 +7,10 @@
       "description": "Rows present at an endpoint, read from the endpoint itself rather than from the product's record of what it wrote."
     },
     {
+      "word": "error_count",
+      "description": "The pipeline's published error count, read from the metrics face: one while it is FAILED, zero otherwise."
+    },
+    {
       "word": "state",
       "description": "The pipeline's published lifecycle state, read from the observation face."
     }

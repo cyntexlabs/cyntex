@@ -85,8 +85,69 @@ class ControlPlaneTest {
                 .hasMessageContaining("carried no state");
     }
 
+    // The metrics face is read the same way, so the same distinctions are pinned here: only no-observation
+    // reads as "nothing yet", and a published observation is required to carry the errorCount the runtime
+    // derives from the state, so an answer missing it is a contract regression, surfaced rather than waited out.
+
+    @Test
+    void readsThePublishedErrorCount() {
+        assertThat(ControlPlane.interpretErrorCount(200, metrics(1), PIPELINE)).contains(1L);
+    }
+
+    @Test
+    void readsTheProductsNoObservationCodeAsNothingPublishedYetForMetrics() {
+        assertThat(ControlPlane.interpretErrorCount(404, coded(MonitorError.NO_OBSERVATION.code()), PIPELINE))
+                .isEmpty();
+    }
+
+    @Test
+    void keepsAnotherCodesNotFoundLoudForMetrics() {
+        assertThatThrownBy(
+                        () ->
+                                ControlPlane.interpretErrorCount(
+                                        404, coded(LifecycleError.UNKNOWN_PIPELINE.code()), PIPELINE))
+                .isInstanceOf(AssertionError.class)
+                .hasMessageContaining("got 404");
+    }
+
+    @Test
+    void keepsAServerFailureLoudForMetrics() {
+        assertThatThrownBy(() -> ControlPlane.interpretErrorCount(500, "boom", PIPELINE))
+                .isInstanceOf(AssertionError.class)
+                .hasMessageContaining("got 500");
+    }
+
+    @Test
+    void refusesAMetricsAnswerThatCarriesNoMetrics() {
+        assertThatThrownBy(
+                        () ->
+                                ControlPlane.interpretErrorCount(
+                                        200, JsonWriter.write(Map.of("pipelineId", PIPELINE)), PIPELINE))
+                .isInstanceOf(AssertionError.class)
+                .hasMessageContaining("carried no metrics");
+    }
+
+    @Test
+    void refusesAPublishedObservationThatCarriesNoErrorCount() {
+        // The runtime derives errorCount from the actual state, so a published observation always carries it;
+        // an answer that does not is the metric wiring having regressed, and the harness says so loudly rather
+        // than sitting out its whole bound as though the pipeline were slow to converge.
+        assertThatThrownBy(
+                        () ->
+                                ControlPlane.interpretErrorCount(
+                                        200,
+                                        JsonWriter.write(Map.of("pipelineId", PIPELINE, "metrics", Map.of())),
+                                        PIPELINE))
+                .isInstanceOf(AssertionError.class)
+                .hasMessageContaining("carried no errorCount");
+    }
+
     private static String status(String state) {
         return JsonWriter.write(Map.of("pipelineId", PIPELINE, "state", state));
+    }
+
+    private static String metrics(long errorCount) {
+        return JsonWriter.write(Map.of("pipelineId", PIPELINE, "metrics", Map.of("errorCount", errorCount)));
     }
 
     /** A structured coded error body, as the product's shared advice renders one. */

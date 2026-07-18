@@ -20,6 +20,14 @@ enum MatcherWord {
     /** Rows present at an endpoint, read from the endpoint itself. */
     COUNT,
 
+    /**
+     * The count of observable errors the pipeline has published. Its source is the metrics read face,
+     * which the runtime derives from the pipeline's actual state - one while it is FAILED, zero otherwise -
+     * so a dead data-plane job is an assertable statistic and not only a log line. The other run
+     * statistics have no source wired yet, so no word offers them.
+     */
+    ERROR_COUNT,
+
     /** The pipeline's published lifecycle state. */
     STATE;
 
