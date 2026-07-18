@@ -12,6 +12,7 @@ import io.cyntex.core.model.Srs;
 import io.cyntex.core.model.SyncElement;
 import io.cyntex.core.model.TableRef;
 import io.cyntex.core.event.Envelope;
+import io.cyntex.runtime.srs.CaptureHealth;
 import io.cyntex.runtime.srs.CaptureRun;
 import io.cyntex.runtime.srs.CaptureRunSpec;
 import io.cyntex.runtime.srs.MiningChainId;
@@ -124,7 +125,8 @@ class StoreBackedPipelineCaptureCoordinatorTest {
             srsCoordinator.provisionSource(spec.sourceId(), chainId, spec.config().streams(), spec.retention());
             srsCoordinator.attachConsumer(chainId, spec.pipelineId());
             Subscription subscription = () -> subscriptionClosed.set(true);
-            return new CaptureRun(Optional.of(chainId), false, 0L, Optional.empty(), Optional.of(subscription));
+            return new CaptureRun(
+                    Optional.of(chainId), false, 0L, Optional.empty(), Optional.of(subscription), new CaptureHealth());
         };
         StoreBackedPipelineCaptureCoordinator coordinator =
                 new StoreBackedPipelineCaptureCoordinator(store, starter, srsCoordinator, new SnapshotBuffer());
@@ -158,7 +160,7 @@ class StoreBackedPipelineCaptureCoordinatorTest {
         CaptureStarter starter = (spec, passthrough) -> {
             passthrough.accept(Envelope.read(1L, "orders", Map.of("id", 1L), Map.of()));
             passthrough.accept(Envelope.read(1L, "orders", Map.of("id", 2L), Map.of()));
-            return new CaptureRun(Optional.empty(), false, 2L, Optional.empty(), Optional.empty());
+            return new CaptureRun(Optional.empty(), false, 2L, Optional.empty(), Optional.empty(), new CaptureHealth());
         };
         StoreBackedPipelineCaptureCoordinator coordinator =
                 new StoreBackedPipelineCaptureCoordinator(store, starter, srsCoordinator, buffer);
@@ -186,6 +188,83 @@ class StoreBackedPipelineCaptureCoordinatorTest {
         assertThat(coordinator.isActive("never-started")).isFalse();
     }
 
+    @Test
+    void captureFailureSurfacesADeadTailOfAStartedPipeline() {
+        InMemoryArtifactStore artifacts = new InMemoryArtifactStore();
+        artifacts.save(cdcSource("orders_src", "orders", null));
+        artifacts.save(pipeline("p", "orders_src"));
+        StorePort store = artifactsOnly(artifacts);
+        SrsCoordinator srsCoordinator = new SrsCoordinator(new InMemorySrsMetaStore());
+
+        // The run the starter hands back carries the health its cdc tail reports failures on; the tail dies after
+        // the run started, exactly as a real stream failing on its daemon thread would.
+        CaptureHealth health = new CaptureHealth();
+        CaptureStarter starter = (spec, passthrough) -> {
+            MiningChainId chainId = MiningChainId.resolve(spec.config(), spec.srsKey());
+            srsCoordinator.provisionSource(spec.sourceId(), chainId, spec.config().streams(), spec.retention());
+            srsCoordinator.attachConsumer(chainId, spec.pipelineId());
+            return new CaptureRun(
+                    Optional.of(chainId), false, 0L, Optional.empty(), Optional.of(() -> {
+            }), health);
+        };
+        StoreBackedPipelineCaptureCoordinator coordinator =
+                new StoreBackedPipelineCaptureCoordinator(store, starter, srsCoordinator, new SnapshotBuffer());
+        coordinator.startCapture("p");
+
+        assertThat(coordinator.captureFailure("p")).as("healthy while the tail is alive").isEmpty();
+        RuntimeException boom = new RuntimeException("cdc tail died");
+        health.fail(boom);
+
+        assertThat(coordinator.captureFailure("p")).as("surfaces the tail's death").contains(boom);
+    }
+
+    @Test
+    void captureFailureIsEmptyForAPipelineThatWasNeverStarted() {
+        StoreBackedPipelineCaptureCoordinator coordinator = new StoreBackedPipelineCaptureCoordinator(
+                artifactsOnly(new InMemoryArtifactStore()),
+                (spec, passthrough) -> {
+                    throw new AssertionError("no capture should be started");
+                },
+                new SrsCoordinator(new InMemorySrsMetaStore()),
+                new SnapshotBuffer());
+
+        assertThat(coordinator.captureFailure("never-started")).isEmpty();
+    }
+
+    @Test
+    void captureFailureSurfacesAFailedRunPastAHealthyEarlierRun() {
+        InMemoryArtifactStore artifacts = new InMemoryArtifactStore();
+        artifacts.save(cdcSource("src_a", "orders", null));
+        artifacts.save(cdcSource("src_b", "customers", null));
+        artifacts.save(twoSourcePipeline("p", "src_a", "src_b"));
+        StorePort store = artifactsOnly(artifacts);
+        SrsCoordinator srsCoordinator = new SrsCoordinator(new InMemorySrsMetaStore());
+
+        // One run per source, in source order; the second source's tail dies while the first stays healthy.
+        CaptureHealth healthA = new CaptureHealth();
+        CaptureHealth healthB = new CaptureHealth();
+        CaptureStarter starter = (spec, passthrough) -> {
+            MiningChainId chainId = MiningChainId.resolve(spec.config(), spec.srsKey());
+            srsCoordinator.provisionSource(spec.sourceId(), chainId, spec.config().streams(), spec.retention());
+            srsCoordinator.attachConsumer(chainId, spec.pipelineId());
+            CaptureHealth health = spec.sourceId().equals("src_b") ? healthB : healthA;
+            return new CaptureRun(Optional.of(chainId), false, 0L, Optional.empty(), Optional.of(() -> {
+            }), health);
+        };
+        StoreBackedPipelineCaptureCoordinator coordinator =
+                new StoreBackedPipelineCaptureCoordinator(store, starter, srsCoordinator, new SnapshotBuffer());
+        coordinator.startCapture("p");
+
+        RuntimeException boom = new RuntimeException("the second source's tail died");
+        healthB.fail(boom);
+
+        // captureFailure must return the first PRESENT failure, skipping the healthy earlier run -- not merely
+        // the first run's failure, which would mask a later run's dead tail while an earlier one is still alive.
+        assertThat(coordinator.captureFailure("p"))
+                .as("surfaces the failed run past the healthy earlier one")
+                .contains(boom);
+    }
+
     // ---- fixtures --------------------------------------------------------------------------------
 
     private static SourceResource cdcSource(String id, String table, String srsKey) {
@@ -198,6 +277,13 @@ class StoreBackedPipelineCaptureCoordinatorTest {
         return new PipelineResource(id, null, List.of(sourceId), null, null,
                 new ServeBlock.Inline(null, FromRef.literal(sourceId),
                         List.of(new SyncElement("sync_1", sourceId, null, null, null, null)), null, null),
+                new Settings(null, null, null, null, ReadMode.CDC_ONLY, "earliest"), null);
+    }
+
+    private static PipelineResource twoSourcePipeline(String id, String sourceA, String sourceB) {
+        return new PipelineResource(id, null, List.of(sourceA, sourceB), null, null,
+                new ServeBlock.Inline(null, FromRef.literal(sourceA),
+                        List.of(new SyncElement("sync_1", sourceA, null, null, null, null)), null, null),
                 new Settings(null, null, null, null, ReadMode.CDC_ONLY, "earliest"), null);
     }
 

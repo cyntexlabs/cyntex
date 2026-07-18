@@ -5,6 +5,7 @@ import io.cyntex.core.event.Envelope;
 import io.cyntex.core.event.Op;
 import io.cyntex.spi.capture.CaptureBatch;
 import io.cyntex.spi.capture.CaptureConfig;
+import io.cyntex.spi.capture.CaptureListener;
 import io.cyntex.spi.capture.ConnectionReport;
 import io.cyntex.spi.capture.DiscoveredSchema;
 import io.cyntex.spi.capture.Subscription;
@@ -18,6 +19,7 @@ import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
@@ -193,6 +195,34 @@ class PdkCapturePortTest {
             assertThat(three.await(5, TimeUnit.SECONDS)).as("three change events delivered").isTrue();
         }
         assertThat(got).extracting(Envelope::op).containsExactly(Op.INSERT, Op.UPDATE, Op.DELETE);
+    }
+
+    @Test
+    void cdcThatFailsWhileStreamingReportsItThroughOnError(@TempDir Path dir) throws Exception {
+        // The cdc stream runs on a daemon thread, so a stream that dies cannot throw back to whoever
+        // started it; the failure reaches the caller only through the listener's error channel. Without
+        // that channel a dead tail is invisible above this port.
+        Path jar = Synthetic.throwingStreamSource(dir);
+        PdkCapturePort port = new PdkCapturePort(provisioner(jar, "synthetic.ThrowingStream", null));
+        AtomicReference<Throwable> reported = new AtomicReference<>();
+        CountDownLatch failed = new CountDownLatch(1);
+        CaptureListener listener = new CaptureListener() {
+            @Override
+            public void onEvent(Envelope event) {
+            }
+
+            @Override
+            public void onError(Throwable error) {
+                reported.set(error);
+                failed.countDown();
+            }
+        };
+        try (Subscription sub = port.cdc(config("t1"), listener)) {
+            assertThat(failed.await(5, TimeUnit.SECONDS))
+                    .as("the cdc stream failure was reported through onError")
+                    .isTrue();
+        }
+        assertThat(reported.get()).isNotNull();
     }
 
     @Test

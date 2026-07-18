@@ -229,11 +229,11 @@ public final class PdkCapturePort implements CapturePort {
                 return null;
             });
         } catch (Throwable t) {
-            // The cdc stream runs on this daemon thread; its failure cannot be returned to the caller, and
-            // the capture SPI has no error channel for the runtime to observe it yet - a coded, observable
-            // stream failure that drives the pipeline into an error state is a later step. Until then, log
-            // it rather than discard it silently, so a stream that dies is at least visible in the logs.
+            // The cdc stream runs on this daemon thread; its failure cannot be returned to the caller, so it
+            // is delivered through the listener's error channel for the runtime to observe and drive the
+            // pipeline into an error state. It is logged as well, so a dead stream is visible in the logs.
             LOG.warn("cdc stream for connector {} stopped on a failure", connector.connectorId(), t);
+            listener.onError(t);
         }
     }
 

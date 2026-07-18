@@ -124,7 +124,7 @@ class CdcPhaseTest {
                 Envelope.update(2, "orders", Map.of("id", 1), Map.of("id", 1, "n", 9), Map.of()),
                 Envelope.delete(3, "orders", Map.of("id", 1), Map.of())));
 
-        CdcPhase.run(port, config(), chain, () -> Long.MAX_VALUE, List::of);
+        CdcPhase.run(port, config(), chain, () -> Long.MAX_VALUE, List::of, new CaptureHealth());
 
         assertThat(ring.tailSequence()).isEqualTo(2L);
         SrsItem first = ring.readOne(0);
@@ -153,7 +153,7 @@ class CdcPhaseTest {
                 Envelope.insert(2, "orders", Map.of("id", 2), Map.of()),
                 Envelope.insert(3, "orders", Map.of("id", 3), Map.of())));
 
-        CdcPhase.run(port, config(), chain, () -> Long.MAX_VALUE, () -> consumers);
+        CdcPhase.run(port, config(), chain, () -> Long.MAX_VALUE, () -> consumers, new CaptureHealth());
 
         // Written at w1, w2, w3; each advance is clamped to the slowest sink-acked position w2, so the
         // persisted offset never passes a change no consumer has durably landed.
@@ -175,7 +175,7 @@ class CdcPhaseTest {
         CdcChain chain = new CdcChain(gate, new RecordingMeta(), "chain", monotonicWatermark(), NUMERIC_ORDER, 0L);
         FakeCdcPort port = new FakeCdcPort(List.of(Envelope.insert(9, "orders", Map.of("id", 9), Map.of())));
 
-        CdcPhase.run(port, config(), chain, minRead, List::of);
+        CdcPhase.run(port, config(), chain, minRead, List::of, new CaptureHealth());
 
         // The change is not dropped: it lands at seq 8 once headroom frees, and the write was retried
         // (polled more than once) rather than silently overwriting the still-unread seq 0.
@@ -198,7 +198,7 @@ class CdcPhaseTest {
         CdcChain chain = new CdcChain(gate, new RecordingMeta(), "chain", monotonicWatermark(), NUMERIC_ORDER, 0L);
         FakeCdcPort port = new FakeCdcPort(List.of(Envelope.insert(9, "orders", Map.of("id", 9), Map.of())));
 
-        Thread writer = new Thread(() -> CdcPhase.run(port, config(), chain, minRead, List::of), "cdc-writer");
+        Thread writer = new Thread(() -> CdcPhase.run(port, config(), chain, minRead, List::of, new CaptureHealth()), "cdc-writer");
         writer.setDaemon(true);
         try {
             writer.start();
@@ -224,7 +224,7 @@ class CdcPhaseTest {
         CdcChain chain = new CdcChain(gate, new RecordingMeta(), "chain", monotonicWatermark(), NUMERIC_ORDER, 0L);
         FakeCdcPort port = new FakeCdcPort(List.of());
 
-        Subscription sub = CdcPhase.run(port, config(), chain, () -> Long.MAX_VALUE, List::of);
+        Subscription sub = CdcPhase.run(port, config(), chain, () -> Long.MAX_VALUE, List::of, new CaptureHealth());
         sub.close();
 
         // The phase hands back the port's own subscription; closing it stops the stream.
@@ -237,26 +237,55 @@ class CdcPhaseTest {
         CdcChain chain = new CdcChain(gate, new RecordingMeta(), "chain", monotonicWatermark(), NUMERIC_ORDER, 0L);
         FakeCdcPort port = new FakeCdcPort(List.of(Envelope.insert(1, "orders", Map.of("id", 1), Map.of())));
 
-        assertThatThrownBy(() -> CdcPhase.run(port, config(), chain, null, List::of))
+        assertThatThrownBy(() -> CdcPhase.run(port, config(), chain, null, List::of, new CaptureHealth()))
                 .isInstanceOf(NullPointerException.class);
 
         // Args are validated up front: the stream is never started when the wiring is incomplete.
         assertThat(port.subscribed).isFalse();
     }
 
+    @Test
+    void recordsAStreamFailureOnTheHealthSoTheRunCanSurfaceIt() {
+        CaptureHealth health = new CaptureHealth();
+        RuntimeException boom = new RuntimeException("stream boom");
+        SrsWriteGate gate = new SrsWriteGate(new SrsRingbuffer(hz.getRingbuffer("srs.chain.fail")));
+        CdcChain chain = new CdcChain(gate, new RecordingMeta(), "chain", monotonicWatermark(), NUMERIC_ORDER, 0L);
+
+        CdcPhase.run(FakeCdcPort.failing(boom), config(), chain, () -> Long.MAX_VALUE, List::of, health);
+
+        // The stream reported a failure rather than a change; the phase records it on the health so the run
+        // can surface a dead tail that the change ring merely going quiet would otherwise hide.
+        assertThat(health.failure()).contains(boom);
+    }
+
     /** A cdc port that drives a fixed list of change events into the listener when the stream starts. */
     private static final class FakeCdcPort implements CapturePort {
         private final List<Envelope> events;
+        private final Throwable error;
         boolean subscribed;
         boolean closed;
 
         FakeCdcPort(List<Envelope> events) {
+            this(events, null);
+        }
+
+        private FakeCdcPort(List<Envelope> events, Throwable error) {
             this.events = events;
+            this.error = error;
+        }
+
+        /** A port whose stream reports a failure instead of delivering changes. */
+        static FakeCdcPort failing(Throwable error) {
+            return new FakeCdcPort(List.of(), error);
         }
 
         @Override
         public Subscription cdc(CaptureConfig config, CaptureListener listener) {
             subscribed = true;
+            if (error != null) {
+                listener.onError(error);
+                return () -> closed = true;
+            }
             for (Envelope e : events) {
                 listener.onEvent(e);
             }

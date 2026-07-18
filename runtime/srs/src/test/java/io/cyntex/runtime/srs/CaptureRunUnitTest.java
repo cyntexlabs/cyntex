@@ -207,6 +207,20 @@ class CaptureRunUnitTest {
     }
 
     @Test
+    void srsDisabledSurfacesADeadTailAsAFailureOnTheRun() {
+        InMemoryMeta meta = new InMemoryMeta();
+        RuntimeException boom = new RuntimeException("tail boom");
+        FakeSource port = new FakeSource(List.of(), List.of()).failing(boom);
+        List<Envelope> passthrough = new ArrayList<>();
+
+        CaptureRun run = runUnit(port, meta).start(spec(ReadMode.CDC_ONLY, false), passthrough::add);
+
+        // The direct tail reported a failure; the run surfaces it so a coordinator polling the run can see a
+        // dead tail rather than a run that merely stopped emitting.
+        assertThat(run.failure()).contains(boom);
+    }
+
+    @Test
     void surfacesTheForceMergeWhenASecondSourceResolvesToTheSameChain() {
         InMemoryMeta meta = new InMemoryMeta();
         CaptureRunUnit unit = new CaptureRunUnit(
@@ -300,12 +314,19 @@ class CaptureRunUnitTest {
     private static final class FakeSource implements CapturePort {
         private final List<Envelope> snapshotRows;
         private final List<Envelope> changes;
+        private Throwable cdcError;
         boolean cdcStarted;
         boolean cdcClosed;
 
         FakeSource(List<Envelope> snapshotRows, List<Envelope> changes) {
             this.snapshotRows = snapshotRows;
             this.changes = changes;
+        }
+
+        /** Makes this source's cdc stream report a failure through the listener rather than deliver changes. */
+        FakeSource failing(Throwable error) {
+            this.cdcError = error;
+            return this;
         }
 
         @Override
@@ -316,6 +337,10 @@ class CaptureRunUnitTest {
         @Override
         public Subscription cdc(CaptureConfig config, CaptureListener listener) {
             cdcStarted = true;
+            if (cdcError != null) {
+                listener.onError(cdcError);
+                return () -> cdcClosed = true;
+            }
             for (Envelope e : changes) {
                 listener.onEvent(e);
             }

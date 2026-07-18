@@ -16,6 +16,7 @@ import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Supplier;
 
@@ -88,6 +89,27 @@ class EngineLifecycleActuatorTest {
                 "startCapture:" + PIPE, "submit:" + PIPE, "stopCapture:" + PIPE + "[jobTerminal]");
     }
 
+    @Test
+    void surfacesACaptureFailureThroughTheSeamWhenTheEngineJobReportsNone() {
+        RuntimeException boom = new RuntimeException("cdc tail died");
+        RecordingCaptureCoordinator coordinator = new RecordingCaptureCoordinator(new CopyOnWriteArrayList<>());
+        coordinator.captureFailure = boom;
+        LifecycleActuator actuator = new EngineLifecycleActuator(new Engine(member), new IdleDagSource(), coordinator);
+
+        // No job was submitted, so the engine reports no failure; the cdc capture's death still surfaces through
+        // the seam the converge loop reads, which is what drives a pipeline whose tail died into FAILED even
+        // though its Jet job keeps running over a ring gone quiet.
+        assertThat(actuator.failure(PIPE)).contains(boom);
+    }
+
+    @Test
+    void reportsNoFailureWhenNeitherTheJobNorTheCaptureHasFailed() {
+        RecordingCaptureCoordinator coordinator = new RecordingCaptureCoordinator(new CopyOnWriteArrayList<>());
+        LifecycleActuator actuator = new EngineLifecycleActuator(new Engine(member), new IdleDagSource(), coordinator);
+
+        assertThat(actuator.failure(PIPE)).isEmpty();
+    }
+
     private static void awaitStatus(Job job, JobStatus expected) {
         long deadline = System.nanoTime() + Duration.ofSeconds(15).toNanos();
         JobStatus last = null;
@@ -129,6 +151,7 @@ class EngineLifecycleActuatorTest {
 
         private final List<String> events;
         private Supplier<Boolean> jobTerminalProbe = () -> false;
+        private Throwable captureFailure;
 
         RecordingCaptureCoordinator(List<String> events) {
             this.events = events;
@@ -142,6 +165,11 @@ class EngineLifecycleActuatorTest {
         @Override
         public void stopCapture(String pipelineId) {
             events.add("stopCapture:" + pipelineId + (jobTerminalProbe.get() ? "[jobTerminal]" : "[jobLive]"));
+        }
+
+        @Override
+        public Optional<Throwable> captureFailure(String pipelineId) {
+            return Optional.ofNullable(captureFailure);
         }
     }
 

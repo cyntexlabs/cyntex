@@ -1,0 +1,11 @@
+version: cyntex/v1
+kind: pipeline
+id: e2e_failing_cdc_pipeline
+source: src_file
+settings: { read_mode: cdc_only }
+transforms:
+  - { id: changes, from: [orders], type: filter, expr: "op == 'i'" }
+serve:
+  from: changes
+  sync:
+    - source: tgt_file

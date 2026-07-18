@@ -33,12 +33,23 @@ public record CaptureRun(
         boolean merged,
         long snapshotCount,
         Optional<StreamSource<SrsItem>> ringSource,
-        Optional<Subscription> cdcSubscription) implements AutoCloseable {
+        Optional<Subscription> cdcSubscription,
+        CaptureHealth health) implements AutoCloseable {
 
     public CaptureRun {
         Objects.requireNonNull(chainId, "chainId");
         Objects.requireNonNull(ringSource, "ringSource");
         Objects.requireNonNull(cdcSubscription, "cdcSubscription");
+        Objects.requireNonNull(health, "health");
+    }
+
+    /**
+     * The failure the run's cdc stream died with, or empty while it is healthy or opened no tail. The
+     * stream reports a failure on its own thread, so this is how a caller learns a tail died rather than
+     * merely going quiet.
+     */
+    public Optional<Throwable> failure() {
+        return health.failure();
     }
 
     /** Stops the capture by closing its cdc subscription, or does nothing when the run opened no tail. */

@@ -77,6 +77,15 @@ public class CsvConnector implements TapConnector {
      */
     private static final String FAIL_WRITES = "fail_writes";
 
+    /**
+     * A test affordance on the read side, the mirror of {@link #FAIL_WRITES}: when set truthy on a source
+     * connection, the cdc tail starts and then throws. It exists so a specification can drive a source whose
+     * change stream dies and assert the product surfaces it as an observable error - a dead cdc tail becoming
+     * a FAILED state and an error count - even though the tail runs on its own thread and the job reading the
+     * ring it fills keeps running over a ring gone quiet. A tail that never fails cannot witness that path.
+     */
+    private static final String FAIL_CDC = "fail_cdc";
+
     private static final String SUFFIX = ".csv";
 
     /** Every column is text: a comma-separated file declares no types, so inventing one would be a lie. */
@@ -172,6 +181,12 @@ public class CsvConnector implements TapConnector {
     private void tail(TapConnectionContext context, List<String> tables, StreamReadConsumer consumer) {
         Map<String, Long> delivered = new LinkedHashMap<>();
         consumer.streamReadStarted();
+        if (cdcRejected(context)) {
+            // The stream started, then dies - the read-side mirror of a rejected write. The product wraps
+            // whatever the tail throws and surfaces it as an observable failure; the type here is immaterial.
+            throw new IllegalStateException(
+                    "the '" + FAIL_CDC + "' setting makes this source's cdc stream fail");
+        }
         while (!stopped && !Thread.currentThread().isInterrupted()) {
             for (String table : tables) {
                 List<TapEvent> fresh = new ArrayList<>();
@@ -415,6 +430,14 @@ public class CsvConnector implements TapConnector {
         Object flag = context.getConnectionConfig() == null
                 ? null
                 : context.getConnectionConfig().getObject(FAIL_WRITES);
+        return flag != null && Boolean.parseBoolean(String.valueOf(flag));
+    }
+
+    /** Whether this connection is configured to fail its cdc stream. Off unless a source opts in. */
+    private static boolean cdcRejected(TapConnectionContext context) {
+        Object flag = context.getConnectionConfig() == null
+                ? null
+                : context.getConnectionConfig().getObject(FAIL_CDC);
         return flag != null && Boolean.parseBoolean(String.valueOf(flag));
     }
 

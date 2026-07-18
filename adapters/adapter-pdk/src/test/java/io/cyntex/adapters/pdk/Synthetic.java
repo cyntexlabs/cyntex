@@ -126,6 +126,15 @@ final class Synthetic {
         return SyntheticJar.compileToJar(dir, "synthetic.ThrowingRead", source("ThrowingRead", "", register));
     }
 
+    /** A source whose streamRead starts then throws — a cdc tail that dies mid-stream. */
+    static Path throwingStreamSource(Path dir) {
+        String register = "functions.supportStreamRead((context, tables, offset, size, consumer) -> {"
+                + "  consumer.streamReadStarted();"
+                + "  throw new RuntimeException(\"stream boom\");"
+                + "});";
+        return SyntheticJar.compileToJar(dir, "synthetic.ThrowingStream", source("ThrowingStream", "", register));
+    }
+
     /** A connector whose batchRead emits a delete-shaped event — unprojectable as a snapshot row. */
     static Path badRowSource(Path dir) {
         String register = "functions.supportBatchRead((context, table, offset, size, consumer) -> {"

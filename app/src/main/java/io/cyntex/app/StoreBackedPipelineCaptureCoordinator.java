@@ -17,6 +17,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
@@ -118,6 +119,22 @@ final class StoreBackedPipelineCaptureCoordinator implements PipelineCaptureCoor
                 MOCK_SCHEMA_VER,
                 monotonicWatermark(),
                 MockPositionOrder.INSTANCE);
+    }
+
+    @Override
+    public Optional<Throwable> captureFailure(String pipelineId) {
+        List<CaptureRun> runs = runsByPipeline.get(pipelineId);
+        if (runs == null) {
+            return Optional.empty();
+        }
+        // The pipeline's cdc capture has failed if any of its source runs' tails died; surface the first, so a
+        // dead tail becomes a failure the converge loop drives to the observable FAILED state rather than an
+        // engine job that stays running over a ring gone quiet.
+        return runs.stream()
+                .map(CaptureRun::failure)
+                .filter(Optional::isPresent)
+                .map(Optional::get)
+                .findFirst();
     }
 
     /** Whether this pipeline currently has a live capture -- a test-visible view of the retained handles. */

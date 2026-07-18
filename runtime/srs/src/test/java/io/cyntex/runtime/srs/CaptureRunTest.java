@@ -20,7 +20,7 @@ class CaptureRunTest {
         AtomicBoolean closed = new AtomicBoolean(false);
         Subscription subscription = () -> closed.set(true);
         CaptureRun run = new CaptureRun(
-                Optional.empty(), false, 0L, Optional.empty(), Optional.of(subscription));
+                Optional.empty(), false, 0L, Optional.empty(), Optional.of(subscription), new CaptureHealth());
 
         run.close();
 
@@ -29,10 +29,32 @@ class CaptureRunTest {
 
     @Test
     void closeIsANoOpWhenThereIsNoCdcSubscription() {
-        CaptureRun run = new CaptureRun(Optional.empty(), false, 0L, Optional.empty(), Optional.empty());
+        CaptureRun run = new CaptureRun(
+                Optional.empty(), false, 0L, Optional.empty(), Optional.empty(), new CaptureHealth());
 
         // A snapshot-only or srs-disabled run may open no cdc tail; closing it must be a safe no-op, not a fault.
         assertThatCode(run::close).doesNotThrowAnyException();
+    }
+
+    @Test
+    void failureSurfacesWhatTheStreamRecordedOnTheHealth() {
+        CaptureHealth health = new CaptureHealth();
+        RuntimeException boom = new RuntimeException("tail boom");
+        // A stream failure lands on the health through the recording listener the phase installs.
+        health.recording(e -> {
+        }).onError(boom);
+        CaptureRun run = new CaptureRun(
+                Optional.empty(), false, 0L, Optional.empty(), Optional.empty(), health);
+
+        assertThat(run.failure()).contains(boom);
+    }
+
+    @Test
+    void failureIsEmptyForARunWhoseTailIsHealthy() {
+        CaptureRun run = new CaptureRun(
+                Optional.empty(), false, 0L, Optional.empty(), Optional.empty(), new CaptureHealth());
+
+        assertThat(run.failure()).isEmpty();
     }
 
     @Test
@@ -40,7 +62,7 @@ class CaptureRunTest {
         AtomicBoolean closed = new AtomicBoolean(false);
         Subscription subscription = () -> closed.set(true);
         CaptureRun run = new CaptureRun(
-                Optional.empty(), false, 0L, Optional.empty(), Optional.of(subscription));
+                Optional.empty(), false, 0L, Optional.empty(), Optional.of(subscription), new CaptureHealth());
 
         run.close();
         assertThatCode(run::close).doesNotThrowAnyException();
