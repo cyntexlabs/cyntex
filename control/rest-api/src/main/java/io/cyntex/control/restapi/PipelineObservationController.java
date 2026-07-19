@@ -1,6 +1,5 @@
 package io.cyntex.control.restapi;
 
-import io.cyntex.control.core.PipelineMetrics;
 import io.cyntex.control.core.PipelineObservationQueryService;
 import io.cyntex.control.core.PipelineSnapshot;
 import io.cyntex.control.core.PipelineStatus;
@@ -37,8 +36,8 @@ class PipelineObservationController {
 
     @Verb("pipeline.metrics")
     @GetMapping("/pipelines/{id}/metrics")
-    PipelineMetrics metrics(@PathVariable("id") String id) {
-        return observations.metrics(id);
+    PipelineMetricsResponse metrics(@PathVariable("id") String id) {
+        return PipelineMetricsResponse.of(observations.metrics(id));
     }
 
     @Verb("pipeline.snapshot")
