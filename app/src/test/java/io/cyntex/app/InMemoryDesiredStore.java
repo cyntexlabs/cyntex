@@ -19,6 +19,10 @@ final class InMemoryDesiredStore implements DesiredStore {
         docs.put(desired.pipelineId(), desired);
     }
 
+    void remove(String pipelineId) {
+        docs.remove(pipelineId);
+    }
+
     @Override
     public Optional<DesiredState> read(String pipelineId) {
         return Optional.ofNullable(docs.get(pipelineId));

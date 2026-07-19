@@ -26,6 +26,10 @@ final class InMemoryStateStore implements StateStore {
         failing.add(pipelineId);
     }
 
+    void recover(String pipelineId) {
+        failing.remove(pipelineId);
+    }
+
     @Override
     public Optional<CheckpointDoc> read(String pipelineId) {
         if (failing.contains(pipelineId)) {

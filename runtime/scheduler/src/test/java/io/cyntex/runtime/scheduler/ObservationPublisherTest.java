@@ -91,6 +91,31 @@ class ObservationPublisherTest {
         assertThat(observations.read("orders").orElseThrow().state()).isEqualTo(PipelineState.PAUSED);
     }
 
+    @Test
+    void publishReconcileFailureRecordsTheCountAgainstNewWhenNothingHasBeenObservedYet() {
+        publisher.publishReconcileFailure("orders", 3L);
+
+        Observation published = observations.read("orders").orElseThrow();
+        // A pipeline that never converged witnessed no lifecycle state, so the projection is NEW rather than a
+        // fabricated FAILED; the consecutive-failure count is the observable error signal.
+        assertThat(published.state()).isEqualTo(PipelineState.NEW);
+        assertThat(published.metrics()).containsOnly(entry("errorCount", 3L));
+        assertThat(published.snapshot()).isEmpty();
+    }
+
+    @Test
+    void publishReconcileFailurePreservesTheLastObservedStateAndCarriesTheCount() {
+        state.seed("orders", PipelineState.RUNNING);
+        publisher.publish("orders"); // the last state actually observed is RUNNING
+
+        publisher.publishReconcileFailure("orders", 2L);
+
+        Observation published = observations.read("orders").orElseThrow();
+        // The last observed state is kept, not overwritten with FAILED — only the error count moves.
+        assertThat(published.state()).isEqualTo(PipelineState.RUNNING);
+        assertThat(published.metrics()).containsOnly(entry("errorCount", 2L));
+    }
+
     /** In-memory state store double: seedable checkpoints, read-only for what the publisher needs. */
     private static final class MutableStateStore implements StateStore {
 

@@ -2,6 +2,7 @@ package io.cyntex.app;
 
 import ch.qos.logback.classic.Logger;
 import io.cyntex.core.lifecycle.DesiredState;
+import io.cyntex.core.lifecycle.Observation;
 import io.cyntex.core.lifecycle.StateJson;
 import io.cyntex.core.logging.LogLine;
 import io.cyntex.core.logging.RingBufferLogSink;
@@ -18,8 +19,10 @@ import java.time.ZoneOffset;
 import java.util.Optional;
 
 import static io.cyntex.core.lifecycle.PipelineState.FAILED;
+import static io.cyntex.core.lifecycle.PipelineState.NEW;
 import static io.cyntex.core.lifecycle.PipelineState.RUNNING;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.entry;
 
 /**
  * The convergence driver ticks the framework-free converger over every desired pipeline. It reconciles
@@ -62,6 +65,85 @@ class ConvergenceDriverTest {
 
         // The healthy pipeline still converges even though the broken one threw mid-pass.
         assertThat(state.read("healthy").orElseThrow().stateJson()).isEqualTo(StateJson.of(RUNNING));
+    }
+
+    @Test
+    void aPipelineWhoseReconcileKeepsThrowingBecomesObservableWithAClimbingErrorCount() {
+        // A pipeline whose converge pass throws every tick (its store is unreachable) never reaches the
+        // publish call, so with no error observation it is indistinguishable from one that is merely slow to
+        // converge. The driver must count the consecutive failures and surface them, so "permanently broken"
+        // reads differently from "still converging" on the observation read face.
+        desired.save(new DesiredState("broken", RUNNING, "rev-1"));
+        state.failFor("broken");
+
+        driver.reconcile();
+        driver.reconcile();
+        driver.reconcile();
+
+        Observation observed = observations.read("broken").orElseThrow();
+        // Never converged, so no lifecycle state was ever witnessed: the projection stays NEW rather than a
+        // fabricated FAILED, and the climbing errorCount is what marks it broken.
+        assertThat(observed.state()).isEqualTo(NEW);
+        assertThat(observed.metrics()).containsOnly(entry("errorCount", 3L));
+    }
+
+    @Test
+    void theReconcileFailureStreakClearsThenRestartsAfterThePipelineRecovers() {
+        desired.save(new DesiredState("orders", RUNNING, "rev-1"));
+        state.failFor("orders");
+        driver.reconcile();
+        driver.reconcile();
+        assertThat(observations.read("orders").orElseThrow().metrics()).containsOnly(entry("errorCount", 2L));
+
+        // The store recovers: the next pass converges normally and republishes the real state, so the error
+        // count drops back to zero rather than staying stuck at the earlier failure total.
+        state.recover("orders");
+        driver.reconcile();
+        Observation recovered = observations.read("orders").orElseThrow();
+        assertThat(recovered.state()).isEqualTo(RUNNING);
+        assertThat(recovered.metrics()).containsOnly(entry("errorCount", 0L));
+
+        // A later failure starts a fresh streak from one, not from the earlier total of two, so the clean pass
+        // in between must have cleared the counter.
+        state.failFor("orders");
+        driver.reconcile();
+        assertThat(observations.read("orders").orElseThrow().metrics()).containsOnly(entry("errorCount", 1L));
+    }
+
+    @Test
+    void aFailingPipelineDroppedFromTheDesiredSetDoesNotKeepItsStreak() {
+        desired.save(new DesiredState("orders", RUNNING, "rev-1"));
+        state.failFor("orders");
+        driver.reconcile();
+        driver.reconcile(); // the streak climbs to two
+
+        // The pipeline is deleted while still failing; the pass that no longer sees it prunes its counter so a
+        // deleted-while-failing pipeline cannot leak a streak that nothing will ever clear.
+        desired.remove("orders");
+        driver.reconcile();
+
+        // Re-applied later and still failing, it starts a fresh streak from one rather than resuming at three.
+        desired.save(new DesiredState("orders", RUNNING, "rev-1"));
+        driver.reconcile();
+        assertThat(observations.read("orders").orElseThrow().metrics()).containsOnly(entry("errorCount", 1L));
+    }
+
+    @Test
+    void aReadFaceThatRejectsTheErrorObservationDoesNotStarveTheOtherPipelines() {
+        // The broken pipeline's converge keeps throwing and the read face also rejects its error observation
+        // (the same store backs both and is down). Publishing the failure is best-effort: it must be swallowed
+        // so a second, healthy pipeline still converges and is observed in the same pass. Without that, one
+        // unreachable read face would starve every pipeline reconciled after it.
+        desired.save(new DesiredState("broken", RUNNING, "rev-1"));
+        desired.save(new DesiredState("healthy", RUNNING, "rev-1"));
+        state.failFor("broken");
+        observations.failSaveFor("broken");
+
+        driver.reconcile(); // must return normally rather than propagating the rejected save
+
+        assertThat(observations.read("healthy").orElseThrow().state()).isEqualTo(RUNNING);
+        // The broken pipeline's error observation could not be written, but that did not abort the pass.
+        assertThat(observations.read("broken")).isEmpty();
     }
 
     @Test

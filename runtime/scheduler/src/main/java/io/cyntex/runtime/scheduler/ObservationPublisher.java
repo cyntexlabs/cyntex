@@ -16,12 +16,15 @@ import java.util.Objects;
  * writes the observation, control reads it, and the two meet only at the store, never calling each other.
  * A pipeline with no checkpoint yet has nothing to observe and is left untouched (no empty doc is written).
  *
- * <p>The errorCount metric is derived from that same actual state — 1 while the pipeline is FAILED, 0
- * otherwise — so a dead data-plane job is an observable statistic, not just a log line. The remaining run
- * statistics have no source wired yet and are absent from the map; the snapshot dataset is likewise
- * unavailable and published empty (never faked). Republishing overwrites the latest projection in place —
- * the observation is current-state, not a time series, so the derived errorCount tracks the state and does
- * not accumulate across ticks (a recovered pipeline drops back to 0).
+ * <p>The errorCount metric has two sources. On a converged pass it is derived from that same actual state —
+ * 1 while the pipeline is FAILED, 0 otherwise — so a dead data-plane job is an observable statistic, not just
+ * a log line. When a reconcile pass instead keeps throwing (its store is unreachable, so it never converges),
+ * {@link #publishReconcileFailure} carries the consecutive-failure count as errorCount so the pipeline is
+ * observable as broken rather than silently absent from the read face. Either way errorCount &gt; 0 means the
+ * pipeline is unhealthy. The remaining run statistics have no source wired yet and are absent from the map;
+ * the snapshot dataset is likewise unavailable and published empty (never faked). Republishing overwrites the
+ * latest projection in place — the observation is current-state, not a time series, so the derived errorCount
+ * tracks the state and does not accumulate across ticks (a recovered pipeline drops back to 0).
  */
 public final class ObservationPublisher {
 
@@ -40,6 +43,20 @@ public final class ObservationPublisher {
             PipelineState actual = StateJson.parse(checkpoint.stateJson());
             observations.save(new Observation(pipelineId, actual, metrics(actual), Map.of()));
         });
+    }
+
+    /**
+     * Publishes a reconcile-failure observation for a pipeline whose converge pass keeps throwing and so
+     * never reaches {@link #publish}. Without it the read face stays empty and "permanently broken" cannot be
+     * told apart from "still converging". The consecutive-failure count rides out as errorCount; the last
+     * observed lifecycle state is preserved (or NEW when the pipeline has never been observed), since a
+     * reconcile that could not run witnessed no state transition. The snapshot dataset is left unavailable and
+     * the failure cause stays in the driver's log — neither fits the numeric metric map.
+     */
+    public void publishReconcileFailure(String pipelineId, long consecutiveFailures) {
+        Objects.requireNonNull(pipelineId, "pipelineId");
+        PipelineState lastState = observations.read(pipelineId).map(Observation::state).orElse(PipelineState.NEW);
+        observations.save(new Observation(pipelineId, lastState, Map.of("errorCount", consecutiveFailures), null));
     }
 
     /** The run statistics derived from the actual state: a FAILED job is one observable error, else zero. */
