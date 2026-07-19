@@ -29,10 +29,10 @@ public final class PipelineObservationQueryService {
         return new PipelineStatus(observation.pipelineId(), observation.state());
     }
 
-    /** The pipeline's open map of run statistics. */
+    /** The pipeline's open map of run statistics plus its per-table source positions. */
     public PipelineMetrics metrics(String pipelineId) {
         Observation observation = require(pipelineId);
-        return new PipelineMetrics(observation.pipelineId(), observation.metrics());
+        return new PipelineMetrics(observation.pipelineId(), observation.metrics(), observation.positions());
     }
 
     /** The pipeline's per-table initial-load progress. */
