@@ -1356,9 +1356,10 @@ final class Repl {
     }
 
     /**
-     * {@code metrics <pipeline-id>} — reads the pipeline's open map of run statistics and prints one
-     * {@code <name>  <value>} line per metric in name order, or a benign {@code no metrics} line when none
-     * are wired yet (unavailable, never faked). A coded refusal renders its code and message.
+     * {@code metrics <pipeline-id>} — reads the pipeline's open map of run statistics and its per-table source
+     * positions and prints one {@code <name>  <value>} line each in name order (a per-table position under a
+     * {@code perTableOffset.<table>} key), or a benign {@code no metrics} line when none are wired yet
+     * (unavailable, never faked). A coded refusal renders its code and message.
      */
     private void metricsOnline(List<String> words) {
         String id = readTargetId(words);
@@ -1371,10 +1372,13 @@ final class Repl {
         PrintWriter out = commandLine.getOut();
         switch (outcome) {
             case MetricsOutcome.Found found -> {
-                if (found.metrics().isEmpty()) {
+                Map<String, String> lines = new TreeMap<>();
+                found.metrics().forEach((name, value) -> lines.put(name, String.valueOf(value)));
+                found.perTableOffset().forEach((table, position) -> lines.put("perTableOffset." + table, position));
+                if (lines.isEmpty()) {
                     out.println("no metrics");
                 } else {
-                    new TreeMap<>(found.metrics()).forEach((name, value) -> out.println(name + "  " + value));
+                    lines.forEach((name, value) -> out.println(name + "  " + value));
                 }
                 out.flush();
             }

@@ -554,8 +554,10 @@ final class HttpControlPlaneClient implements ControlPlaneClient {
 
     /**
      * The metrics decoded from a 200 body's {@code metrics} object, or {@code null} unless the body carries a
-     * string id and a metrics object. Each numeric cell is read as a long; a non-numeric cell is dropped, so a
-     * malformed entry never crashes the read. An empty object is a legitimate empty (no source wired yet).
+     * string id and a metrics object. Each numeric cell is read as a long; the nested {@code perTableOffset}
+     * object is read separately into the per-table positions ({@code table -> srcpos}). Any other non-numeric
+     * cell is dropped, so a malformed entry never crashes the read. An empty object is a legitimate empty (no
+     * source wired yet).
      */
     private static MetricsOutcome.Found metricsFound(String body) {
         if (JsonReader.parse(body) instanceof Map<?, ?> m
@@ -567,7 +569,15 @@ final class HttpControlPlaneClient implements ControlPlaneClient {
                     stats.put(name, value.longValue());
                 }
             }
-            return new MetricsOutcome.Found(id, stats);
+            Map<String, String> perTableOffset = new LinkedHashMap<>();
+            if (metrics.get("perTableOffset") instanceof Map<?, ?> offsets) {
+                for (Map.Entry<?, ?> e : offsets.entrySet()) {
+                    if (e.getKey() instanceof String table && e.getValue() instanceof String position) {
+                        perTableOffset.put(table, position);
+                    }
+                }
+            }
+            return new MetricsOutcome.Found(id, stats, perTableOffset);
         }
         return null;
     }

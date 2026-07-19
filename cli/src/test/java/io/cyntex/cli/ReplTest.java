@@ -2118,6 +2118,31 @@ class ReplTest {
     }
 
     @Test
+    void metricsPrintsPerTableOffsetLinesAlongsideTheStats() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.metricsOutcome = new MetricsOutcome.Found(
+                "pl1", Map.of("recordCount", 6L), Map.of("orders", "w7"));
+        Harness h = onlineSession(Path.of("cyn-work"), client);
+        int mark = h.sink().toString().length();
+        h.repl().dispatch("metrics pl1");
+        String out = h.sink().toString().substring(mark);
+        assertThat(out).contains("recordCount").contains("perTableOffset.orders").contains("w7");
+    }
+
+    @Test
+    void metricsWithOnlyPerTableOffsetPrintsItRatherThanNoMetrics() {
+        // Positions-only: numeric stats empty but a per-table position is wired, so the offset prints and
+        // "no metrics" must not — it fires only when both sources are empty.
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.metricsOutcome = new MetricsOutcome.Found("pl1", Map.of(), Map.of("orders", "w7"));
+        Harness h = onlineSession(Path.of("cyn-work"), client);
+        int mark = h.sink().toString().length();
+        h.repl().dispatch("metrics pl1");
+        String out = h.sink().toString().substring(mark);
+        assertThat(out).contains("perTableOffset.orders").contains("w7").doesNotContain("no metrics");
+    }
+
+    @Test
     void metricsWithNoMetricsPrintsABenignNoMetricsLine() {
         FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
         client.metricsOutcome = new MetricsOutcome.Found("pl1", Map.of());

@@ -863,6 +863,22 @@ class HttpControlPlaneClientTest {
     }
 
     @Test
+    void metricsCapturesPerTableOffsetFromTheOpenMap() throws Exception {
+        // perTableOffset rides inside the open map as a nested table -> srcpos object; it is captured
+        // separately from the numeric stats, and the nested object never leaks into the numeric map.
+        HttpServer server = apiServer("/api/pipelines/pl1/metrics", 200,
+                "{\"pipelineId\":\"pl1\",\"metrics\":{\"recordCount\":6,\"perTableOffset\":{\"orders\":\"w7\"}}}",
+                new AtomicReference<>());
+        try {
+            MetricsOutcome outcome = new HttpControlPlaneClient().metrics(baseOf(server), "tok", "pl1");
+            assertThat(outcome).isEqualTo(new MetricsOutcome.Found(
+                    "pl1", Map.of("recordCount", 6L), Map.of("orders", "w7")));
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
     void metricsReturnsAnEmptyMapWhenNoMetricSourceIsWiredYet() throws Exception {
         // Honest-empty: no metric source is wired, so the open map is empty — never faked.
         HttpServer server = apiServer("/api/pipelines/pl1/metrics", 200,
