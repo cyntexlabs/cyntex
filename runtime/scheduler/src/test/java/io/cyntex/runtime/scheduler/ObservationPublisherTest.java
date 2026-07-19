@@ -13,6 +13,7 @@ import java.time.Instant;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalLong;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.entry;
@@ -42,9 +43,50 @@ class ObservationPublisherTest {
         assertThat(published.pipelineId()).isEqualTo("orders");
         assertThat(published.state()).isEqualTo(PipelineState.RUNNING);
         // errorCount is wired from the actual state: a healthy pipeline reports zero errors. The snapshot
-        // source is not wired yet, so it is published empty (unavailable), not faked.
+        // source is not wired yet, so it is published empty (unavailable), not faked. This publisher was
+        // built with no metric or position source, so recordCount is absent and positions are empty.
         assertThat(published.metrics()).containsOnly(entry("errorCount", 0L));
         assertThat(published.snapshot()).isEmpty();
+        assertThat(published.positions()).isEmpty();
+    }
+
+    @Test
+    void publishWiresTheRecordCountFromItsSourceIntoTheMetrics() {
+        state.seed("orders", PipelineState.RUNNING);
+        ObservationPublisher wired = new ObservationPublisher(
+                state, observations, id -> OptionalLong.of(128L), id -> Map.of());
+
+        wired.publish("orders");
+
+        // recordCount rides the numeric metrics map alongside the always-present errorCount gauge.
+        assertThat(observations.read("orders").orElseThrow().metrics())
+                .containsOnly(entry("errorCount", 0L), entry("recordCount", 128L));
+    }
+
+    @Test
+    void recordCountIsAbsentFromTheMetricsWhenItsSourceHasNoLiveJob() {
+        state.seed("orders", PipelineState.RUNNING);
+        ObservationPublisher wired = new ObservationPublisher(
+                state, observations, id -> OptionalLong.empty(), id -> Map.of());
+
+        wired.publish("orders");
+
+        // A missing metric means the source is not wired (here: no live job), expressed by its absence
+        // rather than a zero sentinel, so only the errorCount gauge is carried.
+        assertThat(observations.read("orders").orElseThrow().metrics()).containsOnly(entry("errorCount", 0L));
+    }
+
+    @Test
+    void publishWiresThePerTableSinkAckedPositionsFromItsSource() {
+        state.seed("orders", PipelineState.RUNNING);
+        ObservationPublisher wired = new ObservationPublisher(
+                state, observations, id -> OptionalLong.empty(), id -> Map.of("orders", "gtid:aaa-1:100"));
+
+        wired.publish("orders");
+
+        // The durable sink-acked source position rides the positions map, keyed by table, as a String.
+        assertThat(observations.read("orders").orElseThrow().positions())
+                .containsOnly(entry("orders", "gtid:aaa-1:100"));
     }
 
     @Test
