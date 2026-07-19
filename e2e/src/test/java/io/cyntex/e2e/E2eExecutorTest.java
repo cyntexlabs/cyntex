@@ -1,0 +1,371 @@
+package io.cyntex.e2e;
+
+import io.cyntex.core.lifecycle.LifecycleVerb;
+import io.cyntex.core.lifecycle.PipelineState;
+import org.junit.jupiter.api.Test;
+
+import java.time.Duration;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Stream;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
+/**
+ * The executor turns a specification into calls on a tier binding. What it must get right is order
+ * and honesty: provisioning strictly before data, data strictly before steps, and a wait that fails
+ * loudly on timeout reporting what it expected against what it actually read.
+ */
+class E2eExecutorTest {
+
+    private static final String PIPELINE_ID = "mongo2mongo";
+    private static final TableAlias SOURCE = new TableAlias("src_mongo", "orders");
+    private static final TableAlias TARGET = new TableAlias("tgt_mongo", "orders");
+
+    private final RecordingBinding binding = new RecordingBinding();
+
+    /**
+     * The dependency order, and the seed is part of it. A connector must be registered before a resource
+     * naming it can be applied, and a resource must exist before its model can be discovered - but a model
+     * is discovered from what the source holds, and what the source holds is what the seed put there. The
+     * harness's own seed is what materializes the table: it drops and rewrites it, so a discovery running
+     * first reads a table that is not there yet, comes back empty, and leaves the sink with no target model
+     * and no key to upsert on. Discovering last is what makes the discovery real.
+     */
+    @Test
+    void provisionsInDependencyOrderAndDiscoversWhatTheSeedPutThere() {
+        execute(
+                """
+                name: n
+                setup:
+                  connectors: [mongodb]
+                  apply: [src_mongo.cyn.yml, tgt_mongo.cyn.yml]
+                  discover: [src_mongo]
+                pipeline: p.cyn.yml
+                seed:
+                  src_mongo.orders: { rows: 3 }
+                steps:
+                  - start
+                """);
+
+        assertThat(binding.calls)
+                .containsExactly(
+                        "register:mongodb",
+                        // One apply, not one per file: the product resolves references within the set
+                        // submitted together, so a pipeline and its source must arrive in the same batch.
+                        "apply:[src_mongo.cyn.yml, tgt_mongo.cyn.yml]",
+                        "seed:src_mongo.orders=3",
+                        "discover:src_mongo",
+                        "drive:START");
+    }
+
+    @Test
+    void drivesEveryLifecycleVerbInDeclarationOrder() {
+        execute(minimal("steps:\n  - start\n  - pause\n  - resume\n  - stop\n"));
+
+        assertThat(binding.calls).containsExactly("drive:START", "drive:PAUSE", "drive:RESUME", "drive:STOP");
+    }
+
+    @Test
+    void awaitPollsUntilTheMatcherHolds() {
+        binding.countsOverTime(TARGET, 0L, 0L, 100L);
+
+        execute(minimal("steps:\n  - start\n  - await: { count: { tgt_mongo.orders: 100 } }\n"));
+
+        assertThat(binding.countReads).isEqualTo(3);
+    }
+
+    @Test
+    void awaitFailsLoudlyReportingExpectedAgainstActual() {
+        binding.countsOverTime(TARGET, 7L);
+
+        assertThatThrownBy(() -> execute(minimal("steps:\n  - await: { count: { tgt_mongo.orders: 100 } }\n")))
+                .isInstanceOf(AssertionError.class)
+                .hasMessageContaining("timed out after")
+                // Pinned as one phrase: asserting the numbers separately cannot tell this message
+                // apart from one that reports them the wrong way round.
+                .hasMessageContaining("tgt_mongo.orders expected 100, found 7");
+    }
+
+    @Test
+    void assertChecksOnceAndDoesNotWait() {
+        binding.countsOverTime(TARGET, 0L, 100L);
+
+        assertThatThrownBy(() -> execute(minimal("steps:\n  - assert: { count: { tgt_mongo.orders: 100 } }\n")))
+                .isInstanceOf(AssertionError.class)
+                .hasMessageContaining("tgt_mongo.orders expected 100, found 0");
+        assertThat(binding.countReads).isEqualTo(1);
+    }
+
+    @Test
+    void awaitAndAssertReadTheSameMatcherVocabulary() {
+        binding.countsOverTime(TARGET, 100L);
+
+        execute(minimal("steps:\n  - await: { count: { tgt_mongo.orders: 100 } }\n"));
+        execute(minimal("steps:\n  - assert: { count: { tgt_mongo.orders: 100 } }\n"));
+    }
+
+    @Test
+    void awaitsTheStateOfThePipelineResolvedFromTheEnvelope() {
+        binding.states(PipelineState.NEW, PipelineState.RUNNING);
+
+        execute(minimal("steps:\n  - await: { state: RUNNING }\n"));
+
+        assertThat(binding.stateReads).isEqualTo(2);
+        // The state read must address the pipeline the envelope names, not a hand-copied id.
+        assertThat(binding.statedPipelineIds).containsOnly(PIPELINE_ID);
+    }
+
+    @Test
+    void awaitPollsThroughAPipelineThatHasPublishedNoObservationYet() {
+        // The window every real run opens: a start intent is recorded, and until the first convergence pass
+        // lands there is nothing published to read at all. Sitting through it is what the bound is for, so
+        // an unpublished reading is "not yet" - a wait that failed here could never wait for a start.
+        binding.unobservedThen(PipelineState.RUNNING);
+
+        execute(minimal("steps:\n  - start\n  - await: { state: RUNNING }\n"));
+
+        assertThat(binding.stateReads).isEqualTo(2);
+    }
+
+    @Test
+    void reportsAnUnpublishedObservationAsTheReadingRatherThanAsAState() {
+        binding.neverObserved();
+
+        assertThatThrownBy(() -> execute(minimal("steps:\n  - assert: { state: RUNNING }\n")))
+                .isInstanceOf(AssertionError.class)
+                .hasMessageContaining("mongo2mongo expected RUNNING, found no published observation");
+    }
+
+    @Test
+    void reportsTheStateMismatchAgainstTheResolvedPipeline() {
+        binding.states(PipelineState.PAUSED);
+
+        assertThatThrownBy(() -> execute(minimal("steps:\n  - assert: { state: RUNNING }\n")))
+                .isInstanceOf(AssertionError.class)
+                .hasMessageContaining("mongo2mongo expected RUNNING, found PAUSED");
+    }
+
+    @Test
+    void awaitsTheErrorCountOfThePipelineResolvedFromTheEnvelope() {
+        binding.errorCounts(0L, 0L, 1L);
+
+        execute(minimal("steps:\n  - await: { error_count: 1 }\n"));
+
+        assertThat(binding.errorCountReads).isEqualTo(3);
+        // The metrics read must address the pipeline the envelope names, not a hand-copied id.
+        assertThat(binding.errorCountedPipelineIds).containsOnly(PIPELINE_ID);
+    }
+
+    @Test
+    void awaitsThroughAPipelineThatHasPublishedNoObservationYetForTheErrorCount() {
+        // The same window the state matcher sits through: a start intent is recorded and there is nothing
+        // published to read until the first convergence pass lands. An unpublished reading is "not yet", so a
+        // wait for an error count can still wait for a start.
+        binding.errorCountsUnobservedThen(1L);
+
+        execute(minimal("steps:\n  - start\n  - await: { error_count: 1 }\n"));
+
+        assertThat(binding.errorCountReads).isEqualTo(2);
+    }
+
+    @Test
+    void reportsAnUnpublishedObservationAsTheErrorCountReadingRatherThanACount() {
+        binding.errorCountNeverObserved();
+
+        assertThatThrownBy(() -> execute(minimal("steps:\n  - assert: { error_count: 1 }\n")))
+                .isInstanceOf(AssertionError.class)
+                .hasMessageContaining("mongo2mongo expected error count 1, found no published observation");
+    }
+
+    @Test
+    void reportsTheErrorCountMismatchAgainstTheResolvedPipeline() {
+        binding.errorCounts(0L);
+
+        assertThatThrownBy(() -> execute(minimal("steps:\n  - assert: { error_count: 1 }\n")))
+                .isInstanceOf(AssertionError.class)
+                .hasMessageContaining("mongo2mongo expected error count 1, found 0");
+    }
+
+    @Test
+    void producesCdcChangesAgainstTheNamedTable() {
+        execute(minimal("steps:\n  - cdc: { src_mongo.orders: insert 10 }\n"));
+
+        assertThat(binding.calls).containsExactly("cdc:src_mongo.orders=INSERT x10");
+    }
+
+    @Test
+    void countMatcherOverSeveralTablesHoldsOnlyWhenEveryTableMatches() {
+        binding.countsOverTime(TARGET, 100L);
+        binding.countsOverTime(SOURCE, 1L);
+
+        assertThatThrownBy(
+                        () ->
+                                execute(
+                                        minimal(
+                                                "steps:\n  - assert: { count: { tgt_mongo.orders: 100,"
+                                                        + " src_mongo.orders: 2 } }\n")))
+                .isInstanceOf(AssertionError.class)
+                .hasMessageContaining("src_mongo.orders expected 2, found 1");
+    }
+
+    @Test
+    void readsTheCountEndpointsInTheOrderTheAuthorWroteThem() {
+        binding.countsOverTime(new TableAlias("c", "t"), 9L);
+        binding.countsOverTime(new TableAlias("a", "t"), 9L);
+        binding.countsOverTime(new TableAlias("b", "t"), 9L);
+
+        execute(minimal("steps:\n  - assert: { count: { c.t: 9, a.t: 9, b.t: 9 } }\n"));
+
+        assertThat(binding.readTables)
+                .containsExactly(new TableAlias("c", "t"), new TableAlias("a", "t"), new TableAlias("b", "t"));
+    }
+
+    @Test
+    void drivesTheVerbAgainstThePipelineResolvedFromTheEnvelope() {
+        execute(minimal("steps:\n  - start\n"));
+
+        assertThat(binding.drivenPipelineIds).containsExactly(PIPELINE_ID);
+    }
+
+    @Test
+    void pollsAtLeastOnceEvenWithAZeroBound() {
+        binding.countsOverTime(TARGET, 7L);
+
+        assertThatThrownBy(
+                        () ->
+                                new E2eExecutor(binding, path -> PIPELINE_ID, Duration.ZERO, Duration.ofMillis(1))
+                                        .execute(
+                                                EnvelopeParser.parse(
+                                                        minimal("steps:\n  - await: { count: { tgt_mongo.orders: 100 } }\n"))))
+                .isInstanceOf(AssertionError.class);
+        assertThat(binding.countReads).isEqualTo(1);
+    }
+
+    private void execute(String yaml) {
+        binding.calls.clear();
+        new E2eExecutor(binding, path -> PIPELINE_ID, Duration.ofMillis(200), Duration.ofMillis(1))
+                .execute(EnvelopeParser.parse(yaml));
+    }
+
+    private static String minimal(String body) {
+        return "name: n\npipeline: p.cyn.yml\n" + body;
+    }
+
+    /** Records what the executor asked for, and can vary a reading over successive polls. */
+    private static final class RecordingBinding implements TierBinding {
+
+        private final List<String> calls = new ArrayList<>();
+        private final List<String> drivenPipelineIds = new ArrayList<>();
+        private final List<String> statedPipelineIds = new ArrayList<>();
+        private final List<TableAlias> readTables = new ArrayList<>();
+        private final Map<TableAlias, List<Long>> countSeries = new HashMap<>();
+        private final Map<TableAlias, AtomicInteger> countCursor = new HashMap<>();
+        private List<Optional<PipelineState>> stateSeries = List.of(Optional.of(PipelineState.RUNNING));
+        private List<Optional<Long>> errorCountSeries = List.of(Optional.of(0L));
+        private final List<String> errorCountedPipelineIds = new ArrayList<>();
+        private int stateReads;
+        private int errorCountReads;
+        private int countReads;
+
+        void countsOverTime(TableAlias table, Long... readings) {
+            countSeries.put(table, List.of(readings));
+            countCursor.put(table, new AtomicInteger());
+        }
+
+        void states(PipelineState... readings) {
+            stateSeries = Stream.of(readings).map(Optional::of).toList();
+        }
+
+        void errorCounts(Long... readings) {
+            errorCountSeries = Stream.of(readings).map(Optional::of).toList();
+        }
+
+        /** Publishes no observation on the first read, then these counts: the window a real start opens. */
+        void errorCountsUnobservedThen(Long... readings) {
+            errorCountSeries =
+                    Stream.concat(
+                                    Stream.of(Optional.<Long>empty()),
+                                    Stream.of(readings).map(Optional::of))
+                            .toList();
+        }
+
+        /** Publishes nothing, ever: a pipeline no convergence pass has reached. */
+        void errorCountNeverObserved() {
+            errorCountSeries = List.of(Optional.empty());
+        }
+
+        /** Publishes nothing on the first read, then these states: the window a real start opens. */
+        void unobservedThen(PipelineState... readings) {
+            stateSeries =
+                    Stream.concat(
+                                    Stream.of(Optional.<PipelineState>empty()),
+                                    Stream.of(readings).map(Optional::of))
+                            .toList();
+        }
+
+        /** Publishes nothing, ever: a pipeline no convergence pass has reached. */
+        void neverObserved() {
+            stateSeries = List.of(Optional.empty());
+        }
+
+        @Override
+        public void registerConnector(String connectorId) {
+            calls.add("register:" + connectorId);
+        }
+
+        @Override
+        public void applyResources(List<String> resourceFiles) {
+            calls.add("apply:" + resourceFiles);
+        }
+
+        @Override
+        public void discoverSchema(String resourceId) {
+            calls.add("discover:" + resourceId);
+        }
+
+        @Override
+        public void seed(TableAlias table, long rows) {
+            calls.add("seed:" + table + "=" + rows);
+        }
+
+        @Override
+        public void drive(String pipelineId, LifecycleVerb verb) {
+            drivenPipelineIds.add(pipelineId);
+            calls.add("drive:" + verb);
+        }
+
+        @Override
+        public void cdc(TableAlias table, CdcOp op, long rows) {
+            calls.add("cdc:" + table + "=" + op + " x" + rows);
+        }
+
+        @Override
+        public long count(TableAlias table) {
+            countReads++;
+            readTables.add(table);
+            List<Long> series = countSeries.getOrDefault(table, List.of(0L));
+            int index = countCursor.computeIfAbsent(table, t -> new AtomicInteger()).getAndIncrement();
+            return series.get(Math.min(index, series.size() - 1));
+        }
+
+        @Override
+        public Optional<PipelineState> state(String pipelineId) {
+            statedPipelineIds.add(pipelineId);
+            int index = stateReads++;
+            return stateSeries.get(Math.min(index, stateSeries.size() - 1));
+        }
+
+        @Override
+        public Optional<Long> errorCount(String pipelineId) {
+            errorCountedPipelineIds.add(pipelineId);
+            int index = errorCountReads++;
+            return errorCountSeries.get(Math.min(index, errorCountSeries.size() - 1));
+        }
+    }
+}

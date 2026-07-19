@@ -1,14 +1,16 @@
 package io.cyntex.app;
 
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
+
+import com.hazelcast.core.HazelcastInstance;
+import io.cyntex.runtime.engine.Engine;
 import io.cyntex.runtime.scheduler.LifecycleActuator;
 import io.cyntex.runtime.scheduler.PipelineConverger;
 import io.cyntex.spi.store.StorePort;
+import java.time.Clock;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
-
-import java.time.Clock;
-
-import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * The runtime convergence loop is wired into startup and gated on the same store switch as the store it
@@ -20,6 +22,7 @@ class RuntimeConvergenceStartupTest {
     private final ApplicationContextRunner runner = new ApplicationContextRunner()
             .withBean(StorePort.class, InMemoryStorePort::new)
             .withBean(LifecycleActuator.class, NoOpActuator::new)
+            .withBean(Engine.class, () -> new Engine(mock(HazelcastInstance.class)))
             .withBean(Clock.class, Clock::systemUTC)
             .withUserConfiguration(RuntimeConvergenceConfiguration.class);
 

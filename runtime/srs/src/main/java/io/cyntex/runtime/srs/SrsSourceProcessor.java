@@ -12,10 +12,16 @@ import java.util.Objects;
 
 /**
  * The core-API self-built source over one per-table change ring: a Jet processor with no inbound edge that
- * tails the ring in sequence order and emits each change already projected to the {@link Envelope} currency,
- * the source vertex the engine's DAG builder wires. It is the core-API sibling of {@link SrsRingSource} (the
- * pipeline-API stream source over raw items): the DAG builder speaks in processor suppliers, and the source
- * position must enter the envelope at the source, so the projection lives here rather than in a later stage.
+ * emits this ring's buffered snapshot rows first, then tails the ring in sequence order emitting each change
+ * already projected to the {@link Envelope} currency, the source vertex the engine's DAG builder wires. It is
+ * the core-API sibling of {@link SrsRingSource} (the pipeline-API stream source over raw items): the DAG
+ * builder speaks in processor suppliers, and the source position must enter the envelope at the source, so
+ * the projection lives here rather than in a later stage.
+ *
+ * <p>Snapshot rows and cdc changes flow through this one ordered source: the snapshot rows a member-side
+ * {@link SnapshotBuffer} holds for this ring are drained once at init and emitted ahead of any cdc change, so
+ * the older snapshot value can never land at the sink after a newer change of the same key. A member with no
+ * buffer bound, or a ring with none buffered (a cdc-only read), is a pure ring tail.
  *
  * <p>Non-cooperative, exactly as Jet's own SourceBuilder-built source is: it runs on its own thread and backs
  * off between empty fills, so an idle ring never spins a shared cooperative thread. It is not fault-tolerant -
@@ -45,6 +51,19 @@ public final class SrsSourceProcessor extends AbstractProcessor {
 
     @Override
     protected void init(Context context) {
+        // Seed the emit buffer with this ring's snapshot rows before opening the ring reader, so the source
+        // emits every snapshot row (op r, no source position) ahead of the first cdc change -- the ordering
+        // that keeps a stale snapshot from landing at the sink after a newer change of the same key. A member
+        // with no snapshot buffer bound, or a ring with none buffered (a cdc-only read), seeds nothing and the
+        // source is a pure ring tail. The rows are drained once here, in buffered order, and preserved as-is:
+        // their null source position is what the sink-ack watermark skips, so only cdc positions advance it.
+        // This is a streaming source: it assumes a cdc tail follows the snapshot. A snapshot-only read (no
+        // tail, a bounded source that emits the buffer then completes rather than tailing an empty ring) is a
+        // later increment; it is not driven through this vertex yet.
+        Object bound = context.hazelcastInstance().getUserContext().get(SnapshotBuffer.USER_CONTEXT_KEY);
+        if (bound instanceof SnapshotBuffer buffer) {
+            pending.addAll(buffer.drain(ringName));
+        }
         Ringbuffer<SrsItem> rb = context.hazelcastInstance().getRingbuffer(ringName);
         SrsRingbuffer ring = new SrsRingbuffer(rb);
         reader = SrsRingReader.from(ring, start, publisherFactory.resolve(context.hazelcastInstance()));

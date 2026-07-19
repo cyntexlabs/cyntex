@@ -82,6 +82,19 @@ class PdkSchemaDiscovererTest {
     }
 
     @Test
+    void discoverFailureDetailUnfoldsTheCauseChainSoANullMessageWrapperStillNamesTheFault() {
+        // A connector's failure often surfaces as a wrapper that carries no message of its own - an
+        // ExceptionInInitializerError, a reflective InvocationTargetException. Reporting only that
+        // wrapper's class name buries the real fault under an opaque word; the detail unfolds the chain
+        // and names the fault instead, so a coded discover failure is diagnosable.
+        Throwable failure = new ExceptionInInitializerError(new IllegalStateException("the real fault"));
+
+        assertThat(PdkSchemaDiscoverer.detail(failure))
+                .contains("ExceptionInInitializerError")
+                .contains("the real fault");
+    }
+
+    @Test
     void anIncompatibleConnectorIsRefusedBeforeDiscovery(@TempDir Path dir) {
         // Discovery provisions through the same open path as the read / write / test ports: an
         // incompatible declared level is refused up front, never downgraded into an empty model.

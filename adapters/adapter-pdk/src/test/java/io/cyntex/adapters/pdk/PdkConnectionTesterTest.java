@@ -112,4 +112,18 @@ class PdkConnectionTesterTest {
                 .isInstanceOf(CyntexException.class)
                 .satisfies(e -> assertThat(((CyntexException) e).code()).isEqualTo(ConnectorError.API_LEVEL_INCOMPATIBLE));
     }
+
+    @Test
+    void anUnrecognizedDeclaredVersionIsRefusedWithACodeNotABareCrash(@TempDir Path dir) {
+        // A version the Cyntex-side level table has no row for is a registry gap, not a compatibility
+        // verdict: the open path refuses it up front with a coded, version-naming diagnosis rather than
+        // the bare IllegalStateException the strict level lookup would raise mid-load.
+        ConnectorRef ref = new ConnectorRef(List.of(Synthetic.passingTest(dir)), "synthetic.PassingTest", "9.9.9", null);
+        ConnectionTester tester = new PdkConnectionTester(
+                connectorId -> ref, Clock.fixed(Instant.ofEpochMilli(FIXED_MILLIS), ZoneOffset.UTC));
+
+        assertThatThrownBy(() -> tester.test(config()))
+                .isInstanceOf(CyntexException.class)
+                .satisfies(e -> assertThat(((CyntexException) e).code()).isEqualTo(ConnectorError.API_LEVEL_UNKNOWN));
+    }
 }

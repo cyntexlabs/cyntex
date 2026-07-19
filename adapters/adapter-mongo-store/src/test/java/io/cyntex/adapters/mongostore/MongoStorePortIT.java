@@ -70,7 +70,8 @@ class MongoStorePortIT {
             port.artifacts().save(PARSER.parse(ORDERS));
             port.state().create("orders_sync", "{\"phase\":\"snapshot\"}", Instant.parse("2026-07-06T00:00:00Z"));
             port.desired().save(new DesiredState("orders_sync", PipelineState.RUNNING, "rev-abc"));
-            port.observations().save(new Observation("orders_sync", PipelineState.RUNNING, Map.of(), Map.of()));
+            port.observations().save(new Observation("orders_sync", PipelineState.RUNNING,
+                    Map.of(), Map.of(), Map.of("orders", "w7")));
             port.catalog().save(new ConnectionConfig("mysql-local", "mysql", Map.of("host", "localhost")));
             port.schemas().save(new DiscoveredSourceModel("mysql-local", "mysql", 1783998000000L, new SourceModel(List.of(
                     new SourceTable("orders", List.of(), List.of(), List.of())))));
@@ -88,7 +89,8 @@ class MongoStorePortIT {
             assertThat(port.artifacts().get("orders")).isPresent();
             assertThat(port.state().read("orders_sync")).isPresent();
             assertThat(port.desired().read("orders_sync")).isPresent();
-            assertThat(port.observations().read("orders_sync")).isPresent();
+            assertThat(port.observations().read("orders_sync"))
+                    .hasValueSatisfying(observation -> assertThat(observation.positions()).containsEntry("orders", "w7"));
             assertThat(port.catalog().get("mysql-local")).isPresent();
             assertThat(port.schemas().get("mysql-local")).isPresent();
             assertThat(port.connectors().list()).hasSize(1);

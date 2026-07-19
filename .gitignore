@@ -10,3 +10,6 @@ target/
 .idea/
 .vscode/
 *.iml
+
+# Server logs, written under the working directory by any test that boots the product
+logs/

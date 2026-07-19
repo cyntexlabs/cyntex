@@ -52,7 +52,17 @@ public enum DslError implements CyntexErrorCode {
      *  code it carries no field {@code path} (none is known) and has no corpus witness (a syntax error
      *  cannot be a well-formed corpus artifact) — {@code detail} carries the parser diagnostic, the
      *  typed line / column carry the location, and it is proven by a direct parser test. */
-    MALFORMED_YAML("dsl.malformed-yaml", Set.of("detail"));
+    MALFORMED_YAML("dsl.malformed-yaml", Set.of("detail")),
+    /** A {@code ${...}} reference naming a variable that is not set, where no default was given (§9).
+     *  Pre-semantic like {@link #MALFORMED_YAML}: interpolation runs on raw text before the parse, so
+     *  no field {@code path} exists yet and the typed line / column carry the location. Whether it
+     *  fires depends on the environment rather than on the document, so it has no corpus witness. */
+    UNDEFINED_VARIABLE("dsl.undefined-variable", Set.of("name")),
+    /** A {@code ${...}} reference that is not one of the forms the grammar defines (§9) — an unclosed
+     *  reference, an unknown prefix, or a name that is not a variable name. Pre-semantic and without a
+     *  corpus witness, for the same reasons as {@link #UNDEFINED_VARIABLE}; {@code ref} echoes the
+     *  offending reference. */
+    MALFORMED_INTERPOLATION("dsl.malformed-interpolation", Set.of("ref"));
 
     private final String code;
     private final Set<String> placeholders;

@@ -1,5 +1,6 @@
 package io.cyntex.spi.sink;
 
+import java.io.Serializable;
 import java.util.List;
 
 /**
@@ -10,8 +11,10 @@ import java.util.List;
  * <p>This is the write-side target model, already resolved (renames applied, primary key chosen), not
  * the source model as discovered. {@code fields} is held as an unmodifiable defensive copy; a null
  * list is normalized to empty. An empty field list leaves the target structure to the connector.
+ *
+ * <p>Serializable so a resolved model travels with the sink factory the engine ships onto the DAG.
  */
-public record TargetTable(String name, List<TargetField> fields) {
+public record TargetTable(String name, List<TargetField> fields) implements Serializable {
 
     public TargetTable {
         if (name == null || name.isBlank()) {

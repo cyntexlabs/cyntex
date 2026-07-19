@@ -5,6 +5,8 @@ import io.cyntex.control.core.ApplyService;
 import io.cyntex.control.core.ArtifactOutcome;
 import io.cyntex.control.core.ArtifactQueryService;
 import io.cyntex.control.core.AuditGate;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import io.cyntex.control.core.ConnectionTestResultQueryService;
 import io.cyntex.control.core.ConnectionTestService;
 import io.cyntex.control.core.ControlOperations;
@@ -21,6 +23,8 @@ import io.cyntex.core.model.canonical.CanonicalWriter;
 import io.cyntex.runtime.probe.ConnectionProbe;
 import io.cyntex.runtime.probe.SchemaDiscoveryProbe;
 import io.cyntex.spi.store.ArtifactStore;
+import io.cyntex.spi.store.AuditRecord;
+import io.cyntex.spi.store.AuditStore;
 import io.cyntex.spi.store.ConnectionTestResult;
 import io.cyntex.spi.store.ConnectionTestResultStore;
 import io.cyntex.spi.store.DiscoveredSourceModel;
@@ -45,9 +49,14 @@ import org.springframework.stereotype.Controller;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.method.HandlerMethod;
+import org.springframework.web.servlet.HandlerInterceptor;
+import org.springframework.web.servlet.config.annotation.InterceptorRegistry;
+import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 import org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping;
 
 import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -57,6 +66,7 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.tuple;
 
 /**
  * The HTTP face over the control verbs: each endpoint is a thin projection of a registered operation
@@ -67,8 +77,21 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 class ControlApiTest {
 
+    private static final String STAMPED_PRINCIPAL = "alice";
+    private static final Instant AUDIT_INSTANT = Instant.parse("2026-07-15T10:15:30Z");
+
     private static ConfigurableApplicationContext context;
     private static int port;
+
+    /** An audit store that captures every record it is asked to write. */
+    static final class RecordingAuditStore implements AuditStore {
+        final List<AuditRecord> records = new ArrayList<>();
+
+        @Override
+        public void record(AuditRecord record) {
+            records.add(record);
+        }
+    }
 
     @BeforeAll
     static void startServer() {
@@ -86,6 +109,7 @@ class ControlApiTest {
     @BeforeEach
     void resetStore() {
         ((InMemoryArtifactStore) context.getBean(ArtifactStore.class)).clear();
+        context.getBean(RecordingAuditStore.class).records.clear();
     }
 
     private RestClient client() {
@@ -104,6 +128,21 @@ class ControlApiTest {
     }
 
     // ---- the verbs project onto HTTP ----
+
+    @Test
+    void applyAuditsTheRequestPrincipalForEachChangedArtifact() {
+        // artifact.apply is an audited write, so the endpoint must reach the store through the audit gate
+        // and carry the request's own principal into the record — not a constant the controller invents.
+        // The interceptor's job (deriving that principal from the credential) is asserted in AuthTest; the
+        // request-attribute-to-audit chain for this same mechanism is asserted in PipelineApiTest.
+        applyDrafts(TGT_MY, SRC_ORA);
+
+        assertThat(context.getBean(RecordingAuditStore.class).records).extracting(
+                        AuditRecord::operationId, AuditRecord::principal, AuditRecord::resourceId)
+                .containsExactly(
+                        tuple("artifact.apply", STAMPED_PRINCIPAL, "tgt_my"),
+                        tuple("artifact.apply", STAMPED_PRINCIPAL, "src_ora"));
+    }
 
     @Test
     void applyUpsertsAndReturnsTheOutcomes() {
@@ -329,8 +368,42 @@ class ControlApiTest {
         }
 
         @Bean
-        ApplyService applyService(ArtifactStore store) {
-            return new ApplyService(CyntexCatalog::load, store);
+        ApplyService applyService(ArtifactStore store, AuditGate auditGate) {
+            return new ApplyService(CyntexCatalog::load, store, auditGate);
+        }
+
+        @Bean
+        RecordingAuditStore auditStore() {
+            return new RecordingAuditStore();
+        }
+
+        @Bean
+        AuditGate auditGate(RecordingAuditStore store) {
+            return new AuditGate(store, Clock.fixed(AUDIT_INSTANT, ZoneOffset.UTC));
+        }
+
+        /**
+         * Stamps a fixed principal onto every {@code /api} request. This context omits the authentication
+         * interceptor on purpose — it asserts the verb mechanics, not the guard (which AuthTest asserts) —
+         * but an audited verb still needs a principal to attribute its record to, so one is supplied here.
+         * The endpoint reads whatever this stamps, which is what proves it carries the request's principal
+         * rather than a constant of its own.
+         */
+        @Bean
+        WebMvcConfigurer principalStamp() {
+            return new WebMvcConfigurer() {
+                @Override
+                public void addInterceptors(InterceptorRegistry registry) {
+                    registry.addInterceptor(new HandlerInterceptor() {
+                        @Override
+                        public boolean preHandle(
+                                HttpServletRequest request, HttpServletResponse response, Object handler) {
+                            request.setAttribute(AuthInterceptor.PRINCIPAL_ATTRIBUTE, STAMPED_PRINCIPAL);
+                            return true;
+                        }
+                    }).addPathPatterns("/api/**");
+                }
+            };
         }
 
         @Bean

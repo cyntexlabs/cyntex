@@ -8,6 +8,12 @@
 #
 # Values are double-quoted single-line scalars; colons, apostrophes and backticks inside the quotes
 # are fine. Keep literal double-quotes out of values (use backticks for inline code).
+actuation.pipeline-not-found:
+  message: "No pipeline artifact `{pipeline}` is stored to run."
+  solution: "Apply the pipeline before starting it, and check the id for typos."
+actuation.not-a-pipeline:
+  message: "Resource `{pipeline}` is a `{kind}`, not a pipeline, so it cannot be run."
+  solution: "Start a pipeline resource; check the id names a pipeline and not another kind of resource."
 boot.hazelcast-unavailable:
   message: "The embedded Hazelcast member could not start."
   solution: "Another process may already be using the member port on loopback; stop it or set a different port, then restart."
@@ -35,6 +41,9 @@ cli.not-connected:
 cli.not-authenticated:
   message: "The `{verb}` command needs you to sign in first."
   solution: "Run `login <username>` to authenticate, then try again."
+cli.verb-not-implemented:
+  message: "The `{verb}` command is reserved but not implemented yet."
+  solution: "Use the commands it will be built from in the meantime; `help` lists what this build can do."
 dsl.unknown-field:
   message: "Unknown field '{field}' at {path}."
   solution: "Remove it, or run `cyntex explain` to see the fields allowed here."
@@ -74,6 +83,12 @@ dsl.invalid-config-value:
 dsl.malformed-yaml:
   message: "Malformed YAML: {detail}."
   solution: "Fix the YAML syntax; the line and column point at the problem."
+dsl.undefined-variable:
+  message: "Variable '{name}' is not set, and the reference to it gives no default."
+  solution: "Set '{name}' in the environment you apply from, or give the reference a fallback with the ${var:NAME:default} form."
+dsl.malformed-interpolation:
+  message: "Reference '{ref}' is not a form the grammar defines."
+  solution: "A reference names a variable, as in ${var:NAME:default} for one with a fallback; a lone dollar sign is ordinary text."
 lifecycle.illegal-transition:
   message: "Cannot {verb} a pipeline in state {from}."
   solution: "Only certain actions are valid from each state; check the pipeline's current state first."
@@ -137,6 +152,9 @@ connector.spec-invalid:
 connector.api-level-incompatible:
   message: "Connector '{connector}' requires PDK API level {required} but this engine provides level {provided}."
   solution: "Use a connector build compatible with API level {provided}, or upgrade the engine."
+connector.api-level-unknown:
+  message: "Connector '{connector}' declares PDK API version {version}, which this engine build does not recognize."
+  solution: "Use a connector built against a PDK API version this engine registers, or add {version} to the Cyntex-side level table if it is API-compatible."
 connector.projection-failed:
   message: "Connector '{connector}' produced an event that could not be projected: {detail}."
   solution: "This is a bridge-level projection failure between the connector and the event envelope."

@@ -5,9 +5,17 @@ import com.hazelcast.jet.Job;
 import com.hazelcast.jet.config.JobConfig;
 import com.hazelcast.jet.config.ProcessingGuarantee;
 import com.hazelcast.jet.core.DAG;
+import com.hazelcast.jet.core.JobStatus;
+import com.hazelcast.jet.core.metrics.Measurement;
+import com.hazelcast.jet.core.metrics.MetricNames;
+import com.hazelcast.jet.core.metrics.MetricTags;
 import io.cyntex.core.common.CyntexException;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
+import java.util.OptionalLong;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.CompletionException;
 
 /**
  * The data-plane execution engine: the lifecycle actuator that maps a pipeline's lifecycle to Jet
@@ -64,6 +72,54 @@ public final class Engine {
         if (job != null) {
             job.cancel();
         }
+    }
+
+    /**
+     * The failure of the pipeline's job if it died on its own, or empty while it runs, has no job, or
+     * was ended by a cancel. A Jet job reaches FAILED both when it throws and when it is cancelled, so a
+     * bare status check cannot tell a real failure from a stop; the terminal future tells them apart —
+     * a cancelled job completes with a {@link CancellationException}, a failed one with its own cause.
+     * The job is terminal here, so joining its future returns or throws at once without blocking.
+     */
+    public Optional<Throwable> failureOf(String pipelineId) {
+        Job job = member.getJet().getJob(pipelineId);
+        if (job == null || job.getStatus() != JobStatus.FAILED) {
+            return Optional.empty();
+        }
+        try {
+            job.getFuture().join();
+            return Optional.empty();
+        } catch (CancellationException cancelled) {
+            return Optional.empty();
+        } catch (CompletionException failed) {
+            Throwable cause = failed.getCause() != null ? failed.getCause() : failed;
+            return cause instanceof CancellationException ? Optional.empty() : Optional.of(cause);
+        }
+    }
+
+    /**
+     * The number of records the pipeline's live job has driven to its serve sinks, or empty when it
+     * has no live job. The count is the received count summed over the serve-sink vertices, so a
+     * filter earlier in the chain is reflected in it. It reads the job's last collected metrics, so a
+     * freshly submitted job reports a low or zero count until the first collection; a stopped pipeline
+     * reports empty, matching the live-state projection the rest of the read face carries.
+     */
+    public OptionalLong recordCount(String pipelineId) {
+        Job job = liveJob(pipelineId);
+        if (job == null) {
+            return OptionalLong.empty();
+        }
+        long reached = job.getMetrics().get(MetricNames.RECEIVED_COUNT).stream()
+                .filter(Engine::isServeSink)
+                .mapToLong(Measurement::value)
+                .sum();
+        return OptionalLong.of(reached);
+    }
+
+    /** Whether a measurement belongs to a serve-sink vertex, which the builder names by that prefix. */
+    private static boolean isServeSink(Measurement measurement) {
+        String vertex = measurement.tag(MetricTags.VERTEX);
+        return vertex != null && vertex.startsWith(PipelineDagBuilder.SERVE_VERTEX_PREFIX);
     }
 
     /**

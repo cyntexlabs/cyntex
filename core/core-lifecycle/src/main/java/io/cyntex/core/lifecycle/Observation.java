@@ -14,21 +14,38 @@ import java.util.Objects;
  * <ul>
  *   <li>{@code pipelineId} — the primary key, one observation per pipeline.</li>
  *   <li>{@code state} — the lifecycle state, the small stable status dataset.</li>
- *   <li>{@code metrics} — an open map of run statistics ({@code name -> value}); empty when none are
- *       wired yet (unavailable), never faked.</li>
+ *   <li>{@code metrics} — an open map of numeric run statistics ({@code name -> count}); empty when none
+ *       are wired yet (unavailable), never faked.</li>
  *   <li>{@code snapshot} — per-table initial-load progress; empty outside a snapshot phase or when
  *       unavailable.</li>
+ *   <li>{@code positions} — per-table source positions ({@code table -> opaque srcpos}), the durable
+ *       sink-acked position (binlog/GTID/LSN). A String, not a count, so it rides here rather than the
+ *       numeric metrics map; a read face presents it alongside metrics. Empty when unwired.</li>
  * </ul>
  */
 public record Observation(
-        String pipelineId, PipelineState state, Map<String, Long> metrics, Map<String, TableSnapshot> snapshot) {
+        String pipelineId,
+        PipelineState state,
+        Map<String, Long> metrics,
+        Map<String, TableSnapshot> snapshot,
+        Map<String, String> positions) {
 
     public Observation {
         Objects.requireNonNull(pipelineId, "pipelineId");
         Objects.requireNonNull(state, "state");
-        // A state-only observation is normal before metric / snapshot sources are wired: null reads as an
-        // empty (unavailable) map, and the copy makes the stored projection immutable.
+        // A state-only observation is normal before metric / snapshot / position sources are wired: null
+        // reads as an empty (unavailable) map, and the copy makes the stored projection immutable.
         metrics = metrics == null ? Map.of() : Map.copyOf(metrics);
         snapshot = snapshot == null ? Map.of() : Map.copyOf(snapshot);
+        positions = positions == null ? Map.of() : Map.copyOf(positions);
+    }
+
+    /**
+     * A state/metrics/snapshot observation with no source positions — the shape callers used before the
+     * per-table offset projection was added. Backward compatible: positions read as empty (unavailable).
+     */
+    public Observation(
+            String pipelineId, PipelineState state, Map<String, Long> metrics, Map<String, TableSnapshot> snapshot) {
+        this(pipelineId, state, metrics, snapshot, Map.of());
     }
 }

@@ -1,9 +1,12 @@
 package io.cyntex.cli;
 
+import io.cyntex.core.dsl.DslException;
 import io.cyntex.core.dsl.DslParser;
+import io.cyntex.core.dsl.Interpolator;
 import io.cyntex.core.model.Resource;
 import io.cyntex.core.model.SourceResource;
 import io.cyntex.core.schema.SchemaNavigator;
+import io.cyntex.messages.MessageCatalog;
 import org.jline.reader.EndOfFileException;
 import org.jline.reader.LineReader;
 import org.jline.reader.LineReaderBuilder;
@@ -28,6 +31,7 @@ import java.util.Map;
 import java.util.TreeMap;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
+import java.util.function.UnaryOperator;
 import java.util.stream.Collectors;
 
 /**
@@ -57,8 +61,8 @@ final class Repl {
      * verbs ({@code test} = {@code connection.test}, {@code test-result} = {@code connection.test-result},
      * {@code discover-schema} = {@code connection.discover-schema}, {@code schema} = {@code connection.schema}),
      * and the connector verbs ({@code register} = {@code connector.register}, {@code connectors} =
-     * {@code connector.list}). Offline they fall through to the table, where the connected verbs report
-     * "requires a connection" and {@code ls} browses the local workspace. {@code validate} is not here — it
+     * {@code connector.list}). Offline they fall through to the table, where the connected verbs report a
+     * coded {@code cli.not-connected} and {@code ls} browses the local workspace. {@code validate} is not here — it
      * runs the full local stack in either state until a server validate endpoint exists.
      */
     private static final List<String> ONLINE_VERBS = List.of(
@@ -80,6 +84,12 @@ final class Repl {
     private Path workdir;
 
     /**
+     * The environment {@code ${...}} references are substituted from — the author's own, since this side
+     * loads the files. A scripted stand-in is injected in tests; the real one is the process environment.
+     */
+    private final UnaryOperator<String> env;
+
+    /**
      * Set by the terminal's interrupt handler to stop an in-flight {@code --watch} / {@code --follow}
      * stream; reset at the start of each stream. Volatile because the interrupt handler runs on another
      * thread than the stream loop that polls it.
@@ -99,10 +109,16 @@ final class Repl {
     }
 
     Repl(CommandLine commandLine, Path workdir, ControlPlaneClient controlPlane, Prompter prompter) {
+        this(commandLine, workdir, controlPlane, prompter, System::getenv);
+    }
+
+    Repl(CommandLine commandLine, Path workdir, ControlPlaneClient controlPlane, Prompter prompter,
+         UnaryOperator<String> env) {
         this.commandLine = commandLine;
         this.workdir = workdir;
         this.controlPlane = controlPlane;
         this.prompter = prompter;
+        this.env = env;
     }
 
     /** The current session workspace. */
@@ -315,6 +331,11 @@ final class Repl {
         } catch (IOException e) {
             err.println("apply: cannot read " + target + ": " + e.getMessage());
             err.flush();
+            return;
+        } catch (DslException e) {
+            // an unresolved reference is refused here, before anything is sent: the server would only see
+            // a literal ${...} and take it for a real value
+            renderLocalRefusal(e);
             return;
         }
         if (drafts.isEmpty()) {
@@ -1335,9 +1356,10 @@ final class Repl {
     }
 
     /**
-     * {@code metrics <pipeline-id>} — reads the pipeline's open map of run statistics and prints one
-     * {@code <name>  <value>} line per metric in name order, or a benign {@code no metrics} line when none
-     * are wired yet (unavailable, never faked). A coded refusal renders its code and message.
+     * {@code metrics <pipeline-id>} — reads the pipeline's open map of run statistics and its per-table source
+     * positions and prints one {@code <name>  <value>} line each in name order (a per-table position under a
+     * {@code perTableOffset.<table>} key), or a benign {@code no metrics} line when none are wired yet
+     * (unavailable, never faked). A coded refusal renders its code and message.
      */
     private void metricsOnline(List<String> words) {
         String id = readTargetId(words);
@@ -1350,10 +1372,13 @@ final class Repl {
         PrintWriter out = commandLine.getOut();
         switch (outcome) {
             case MetricsOutcome.Found found -> {
-                if (found.metrics().isEmpty()) {
+                Map<String, String> lines = new TreeMap<>();
+                found.metrics().forEach((name, value) -> lines.put(name, String.valueOf(value)));
+                found.perTableOffset().forEach((table, position) -> lines.put("perTableOffset." + table, position));
+                if (lines.isEmpty()) {
                     out.println("no metrics");
                 } else {
-                    new TreeMap<>(found.metrics()).forEach((name, value) -> out.println(name + "  " + value));
+                    lines.forEach((name, value) -> out.println(name + "  " + value));
                 }
                 out.flush();
             }
@@ -1530,8 +1555,15 @@ final class Repl {
         return outcome;
     }
 
-    /** Reads every {@code *.cyn.yml} under a path (recursively for a directory) as raw drafts, in name order. */
-    private static List<LocalDraft> collectDrafts(Path target) throws IOException {
+    /**
+     * Reads every {@code *.cyn.yml} under a path (recursively for a directory) as drafts, in name order,
+     * with each file's {@code ${...}} references substituted from this session's environment.
+     *
+     * <p>Substituting here, rather than letting the server do it, is what keeps the variables read the
+     * author's own: this side loads the files, so this side resolves them, and only values cross the
+     * wire. The drafts stay raw text otherwise — the server remains the only parser.
+     */
+    private List<LocalDraft> collectDrafts(Path target) throws IOException {
         List<LocalDraft> drafts = new ArrayList<>();
         if (Files.isDirectory(target)) {
             try (var files = Files.walk(target)) {
@@ -1540,7 +1572,7 @@ final class Repl {
                         .sorted()
                         .toList();
                 for (Path f : yamls) {
-                    drafts.add(new LocalDraft(target.relativize(f).toString(), Files.readString(f)));
+                    drafts.add(draft(target.relativize(f).toString(), f));
                 }
             } catch (UncheckedIOException e) {
                 // Files.walk surfaces a mid-traversal access error (an unreadable or concurrently-removed
@@ -1550,9 +1582,36 @@ final class Repl {
                 throw e.getCause() != null ? e.getCause() : new IOException(e.getMessage(), e);
             }
         } else if (Files.isRegularFile(target)) {
-            drafts.add(new LocalDraft(target.getFileName().toString(), Files.readString(target)));
+            drafts.add(draft(target.getFileName().toString(), target));
         }
         return drafts;
+    }
+
+    /** Reads one artifact and resolves its references, naming the file on whatever it refuses. */
+    private LocalDraft draft(String source, Path file) throws IOException {
+        String text = Files.readString(file);
+        try {
+            return new LocalDraft(source, Interpolator.interpolate(text, env));
+        } catch (DslException e) {
+            throw e.withSource(source);
+        }
+    }
+
+    /**
+     * Renders a coded refusal raised on this side of the wire, located at the file and line it was found
+     * on. Distinct from {@link #renderRejection} only in where the message comes from: a server refusal
+     * arrives rendered, while this one is rendered here from the code and its arguments.
+     */
+    private void renderLocalRefusal(DslException e) {
+        MessageCatalog.Rendered rendered = MessageCatalog.bundled().render(e.code(), e.args());
+        PrintWriter err = commandLine.getErr();
+        String at = e.source() + (e.line() > 0 ? ":" + e.line() + ":" + e.column() : "");
+        err.println(Ansi.AUTO.string("@|bold,red error:|@") + " " + at + "  " + e.code().code());
+        err.println("  " + rendered.message());
+        if (rendered.solution() != null) {
+            err.println("  " + rendered.solution());
+        }
+        err.flush();
     }
 
     /** Renders a coded server refusal: the {@code code} (when present) then the rendered message, to err. */

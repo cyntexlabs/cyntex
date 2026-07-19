@@ -1,0 +1,41 @@
+# A sink that rejects every write drives the pipeline to an observable failure, and the harness reads
+# that failure the way a user would: not from a log, but from the two read faces a running product
+# exposes. The sibling examples witness the happy path - rows crossing and counts settling; this one
+# witnesses the other half, that a dead data-plane job is a state and a statistic rather than an eternal
+# RUNNING that moves nothing.
+#
+# The failure is deliberate: the target connection carries fail_writes, which makes its sink throw on the
+# first batch it is handed. The product wraps that into a coded write failure, the job dies, and the
+# convergence pass that finds a RUNNING job dead drives the pipeline to FAILED - the state this example
+# first awaits.
+#
+# The read is snapshot_only, and that is load-bearing rather than incidental. The sink surfaces a failed
+# write when its input is drained or its upstream finishes; a bounded snapshot read finishes, so the
+# failure is surfaced the moment the seeded rows are read and rejected. A streaming read that failed once
+# and then went idle would leave the rejection unsurfaced until the next row arrived - a real edge of the
+# observability, and not the thing this example is written to pin.
+#
+# error_count is the point of this example. The runtime derives it from the pipeline's actual state - one
+# while FAILED, zero otherwise - and publishes it on the metrics face; asserting it here is what holds
+# that wiring to account from outside the product. Were the metric to stop being published, a published
+# observation would carry no errorCount and this assertion would fail loudly rather than pass on a happy
+# read. It is not redundant with the state: the state says the job died, the count says the failure was
+# counted, and each fails on its own if its source regresses.
+#
+# Zero, and it is the last word. A sink that throws on its first write creates no target file at all, so
+# nothing crosses - and this count is read back by an address the example cannot name, the target
+# directory this run handed out, so it cannot pass by reading the harness's own rows. A run in which the
+# rejected rows leaked to the target anyway would rest on some number above zero and fail here.
+name: a-sink-write-failure-is-observable
+setup:
+  connectors: [e2e_file]
+  apply: [src_file.cyn.yml, tgt_file.cyn.yml, pipeline.cyn.yml]
+  discover: [src_file]
+pipeline: pipeline.cyn.yml
+seed:
+  src_file.orders: { rows: 3 }
+steps:
+  - start
+  - await: { state: FAILED }
+  - assert: { error_count: 1 }
+  - assert: { count: { tgt_file.orders: 0 } }

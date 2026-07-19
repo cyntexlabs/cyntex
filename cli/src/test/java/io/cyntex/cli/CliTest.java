@@ -20,9 +20,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
- * The dual-mode CLI's command table: the offline-verb whitelist (validate / new / explain), the
- * connected-verb "requires a connection" affordance, exit-code contract, and validate wired to the
- * offline DSL link.
+ * The dual-mode CLI's command table: the offline-verb whitelist (validate / new / explain), the coded
+ * not-connected and not-implemented affordances (which must survive the operands these verbs are really
+ * typed with), the exit-code contract, and validate wired to the offline DSL link.
  */
 class CliTest {
 
@@ -55,6 +55,10 @@ class CliTest {
         return Cli.CONNECTED_VERBS.stream();
     }
 
+    static Stream<String> unimplementedCompositeVerbs() {
+        return Cli.UNIMPLEMENTED_COMPOSITE_VERBS.stream();
+    }
+
     @Test
     void offlineVerbsAreRegistered() {
         assertThat(Cli.newCommandLine().getSubcommands().keySet())
@@ -71,10 +75,12 @@ class CliTest {
 
     @Test
     void offlineVerbWhitelistMatchesRegisteredSubcommands() {
-        // single source of truth: every registered subcommand that is not a connected verb must be
-        // exactly the declared offline whitelist (so the recovery hint can never drift)
+        // single source of truth: every registered subcommand that needs neither a server nor an
+        // implementation it has not got must be exactly the declared offline whitelist (so the
+        // recovery hint can never drift)
         TreeSet<String> registeredOffline = new TreeSet<>(Cli.newCommandLine().getSubcommands().keySet());
         registeredOffline.removeAll(Cli.CONNECTED_VERBS);
+        registeredOffline.removeAll(Cli.UNIMPLEMENTED_COMPOSITE_VERBS);
         assertThat(registeredOffline).containsExactlyInAnyOrderElementsOf(Cli.OFFLINE_VERBS);
     }
 
@@ -85,6 +91,28 @@ class CliTest {
         // "invalid" contains "valid", so anchor on the success shape, not a bare substring
         assertThat(r.out()).startsWith("valid:").contains("3 resources");
         assertThat(r.err()).isEmpty();
+    }
+
+    @Test
+    void validateJudgesAWorkspaceWithoutResolvingItsReferences(@TempDir Path ws) throws Exception {
+        // validate is the offline verb: it reads no environment, so a reference stays opaque to it and a
+        // workspace that carries one still validates. That is what lets a check run somewhere the
+        // variables are not set — a build box, a reviewer's laptop — and it is the standing reason the
+        // capability rules skip a value they cannot see. Resolution belongs to apply, which is the verb
+        // that has an environment to resolve from.
+        Files.createDirectory(ws.resolve("source"));
+        Files.writeString(ws.resolve("source").resolve("src.cyn.yml"), """
+                version: cyntex/v1
+                kind: source
+                id: src
+                connector: mongodb
+                config: { uri: "${MONGO_URI}" }
+                """);
+
+        Run r = run("validate", ws.toString());
+
+        assertThat(r.code()).isZero();
+        assertThat(r.out()).startsWith("valid:");
     }
 
     @Test
@@ -328,7 +356,7 @@ class CliTest {
     void connectedVerbReportsNotConnectedRatherThanMissing() {
         Run r = run("apply");
         assertThat(r.code()).isEqualTo(3);
-        assertThat(r.err()).contains("requires a connection");
+        assertThat(r.err()).contains("cli.not-connected");
     }
 
     @ParameterizedTest
@@ -336,8 +364,39 @@ class CliTest {
     void everyConnectedVerbReportsItsOwnName(String verb) {
         Run r = run(verb);
         assertThat(r.code()).isEqualTo(3);
-        // the shared handler must render the verb actually typed, for all of them — not just apply
-        assertThat(r.err()).contains("verb '" + verb + "'").contains("requires a connection");
+        // the shared handler must render a coded diagnostic naming the verb actually typed, for all of
+        // them — not just apply, and not a bare string that no catalog or machine reader can resolve
+        assertThat(r.err()).contains("cli.not-connected").contains(verb);
+    }
+
+    @ParameterizedTest
+    @MethodSource("connectedVerbs")
+    void aConnectedVerbReportsNotConnectedEvenWhenGivenArguments(String verb) {
+        // the affordance has to survive the way these verbs are actually typed — `apply x.yml`, not a
+        // bare `apply`. A verb that takes no arguments would reject the operand as unmatched and print
+        // usage instead, telling the user nothing about the connection they are missing.
+        Run r = run(verb, "some-id", "--force");
+        assertThat(r.code()).isEqualTo(3);
+        assertThat(r.err()).contains("cli.not-connected").contains(verb);
+    }
+
+    @ParameterizedTest
+    @MethodSource("unimplementedCompositeVerbs")
+    void anUnimplementedCompositeVerbSaysSoRatherThanBlamingTheConnection(String verb) {
+        Run r = run(verb);
+        assertThat(r.code()).isEqualTo(3);
+        // these verbs compose registered operations but have no implementation yet, so "you are not
+        // connected" is simply false — connecting would not make them work
+        assertThat(r.err()).contains("cli.verb-not-implemented").contains(verb);
+        assertThat(r.err()).doesNotContain("cli.not-connected");
+    }
+
+    @ParameterizedTest
+    @MethodSource("unimplementedCompositeVerbs")
+    void anUnimplementedCompositeVerbSaysSoEvenWhenGivenArguments(String verb) {
+        Run r = run(verb, "some-id", "--force");
+        assertThat(r.code()).isEqualTo(3);
+        assertThat(r.err()).contains("cli.verb-not-implemented").contains(verb);
     }
 
     @Test

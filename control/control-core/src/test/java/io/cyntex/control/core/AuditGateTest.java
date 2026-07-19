@@ -11,6 +11,7 @@ import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.catchThrowable;
@@ -111,6 +112,110 @@ class AuditGateTest {
         // the audit-blocked code, which means only that the record itself could not be written.
         assertThat(thrown).isSameAs(boom);
         assertThat(store.records).hasSize(1);
+    }
+
+    @Test
+    void aBatchRecordsOneEntryPerContextThenRunsTheActionOnce() {
+        RecordingAuditStore store = new RecordingAuditStore();
+        AuditGate gate = new AuditGate(store, FIXED_CLOCK);
+        AtomicInteger runs = new AtomicInteger();
+
+        String result = gate.dispatchAll(
+                ControlOperations.ARTIFACT_APPLY,
+                List.of(new AuditContext("alice", "orders-source"), new AuditContext("alice", "orders-pipeline")),
+                () -> {
+                    runs.incrementAndGet();
+                    return "applied";
+                });
+
+        assertThat(result).isEqualTo("applied");
+        assertThat(runs)
+                .as("a batch acts once — the whole changed set lands as one atomic write, not once per record")
+                .hasValue(1);
+        assertThat(store.records).hasSize(2);
+        assertThat(store.records).allSatisfy(record -> {
+            assertThat(record.operationId()).isEqualTo("artifact.apply");
+            assertThat(record.principal()).isEqualTo("alice");
+            assertThat(record.timestamp()).isEqualTo(FIXED);
+        });
+        assertThat(store.records).extracting(AuditRecord::resourceId)
+                .as("each resource the batch touches is attributed by its own id")
+                .containsExactly("orders-source", "orders-pipeline");
+    }
+
+    @Test
+    void aBatchIsRefusedWhenAnyAuditRecordCannotBeWritten() {
+        AuditGate gate = new AuditGate(new FailingAuditStore(), FIXED_CLOCK);
+        AtomicBoolean ran = new AtomicBoolean(false);
+
+        CyntexException thrown = catchThrowableOfType(
+                () -> gate.dispatchAll(
+                        ControlOperations.ARTIFACT_APPLY,
+                        List.of(new AuditContext("alice", "orders-source")),
+                        () -> {
+                            ran.set(true);
+                            return "done";
+                        }),
+                CyntexException.class);
+
+        assertThat(thrown).isNotNull();
+        assertThat(thrown.code()).isEqualTo(ControlError.AUDIT_BLOCKED);
+        assertThat(thrown.args()).containsEntry("op", "artifact.apply");
+        assertThat(ran)
+                .as("no part of the batch runs when a mandatory audit record could not be written")
+                .isFalse();
+    }
+
+    @Test
+    void everyBatchRecordIsWrittenBeforeTheActionRuns() {
+        List<String> events = new ArrayList<>();
+        AuditStore store = record -> events.add("audit:" + record.resourceId());
+        AuditGate gate = new AuditGate(store, FIXED_CLOCK);
+
+        gate.dispatchAll(
+                ControlOperations.ARTIFACT_APPLY,
+                List.of(new AuditContext("alice", "orders-source"), new AuditContext("alice", "orders-pipeline")),
+                () -> {
+                    events.add("action");
+                    return null;
+                });
+
+        // Audit-first over the whole batch: every record provably precedes the single effect.
+        assertThat(events).containsExactly("audit:orders-source", "audit:orders-pipeline", "action");
+    }
+
+    @Test
+    void aBatchWithNothingToAuditRunsTheActionAndLeavesNoRecord() {
+        RecordingAuditStore store = new RecordingAuditStore();
+        AuditGate gate = new AuditGate(store, FIXED_CLOCK);
+        AtomicBoolean ran = new AtomicBoolean(false);
+
+        gate.dispatchAll(ControlOperations.ARTIFACT_APPLY, List.of(), () -> {
+            ran.set(true);
+            return null;
+        });
+
+        // An audited batch that changes nothing mutates nothing, so it leaves no record: the audit log
+        // tracks effects on resources, and a batch with no touched resource has none to attribute.
+        assertThat(ran).isTrue();
+        assertThat(store.records).isEmpty();
+    }
+
+    @Test
+    void aNonAuditedBatchRunsWithoutRecordingAnyEntry() {
+        RecordingAuditStore store = new RecordingAuditStore();
+        AuditGate gate = new AuditGate(store, FIXED_CLOCK);
+        AtomicBoolean ran = new AtomicBoolean(false);
+
+        gate.dispatchAll(ControlOperations.ARTIFACT_GET, List.of(new AuditContext("alice", "orders-source")), () -> {
+            ran.set(true);
+            return null;
+        });
+
+        assertThat(ran).isTrue();
+        assertThat(store.records)
+                .as("a read operation carries no audit flag and leaves no record, batched or not")
+                .isEmpty();
     }
 
     @Test

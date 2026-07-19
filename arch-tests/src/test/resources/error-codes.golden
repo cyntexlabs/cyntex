@@ -3,6 +3,8 @@
 # against this file. Adding a code = append it here in the same change set; renaming or
 # removing one = a breaking change to an external contract (review + major version).
 # @Deprecated codes stay listed as tombstones until intentionally retired.
+actuation.not-a-pipeline
+actuation.pipeline-not-found
 boot.hazelcast-unavailable
 capture.start-from-unparsable
 cli.artifact-exists
@@ -12,9 +14,11 @@ cli.not-authenticated
 cli.not-connected
 cli.resource-not-found
 cli.unknown-connector
+cli.verb-not-implemented
 connector.ambiguous-connector-class
 connector.ambiguous-registration
 connector.api-level-incompatible
+connector.api-level-unknown
 connector.capture-failed
 connector.class-not-found
 connector.discover-failed
@@ -42,9 +46,11 @@ dsl.forbidden-field
 dsl.illegal-expression
 dsl.illegal-value
 dsl.invalid-config-value
+dsl.malformed-interpolation
 dsl.malformed-yaml
 dsl.missing-reference
 dsl.mode-mismatch
+dsl.undefined-variable
 dsl.unknown-field
 dsl.unsupported-mode
 engine.no-such-job

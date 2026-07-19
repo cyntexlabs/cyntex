@@ -17,13 +17,15 @@ import java.util.Optional;
 /**
  * The MongoDB per-pipeline observation store: one observation document per pipeline, keyed by the
  * pipeline id (as {@code _id}), carrying the lifecycle state and the metrics / per-table snapshot
- * progress sub-documents. An observation is the latest projection, not fenced: it is a straight upsert
- * by pipeline id (last write wins), not the epoch-fencing compare-and-swap the actual state store uses.
+ * progress / per-table position sub-documents. An observation is the latest projection, not fenced: it is
+ * a straight upsert by pipeline id (last write wins), not the epoch-fencing compare-and-swap the actual
+ * state store uses.
  *
  * <p>Driver IO failures are translated into coded io diagnostics, so no driver type escapes the module
- * (rule R3). A stored document whose state is missing or unrecognized, or whose metric / snapshot cells
- * carry the wrong BSON type, is store corruption — surfaced as a coded io diagnostic, not a bare crash
- * while reconstructing.
+ * (rule R3). A stored document whose state is missing or unrecognized, or whose metric / snapshot / position
+ * cells carry the wrong BSON type, is store corruption — surfaced as a coded io diagnostic, not a bare crash
+ * while reconstructing. A document written before positions existed simply has no positions field and reads
+ * back with empty positions.
  */
 public final class MongoObservationStore implements ObservationStore {
 
@@ -49,7 +51,10 @@ public final class MongoObservationStore implements ObservationStore {
         return document == null ? Optional.empty() : Optional.of(toObservation(document));
     }
 
-    /** Maps an observation to its stored document: pipeline id as {@code _id}, state / metrics / snapshot as fields. */
+    /**
+     * Maps an observation to its stored document: pipeline id as {@code _id}, state / metrics / snapshot /
+     * positions as fields.
+     */
     static Document toDocument(Observation observation) {
         Document metrics = new Document();
         observation.metrics().forEach(metrics::append);
@@ -64,10 +69,13 @@ public final class MongoObservationStore implements ObservationStore {
             }
             snapshot.append(table, cell);
         });
+        Document positions = new Document();
+        observation.positions().forEach(positions::append);
         return new Document("_id", observation.pipelineId())
                 .append("state", observation.state().name())
                 .append("metrics", metrics)
-                .append("snapshot", snapshot);
+                .append("snapshot", snapshot)
+                .append("positions", positions);
     }
 
     /** Reconstructs an observation from its stored document. */
@@ -78,7 +86,8 @@ public final class MongoObservationStore implements ObservationStore {
             // A stored observation missing the state field this version requires is store corruption.
             throw corrupt(id);
         }
-        return new Observation(id, parseState(state, id), readMetrics(document, id), readSnapshot(document, id));
+        return new Observation(id, parseState(state, id),
+                readMetrics(document, id), readSnapshot(document, id), readPositions(document, id));
     }
 
     /** A stored state this version does not recognize is corruption, not a bare enum-valueOf crash. */
@@ -128,11 +137,37 @@ public final class MongoObservationStore implements ObservationStore {
         return out;
     }
 
+    /**
+     * Reads the positions sub-document as table -> srcpos; a missing field reads empty (an observation
+     * stored before positions existed), a non-document field or a non-string cell is corruption.
+     */
+    private static Map<String, String> readPositions(Document document, String id) {
+        Object raw = document.get("positions");
+        if (raw == null) {
+            return Map.of();
+        }
+        if (!(raw instanceof Document positions)) {
+            throw corrupt(id);
+        }
+        Map<String, String> out = new LinkedHashMap<>();
+        for (Map.Entry<String, Object> entry : positions.entrySet()) {
+            out.put(entry.getKey(), requireString(entry.getValue(), id));
+        }
+        return out;
+    }
+
     private static long requireLong(Object value, String id) {
         if (!(value instanceof Number number)) {
             throw corrupt(id);
         }
         return number.longValue();
+    }
+
+    private static String requireString(Object value, String id) {
+        if (!(value instanceof String string)) {
+            throw corrupt(id);
+        }
+        return string;
     }
 
     private static Long optionalLong(Object value, String id) {

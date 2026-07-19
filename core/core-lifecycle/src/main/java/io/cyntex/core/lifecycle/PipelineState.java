@@ -24,5 +24,14 @@ public enum PipelineState {
      * converge side when the source is exhausted, not by a user verb; for {@code start} it behaves
      * exactly like {@link #STOPPED}.
      */
-    COMPLETED
+    COMPLETED,
+
+    /**
+     * A run whose data-plane job died on its own — the observable error state. Entered by the converge
+     * side when a pipeline it believes {@link #RUNNING} is found to have a failed job, never by a user
+     * verb, so such a job reports as failed rather than as an eternal RUNNING moving no data. It is not
+     * re-driven back toward RUNNING (that would restart the dead job every tick); the user recovers by
+     * stopping it — which clears it to {@link #STOPPED} — then starting a fresh run.
+     */
+    FAILED
 }

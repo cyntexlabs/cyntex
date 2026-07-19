@@ -1,0 +1,30 @@
+# Holds the snapshot half of a snapshot-and-cdc read to account.
+#
+# The sibling example moves rows and counts them, but it cannot tell where they came from. This
+# connector's tail has no offset to resume from and replays the table from its beginning, so the
+# snapshot is redundant to it: ask for changes only and the tail alone delivers every seeded row, every
+# count still holds, and that example stays green with a whole phase of the product removed. Only the
+# tail half is witnessed there.
+#
+# This one filters on where a row came from rather than what it holds. A snapshot read is the only row
+# the product ever marks op=r: it is minted in one place, on the batch-read path, and the change ring
+# refuses to carry one at all - constructing an item with that op throws. So a row reaching the target
+# here is a row the snapshot produced, and asking for changes only leaves the predicate nothing to
+# admit: the target file is never created and the count never leaves zero.
+#
+# What this witnesses is a conjunction, worth naming rather than discovering later: that the snapshot ran
+# AND that the filter still filters. A filter port reduced to an identity would pass this example under
+# either read, because the tail's replay would carry the same ids to the same count. The sibling example
+# is what forbids that - its counts are below what a degraded filter carries - so the two are
+# load-bearing together and neither is sufficient alone.
+name: the-snapshot-half-reaches-the-target
+setup:
+  connectors: [e2e_file]
+  apply: [src_file.cyn.yml, tgt_file.cyn.yml, pipeline.cyn.yml]
+  discover: [src_file]
+pipeline: pipeline.cyn.yml
+seed:
+  src_file.orders: { rows: 3 }
+steps:
+  - start
+  - await: { count: { tgt_file.orders: 3 } }

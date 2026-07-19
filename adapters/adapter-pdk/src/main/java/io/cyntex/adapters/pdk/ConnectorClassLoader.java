@@ -15,15 +15,26 @@ import java.util.List;
  *
  * <p>Each connector runs on its own class loader over its own jar (plus any bundled dependencies),
  * so two connectors never see each other's classes and a connector can be dropped by closing its
- * loader. The one thing shared across the boundary is the frozen PDK contract ({@code io.tapdata.*}),
- * which is delegated to the host: every connector binds to the same {@code TapConnector} /
- * {@code TapEvent} types, so events cross the boundary as one contract. Everything else on the host —
- * the cyntex application classes and the service framework libraries — is hidden from the connector.
+ * loader. What is shared across the boundary is the PDK runtime, delegated to the host: the frozen
+ * contract ({@code io.tapdata.*}), so every connector binds to the same {@code TapConnector} /
+ * {@code TapEvent} types and events cross as one contract; and the runtime's own infrastructure a
+ * connector links against but does not bundle — bytecode generation ({@code net.sf.cglib.*}) and the
+ * logging facade ({@code org.slf4j.*}). Everything else on the host — the cyntex application classes and
+ * the service framework libraries — is hidden from the connector.
  */
 public final class ConnectorClassLoader implements AutoCloseable {
 
-    /** The frozen PDK contract is the only host layer a connector is allowed to see. */
-    private static final String SHARED_API_PREFIX = "io.tapdata.";
+    /**
+     * The host layers a connector is allowed to see: the PDK runtime it is built against, and nothing
+     * else. {@code io.tapdata.*} is the frozen contract. {@code net.sf.cglib.*} is the runtime's codegen
+     * library — mapping connection config generates a {@code BeanMap} subclass and defines it into this
+     * loader (the config bean lives here), so the generated subclass cannot link unless this loader
+     * resolves cglib from the host. {@code org.slf4j.*} is the logging facade a thin connector and its
+     * bundled driver log through and do not carry themselves. The cyntex application classes and the
+     * service framework (Spring, Hazelcast, Mongo, the web container) stay hidden.
+     */
+    private static final List<String> SHARED_HOST_PREFIXES =
+            List.of("io.tapdata.", "net.sf.cglib.", "org.slf4j.");
 
     private final URLClassLoader loader;
 
@@ -92,8 +103,10 @@ public final class ConnectorClassLoader implements AutoCloseable {
 
         @Override
         protected Class<?> findClass(String name) throws ClassNotFoundException {
-            if (name.startsWith(SHARED_API_PREFIX)) {
-                return host.loadClass(name);
+            for (String prefix : SHARED_HOST_PREFIXES) {
+                if (name.startsWith(prefix)) {
+                    return host.loadClass(name);
+                }
             }
             throw new ClassNotFoundException(name);
         }

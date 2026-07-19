@@ -12,8 +12,11 @@ import io.tapdata.entity.schema.TapIndexField;
 import io.tapdata.entity.schema.TapTable;
 
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * The PDK implementation of the schema-discovery port: it provisions a connector, refuses it with a
@@ -111,7 +114,26 @@ public final class PdkSchemaDiscoverer implements SchemaDiscoverer {
         return names;
     }
 
-    private static String detail(Throwable t) {
-        return t.getMessage() != null ? t.getMessage() : t.getClass().getSimpleName();
+    /**
+     * A diagnosable one-liner for a connector's failure: the chain of causes, each named and carrying its
+     * own message where it has one. A connector fault often surfaces as a wrapper with no message of its
+     * own — an {@code ExceptionInInitializerError}, a reflective {@code InvocationTargetException} — and
+     * reporting only that wrapper's class name buries the real fault. Walking the chain keeps the fault in
+     * view. Bounded in length, and guarded against a self- or cycle-referential cause.
+     */
+    static String detail(Throwable t) {
+        StringBuilder chain = new StringBuilder();
+        Set<Throwable> seen = Collections.newSetFromMap(new IdentityHashMap<>());
+        for (Throwable each = t; each != null && seen.add(each) && chain.length() < 500; each = each.getCause()) {
+            if (chain.length() > 0) {
+                chain.append(" <- ");
+            }
+            chain.append(each.getClass().getSimpleName());
+            String message = each.getMessage();
+            if (message != null && !message.isBlank()) {
+                chain.append(": ").append(message.strip());
+            }
+        }
+        return chain.toString();
     }
 }

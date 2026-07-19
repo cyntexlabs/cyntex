@@ -13,5 +13,11 @@ public enum ConvergeStatus {
      * The pass was fenced on every attempt and gave up within its retry bound, having been superseded
      * by another writer. Not an error — the next pass re-reads and retries.
      */
-    SUPERSEDED
+    SUPERSEDED,
+
+    /**
+     * The pass found a pipeline it believed running had a dead job and drove it to the observable
+     * FAILED state. The result carries the job's failure cause so the caller can surface it.
+     */
+    FAILED
 }

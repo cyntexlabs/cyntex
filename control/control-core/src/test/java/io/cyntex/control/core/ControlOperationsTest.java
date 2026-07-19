@@ -102,10 +102,13 @@ class ControlOperationsTest {
     }
 
     @Test
-    void everyL1OperationIsOnTheCliPocSurface() {
-        assertThat(registry.exposedOn(Frontend.CLI, Maturity.POC))
-                .hasSize(24)
-                .allSatisfy(op -> assertThat(op.exposure()).containsEntry(Frontend.CLI, Maturity.POC));
+    void theRegistryOpensEveryL1OperationOnTheCliFaceAtPoc() {
+        // a scope statement about the registry alone: L1 opens all 24 operations on the CLI face and
+        // clips none of them below POC. Whether each one has a verb behind it is not knowable from here
+        // — control-core cannot see the CLI — and is gated where both are visible, in arch-tests.
+        assertThat(registry.exposedOn(Frontend.CLI, Maturity.POC)).hasSize(24);
+        assertThat(registry.all()).allSatisfy(op ->
+                assertThat(op.exposure()).as(op.id()).containsEntry(Frontend.CLI, Maturity.POC));
     }
 
     @Test

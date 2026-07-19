@@ -59,6 +59,36 @@ class ObservationTest {
     }
 
     @Test
+    void carriesPerTableOffsetPositionsAsOpaqueStrings() {
+        // perTableOffset (=sink_acked_srcpos) is an opaque source position (binlog/GTID/LSN), a String,
+        // not a numeric metric — so it rides a separate positions projection, not the Long metrics map.
+        Observation obs = new Observation(
+                "orders_sync",
+                PipelineState.RUNNING,
+                Map.of("recordCount", 128500L),
+                Map.of(),
+                Map.of("orders", "mysql-bin.000007:154732"));
+
+        assertThat(obs.positions()).containsEntry("orders", "mysql-bin.000007:154732");
+        assertThat(obs.metrics()).containsEntry("recordCount", 128500L);
+    }
+
+    @Test
+    void positionsDefaultToEmptyAndAreDefensivelyCopied() {
+        // A position source not yet wired reads as empty (unavailable), never a NullPointerException; and the
+        // stored projection is immutable, like metrics and snapshot. The four-arg form defaults positions empty.
+        Observation viaFourArg = new Observation("p1", PipelineState.NEW, null, null);
+        assertThat(viaFourArg.positions()).isEmpty();
+
+        Map<String, String> positions = new HashMap<>(Map.of("t", "pos-1"));
+        Observation obs = new Observation("p1", PipelineState.RUNNING, Map.of(), Map.of(), positions);
+        positions.put("t", "pos-999");
+
+        assertThat(obs.positions()).containsEntry("t", "pos-1");
+        assertThatThrownBy(() -> obs.positions().put("x", "y")).isInstanceOf(UnsupportedOperationException.class);
+    }
+
+    @Test
     void tableSnapshotAllowsUnavailableTotalAndPct() {
         // rows_total not yet wired: total and pct are null (unavailable), never faked as 0 or 100.
         TableSnapshot unavailable = new TableSnapshot(500L, null, null);

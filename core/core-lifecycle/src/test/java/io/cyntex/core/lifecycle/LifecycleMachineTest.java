@@ -12,6 +12,7 @@ import static io.cyntex.core.lifecycle.LifecycleVerb.RESUME;
 import static io.cyntex.core.lifecycle.LifecycleVerb.START;
 import static io.cyntex.core.lifecycle.LifecycleVerb.STOP;
 import static io.cyntex.core.lifecycle.PipelineState.COMPLETED;
+import static io.cyntex.core.lifecycle.PipelineState.FAILED;
 import static io.cyntex.core.lifecycle.PipelineState.NEW;
 import static io.cyntex.core.lifecycle.PipelineState.PAUSED;
 import static io.cyntex.core.lifecycle.PipelineState.RUNNING;
@@ -61,6 +62,19 @@ class LifecycleMachineTest {
     }
 
     @Test
+    @DisplayName("a failed pipeline is recovered by stopping it, not by starting it directly")
+    void stopClearsAFailedPipelineButStartDoesNot() {
+        // Stop clears a failed run to STOPPED, from where a fresh start runs it again. Start is not legal
+        // straight from FAILED: it would leave the desired intent already RUNNING unchanged, so the
+        // converge side could not tell a fresh start from the stale intent it is deliberately not re-driving.
+        assertThat(LifecycleMachine.transition(FAILED, STOP)).isEqualTo(STOPPED);
+        assertThatThrownBy(() -> LifecycleMachine.transition(FAILED, START))
+                .isInstanceOf(CyntexException.class);
+        assertThatThrownBy(() -> LifecycleMachine.transition(FAILED, PAUSE))
+                .isInstanceOf(CyntexException.class);
+    }
+
+    @Test
     @DisplayName("an illegal transition carries the lifecycle.illegal-transition code and {from, verb} args")
     void illegalTransitionIsCoded() {
         CyntexException ex = catchThrowableOfType(
@@ -96,6 +110,7 @@ class LifecycleMachineTest {
         assertThat(LifecycleMachine.legalVerbs(PAUSED)).isEqualTo(EnumSet.of(RESUME, STOP));
         assertThat(LifecycleMachine.legalVerbs(STOPPED)).isEqualTo(EnumSet.of(START));
         assertThat(LifecycleMachine.legalVerbs(COMPLETED)).isEqualTo(EnumSet.of(START));
+        assertThat(LifecycleMachine.legalVerbs(FAILED)).isEqualTo(EnumSet.of(STOP));
     }
 
     @Test

@@ -29,6 +29,7 @@ import static io.cyntex.core.lifecycle.PipelineState.PAUSED;
 import static io.cyntex.core.lifecycle.PipelineState.RUNNING;
 import static io.cyntex.core.lifecycle.PipelineState.STOPPED;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.entry;
 
 /**
  * A single-node integration of the lifecycle chain the {@code --role=all} process runs: desired intent ->
@@ -36,8 +37,9 @@ import static org.assertj.core.api.Assertions.assertThat;
  * the in-memory store the assembly wires the same way. It drives a pipeline through the four verbs (and a
  * re-dig) and witnesses, at each step, that the mapped Jet operation actually took effect, that the actual
  * state converged with a strictly increasing fencing epoch, and that the store-backed read faces serve the
- * converged state. The metric and snapshot faces are honestly empty here: their sources are the capture and
- * transform planes, which merge later. The artificial-failover fencing witness (epoch monotonic under a
+ * converged state. The errorCount metric reads 0 for the healthy run here; the remaining metrics and the
+ * snapshot face are honestly empty, their sources being the capture and transform planes, which merge
+ * later. The artificial-failover fencing witness (epoch monotonic under a
  * competing writer, a stale write rejected) lives in the converger and core unit tests; this integration
  * witnesses the epoch advancing once per real actuated transition.
  */
@@ -68,7 +70,8 @@ class SingleNodeLifecycleE2ETest {
         Clock clock = Clock.fixed(T0, ZoneOffset.UTC);
         storePort = new InMemoryStorePort();
         Engine engine = new Engine(member);
-        EngineLifecycleActuator actuator = new EngineLifecycleActuator(engine, new PlaceholderDagSource());
+        EngineLifecycleActuator actuator =
+                new EngineLifecycleActuator(engine, new IdleDagSource(), new NoOpCaptureCoordinator());
         PipelineConverger converger = new PipelineConverger(storePort.desired(), storePort.state(), actuator, clock);
         ObservationPublisher publisher = new ObservationPublisher(storePort.state(), storePort.observations());
         driver = new ConvergenceDriver(converger, storePort.desired(), publisher);
@@ -91,7 +94,9 @@ class SingleNodeLifecycleE2ETest {
         awaitStatus(job, JobStatus.RUNNING);
         assertActualState(RUNNING, 1);
         assertThat(readFaces.status(PIPE)).isEqualTo(new PipelineStatus(PIPE, RUNNING));
-        assertThat(readFaces.metrics(PIPE).metrics()).as("metric source is not wired yet").isEmpty();
+        assertThat(readFaces.metrics(PIPE).metrics())
+                .as("errorCount is wired: a healthy run reports zero errors")
+                .containsOnly(entry("errorCount", 0L));
         assertThat(readFaces.snapshot(PIPE).snapshot()).as("snapshot source is not wired yet").isEmpty();
 
         desire(PAUSED);

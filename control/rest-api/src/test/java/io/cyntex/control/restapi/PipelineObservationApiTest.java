@@ -33,6 +33,7 @@ import org.springframework.boot.web.server.context.WebServerApplicationContext;
 import org.springframework.context.ConfigurableApplicationContext;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
+import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.method.HandlerMethod;
@@ -70,6 +71,12 @@ class PipelineObservationApiTest {
             Map.of("recordCount", 42L, "errorCount", 0L),
             Map.of("orders", new TableSnapshot(10, 100L, 10)));
 
+    /** One running pipeline whose sink-acked source positions have advanced, to exercise perTableOffset. */
+    private static final Observation PL_POS = new Observation("pl2", PipelineState.RUNNING,
+            Map.of("recordCount", 6L, "errorCount", 0L),
+            Map.of(),
+            Map.of("orders", "w7"));
+
     private static ConfigurableApplicationContext context;
     private static int port;
 
@@ -91,6 +98,7 @@ class PipelineObservationApiTest {
         FakeObservationStore observations = context.getBean(FakeObservationStore.class);
         observations.clear();
         observations.save(PL1);
+        observations.save(PL_POS);
     }
 
     private RestClient client() {
@@ -121,6 +129,28 @@ class PipelineObservationApiTest {
 
         assertThat(body.pipelineId()).isEqualTo("pl1");
         assertThat(body.metrics()).containsEntry("recordCount", 42L).containsEntry("errorCount", 0L);
+    }
+
+    @Test
+    void metricsExposesPerTableOffsetWhenPositionsArePublished() {
+        Map<String, Object> body = client().get().uri("/api/pipelines/pl2/metrics")
+                .header("Authorization", "Bearer " + machineToken(Scope.READ))
+                .retrieve().body(new ParameterizedTypeReference<Map<String, Object>>() {});
+
+        assertThat(body.get("pipelineId")).isEqualTo("pl2");
+        Map<?, ?> metrics = (Map<?, ?>) body.get("metrics");
+        assertThat(metrics.get("perTableOffset")).isEqualTo(Map.of("orders", "w7"));
+        assertThat(metrics.get("recordCount")).isNotNull();
+    }
+
+    @Test
+    void metricsOmitsPerTableOffsetWhenNoPositionsArePublished() {
+        Map<String, Object> body = client().get().uri("/api/pipelines/pl1/metrics")
+                .header("Authorization", "Bearer " + machineToken(Scope.READ))
+                .retrieve().body(new ParameterizedTypeReference<Map<String, Object>>() {});
+
+        Map<?, ?> metrics = (Map<?, ?>) body.get("metrics");
+        assertThat(metrics.get("perTableOffset")).isNull();
     }
 
     @Test

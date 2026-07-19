@@ -1,0 +1,11 @@
+version: cyntex/v1
+kind: pipeline
+id: e2e_failing_sink_pipeline
+source: src_file
+settings: { read_mode: snapshot_only }
+transforms:
+  - { id: snapshot_rows, from: [orders], type: filter, expr: "op == 'r'" }
+serve:
+  from: snapshot_rows
+  sync:
+    - source: tgt_file

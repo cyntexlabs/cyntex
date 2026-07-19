@@ -8,8 +8,10 @@ import com.hazelcast.config.SerializerConfig;
 import com.hazelcast.core.Hazelcast;
 import com.hazelcast.core.HazelcastException;
 import com.hazelcast.core.HazelcastInstance;
+import io.cyntex.adapters.pdk.ConnectorProvisioner;
 import io.cyntex.core.common.CyntexException;
 import io.cyntex.runtime.srs.CaptureRunUnit;
+import io.cyntex.runtime.srs.SnapshotBuffer;
 import io.cyntex.runtime.srs.SrsItem;
 import io.cyntex.runtime.srs.SrsItemSerializer;
 import io.cyntex.spi.store.SrsMetaStore;
@@ -46,7 +48,8 @@ class HazelcastConfiguration {
     private static final int SRS_RING_CAPACITY = 1024;
 
     @Bean(destroyMethod = "shutdown")
-    HazelcastInstance hazelcastMember(HazelcastProperties properties, @Nullable SrsMetaStore srsMetaStore) {
+    HazelcastInstance hazelcastMember(HazelcastProperties properties, @Nullable SrsMetaStore srsMetaStore,
+            @Nullable ConnectorProvisioner connectorProvisioner, @Nullable SnapshotBuffer snapshotBuffer) {
         Config config = memberConfig(properties);
         HazelcastInstance member = startMember(() -> Hazelcast.newHazelcastInstance(config));
         // Bind the SRS meta store onto the member so the read-cursor publisher factory -- carried onto the
@@ -54,6 +57,21 @@ class HazelcastConfiguration {
         // read cursors. A run with no store (mongo disabled) binds nothing, and the publisher then no-ops.
         if (srsMetaStore != null) {
             member.getUserContext().put(CaptureRunUnit.SRS_META_USER_CONTEXT_KEY, srsMetaStore);
+        }
+        // Bind the connector provisioner onto the member so a sink-writer factory -- carried onto the Jet
+        // sink vertex and resolved member-side -- can reach it and open its target connector. A run with no
+        // provisioner (mongo disabled) binds nothing, and the member is then not sink-capable: a sink open
+        // fails loudly rather than silently dropping writes.
+        if (connectorProvisioner != null) {
+            member.getUserContext().put(
+                    PdkSinkWriterFactory.CONNECTOR_PROVISIONER_USER_CONTEXT_KEY, connectorProvisioner);
+        }
+        // Bind the snapshot buffer onto the member so a source vertex -- resolved member-side by the ring name
+        // it carries -- can drain this ring's snapshot rows and emit them ahead of the cdc tail. The coordinator
+        // holds the same instance and fills it through the snapshot pass-through. A run with no buffer (mongo
+        // disabled) binds nothing, and a source then emits no snapshot ahead of the tail.
+        if (snapshotBuffer != null) {
+            member.getUserContext().put(SnapshotBuffer.USER_CONTEXT_KEY, snapshotBuffer);
         }
         return member;
     }

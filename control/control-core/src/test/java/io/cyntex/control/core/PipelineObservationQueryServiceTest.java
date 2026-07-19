@@ -46,6 +46,12 @@ class PipelineObservationQueryServiceTest {
                 Map.of("recordCount", 5L), Map.of("orders", new TableSnapshot(10L, 20L, 50)));
     }
 
+    private static Observation runningWithPositions() {
+        return new Observation("orders_sync", PipelineState.RUNNING,
+                Map.of("recordCount", 5L), Map.of("orders", new TableSnapshot(10L, 20L, 50)),
+                Map.of("orders", "w7"));
+    }
+
     @Test
     void statusProjectsThePublishedState() {
         var service = new PipelineObservationQueryService(storeWith(running()));
@@ -61,6 +67,20 @@ class PipelineObservationQueryServiceTest {
         var service = new PipelineObservationQueryService(storeWith(running()));
 
         assertThat(service.metrics("orders_sync").metrics()).containsEntry("recordCount", 5L);
+    }
+
+    @Test
+    void metricsProjectsThePublishedPositions() {
+        var service = new PipelineObservationQueryService(storeWith(runningWithPositions()));
+
+        assertThat(service.metrics("orders_sync").positions()).containsEntry("orders", "w7");
+    }
+
+    @Test
+    void metricsPositionsAreEmptyWhenTheObservationHasNone() {
+        var service = new PipelineObservationQueryService(storeWith(running()));
+
+        assertThat(service.metrics("orders_sync").positions()).isEmpty();
     }
 
     @Test

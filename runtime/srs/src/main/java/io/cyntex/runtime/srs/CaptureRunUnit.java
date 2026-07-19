@@ -90,6 +90,7 @@ public final class CaptureRunUnit {
                     : SnapshotPhase.drain(port, spec.config(), passthrough);
         }
 
+        CaptureHealth health = new CaptureHealth();
         Optional<StreamSource<SrsItem>> ringSource = Optional.empty();
         Optional<Subscription> subscription = Optional.empty();
         if (plan.sharedRing()) {
@@ -103,16 +104,16 @@ public final class CaptureRunUnit {
             LongSupplier minConsumerReadSeq = () -> minConsumerReadSeq(meta, cid, tbl);
             Supplier<Collection<ConsumerOffset>> consumers =
                     () -> meta.read(cid).map(SrsMeta::consumerOffsets).orElse(List.of());
-            subscription = Optional.of(CdcPhase.run(port, spec.config(), chain, minConsumerReadSeq, consumers));
+            subscription = Optional.of(CdcPhase.run(port, spec.config(), chain, minConsumerReadSeq, consumers, health));
             ringSource = Optional.of(SrsRingSource.create(
                     ringName, spec.startFrom(), readCursorPublisher(cid, spec.pipelineId(), tbl)));
         } else if (plan.directTail()) {
             // srs.enabled:false: the tail streams straight to the single consumer, with no shared ring,
             // no coordinator chain and no durable meta -- the lightweight direct path.
-            subscription = Optional.of(port.cdc(spec.config(), passthrough::accept));
+            subscription = Optional.of(port.cdc(spec.config(), health.recording(passthrough::accept)));
         }
 
-        return new CaptureRun(Optional.ofNullable(chainId), merged, snapshotCount, ringSource, subscription);
+        return new CaptureRun(Optional.ofNullable(chainId), merged, snapshotCount, ringSource, subscription, health);
     }
 
     /** The single stream a shared-ring run reads — L1 is single-table; anything else is out of scope here. */

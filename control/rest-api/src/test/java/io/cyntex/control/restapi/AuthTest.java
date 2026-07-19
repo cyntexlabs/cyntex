@@ -462,8 +462,8 @@ class AuthTest {
         }
 
         @Bean
-        ApplyService applyService(InMemoryArtifactStore store) {
-            return new ApplyService(CyntexCatalog::load, store);
+        ApplyService applyService(InMemoryArtifactStore store, AuditGate auditGate) {
+            return new ApplyService(CyntexCatalog::load, store, auditGate);
         }
 
         @Bean

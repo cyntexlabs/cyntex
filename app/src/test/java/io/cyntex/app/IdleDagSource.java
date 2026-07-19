@@ -8,14 +8,12 @@ import com.hazelcast.jet.core.ProcessorMetaSupplier;
 import com.hazelcast.jet.core.ProcessorSupplier;
 
 /**
- * A stand-in topology that keeps a pipeline's job alive so its lifecycle can be exercised end to end
- * before the real source -> sink builder exists. Every pipeline gets the same one-vertex streaming DAG
- * whose only processor emits nothing and never completes, so the job stays RUNNING until it is paused or
- * stopped. This is a scaffold for this slice: when the capture and transform planes land, the real
- * per-pipeline topology built from the pipeline's artifact replaces it, and nothing else changes — the
- * actuator already drives the job by pipeline id alone.
+ * A stand-in topology for the lifecycle tests: every pipeline gets the same one-vertex streaming DAG whose
+ * only processor emits nothing and never completes, so the job stays RUNNING until it is paused or stopped.
+ * It exercises the actuator-to-engine binding and the converge loop without a store-backed pipeline, which
+ * those tests do not want to set up; the store-backed builder is what production runs.
  */
-final class PlaceholderDagSource implements DagSource {
+final class IdleDagSource implements DagSource {
 
     @Override
     public DAG dagFor(String pipelineId) {

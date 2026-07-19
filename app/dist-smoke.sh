@@ -200,6 +200,11 @@ else
   check     "dist has a versioned root dir"   test -d "$ROOT"
   check     "bin/ conf/ lib/ present"         test -d "$ROOT/bin" -a -d "$ROOT/conf" -a -d "$ROOT/lib"
   check     "bin/cyntex-server is executable" test -x "$ROOT/bin/cyntex-server"
+  # The launcher must carry the connector-host JVM open by default (not depend on the caller setting
+  # JAVA_OPTS): a real PDK connector's cglib config binding reflects into java.base/java.lang, denied
+  # on JDK 17+ without it. Assert it on the shipped launcher, the artifact operators actually run.
+  check     "launcher declares the PDK-host JVM open" \
+            grep -qF -- '--add-opens java.base/java.lang=ALL-UNNAMED' "$ROOT/bin/cyntex-server"
   check     "lib/ holds the server jar"       bash -c 'ls "$1"/lib/*.jar >/dev/null 2>&1' _ "$ROOT"
   if [[ -x "$ROOT/bin/cyntex-server" ]]; then
     set +e

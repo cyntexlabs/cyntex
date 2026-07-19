@@ -5,7 +5,7 @@
 # Resolves its own location so the distribution is relocatable, then runs the bundled fat-jar with
 # conf/ added to the configuration search path (files there override the jar-internal defaults).
 # Arguments are forwarded to the server (e.g. --role=all, which is also the default when none is
-# given). Override the JVM flags via JAVA_OPTS and the Java binary via JAVA_HOME.
+# given). Add JVM flags via JAVA_OPTS and set the Java binary via JAVA_HOME.
 set -euo pipefail
 
 APP_HOME="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -20,7 +20,13 @@ JAR="$(ls "$APP_HOME"/lib/*.jar | head -1)"
 # Spring precedence, so this only pins the default; it does not clobber a configured path.
 cd "$APP_HOME"
 
-# JAVA_OPTS is intentionally word-split so multiple flags can be passed in one variable.
-exec "$JAVA_BIN" ${JAVA_OPTS:-} -jar "$JAR" \
+# JVM access the PDK connector host requires: a connector binds its configuration through cglib, which
+# reflects into java.base/java.lang; JDK 17+ denies that without this open and the connector fails at
+# construction. It is a hard requirement of hosting connectors, not operator tuning, so it ships here
+# ahead of JAVA_OPTS (which stays free for operator flags) instead of relying on the caller to set it.
+CYNTEX_REQUIRED_OPTS="--add-opens java.base/java.lang=ALL-UNNAMED"
+
+# CYNTEX_REQUIRED_OPTS and JAVA_OPTS are intentionally word-split so multiple flags pass in one variable.
+exec "$JAVA_BIN" $CYNTEX_REQUIRED_OPTS ${JAVA_OPTS:-} -jar "$JAR" \
   --spring.config.additional-location="file:$APP_HOME/conf/" \
   "$@"

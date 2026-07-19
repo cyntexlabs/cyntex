@@ -139,6 +139,21 @@ public final class SinkProcessor extends AbstractProcessor {
         return inFlight.isEmpty();
     }
 
+    /**
+     * Reaps settled writes while the inbox is idle. Jet calls this when there is no input to hand the
+     * processor, which is the only call a streaming sink is guaranteed after its last batch: its source
+     * never completes, so {@link #complete()} never runs, and a batch that fails may be the last one, so no
+     * later {@link #process} arrives to reap it either. Left to those two, a failed write would sit
+     * unsurfaced and the job would run on moving nothing - an error behind a healthy-looking state. Reaping
+     * here surfaces it, and also lets a write that settles during a lull advance the sink-ack watermark
+     * without waiting for the next batch.
+     */
+    @Override
+    public boolean tryProcess() {
+        reapSettled();
+        return true;
+    }
+
     @Override
     public void close() {
         if (closed) {

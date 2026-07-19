@@ -1,0 +1,189 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Declarative e2e test-specification framework.
+  Test-scope code only, deliberately: this module is a test harness, never a shipped artifact.
+  The ArchUnit importer skips test sources, so nothing here is scanned by the ring rules
+  R1-R10 - which is exactly the intent, since this module sits outside the six business rings
+  and reads a target database directly (a thing no ring may do).
+  It is NOT registered as a scanned dependency in arch-tests for the same reason.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>io.cyntex</groupId>
+    <artifactId>cyntex</artifactId>
+    <version>${revision}</version>
+  </parent>
+
+  <artifactId>e2e</artifactId>
+  <name>Cyntex :: E2E</name>
+  <description>Declarative YAML test-specification envelope + Java executor (test scope only)</description>
+
+  <dependencyManagement>
+    <dependencies>
+      <dependency>
+        <groupId>io.cyntex</groupId>
+        <artifactId>bom</artifactId>
+        <version>${revision}</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
+
+  <dependencies>
+    <!-- The envelope's pipeline: key references a product .cyn.yml, parsed by the product's own
+         parser. A second, drifting copy of the DSL in test scope is the failure this avoids. -->
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>core-dsl</artifactId>
+      <version>${revision}</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>core-model</artifactId>
+      <version>${revision}</version>
+      <scope>test</scope>
+    </dependency>
+    <!-- The state matcher asserts on the product's own lifecycle enum, so the vocabulary cannot
+         drift from the states the runtime actually publishes. -->
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>core-lifecycle</artifactId>
+      <version>${revision}</version>
+      <scope>test</scope>
+    </dependency>
+    <!-- The wait model tells "this pipeline has published nothing yet" apart from a real failure by the
+         code the product sends, and takes that code from the product's own enum rather than spelling it
+         again here: a hand-copied code is a second truth, and this one decides whether a specification
+         waits or fails. -->
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>control-core</artifactId>
+      <version>${revision}</version>
+      <scope>test</scope>
+    </dependency>
+    <!-- Reads the test-specification envelope. Test scope only: this never reaches any ring's
+         runtime classpath, the same argument the arch-tests catalog gate makes. -->
+    <dependency>
+      <groupId>org.yaml</groupId>
+      <artifactId>snakeyaml</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <!-- The frozen PDK contract, compiled against by the connector this module packages and hands the
+         product to register. A specification that moves data needs a connector to move it through, and
+         the connectors a release ships are not available to this build - so the harness brings its own,
+         implementing the same contract every real connector implements. Test scope, like everything
+         here: this is a fixture the harness builds, never a shipped artifact, and rule R3's lock of the
+         PDK import to adapter-pdk governs the rings, which the ArchUnit importer's skip of test sources
+         leaves this module outside of. Declared rather than inherited through app -> adapter-pdk: a
+         compile surface that depends on a transitive is one dependency change away from vanishing. -->
+    <dependency>
+      <groupId>io.tapdata</groupId>
+      <artifactId>tapdata-pdk-api</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <!-- The in-process tier boots the real assembly root in this JVM; the real-process tier runs the
+         boot jar this same module produces. Both are the product as it ships, driven only through its
+         HTTP surface - no package-private seam of io.cyntex.app is reached from here. -->
+    <dependency>
+      <groupId>io.cyntex</groupId>
+      <artifactId>app</artifactId>
+      <version>${revision}</version>
+      <scope>test</scope>
+    </dependency>
+    <!-- Endpoints a specification seeds, changes and counts. This is the harness reading a pipeline's
+         target the way a user would, from outside the product; rule R3 locks the driver to
+         adapter-mongo-store for the rings, and this module is deliberately not one of them. -->
+    <dependency>
+      <groupId>org.mongodb</groupId>
+      <artifactId>mongodb-driver-sync</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.testcontainers</groupId>
+      <artifactId>mongodb</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <!-- The source half of the real-connector crossing: a real MySQL to seed and snapshot-read. Test
+         scope, and gated at runtime on the connector jars being supplied, so the default build neither
+         pulls a database up nor needs one. The JDBC driver below is the harness's own seed path only -
+         the registered connector jar carries its own driver on an isolated loader, never this one. -->
+    <dependency>
+      <groupId>org.testcontainers</groupId>
+      <artifactId>mysql</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>com.mysql</groupId>
+      <artifactId>mysql-connector-j</artifactId>
+      <version>8.4.0</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.testcontainers</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <!-- Holds the generated schema to the parser it describes. Byte-locking the schema to its
+         generator proves only that nobody hand-edited it; whether the description is TRUE is a
+         separate question, and a schema that quietly disagrees with the parser is worse than none -
+         a model reading it as ground truth would take its word. Test scope, like everything here. -->
+    <dependency>
+      <groupId>com.networknt</groupId>
+      <artifactId>json-schema-validator</artifactId>
+      <version>1.5.6</version>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.assertj</groupId>
+      <artifactId>assertj-core</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <!-- Specification runs (*IT) are Docker-backed and live in the integration-test phase, so `mvn
+           test` stays fast and `mvn verify` exercises them. Without this binding failsafe is not
+           active in this module and every *IT here would be silently collected by nobody - a tier that
+           never runs while the build stays green is the exact failure this framework exists to catch. -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-failsafe-plugin</artifactId>
+        <configuration>
+          <!-- The in-process tier hosts real PDK connectors inside this fork's JVM, and their runtime
+               loads connection config through cglib, which reflects into java.lang.ClassLoader to define
+               generated classes - blocked on JDK 17+ unless java.lang is opened. The shipped server
+               carries the same opening in its launcher; the in-process tier must match it, or a real
+               connector's very first init fails here with an ExceptionInInitializerError. -->
+          <argLine>--add-opens java.base/java.lang=ALL-UNNAMED</argLine>
+          <systemPropertyVariables>
+            <!-- Where the reactor puts the service deliverable. The real-process tier drives this file
+                 rather than a classpath, which is the whole of its fidelity claim; the app module is
+                 built before this one, so by the time a specification runs the jar is there. Naming it
+                 here keeps the path a build fact instead of a guess inside a test. -->
+            <cyntex.e2e.boot-jar>${project.basedir}/../app/target/app-${revision}-boot.jar</cyntex.e2e.boot-jar>
+          </systemPropertyVariables>
+        </configuration>
+        <executions>
+          <execution>
+            <goals>
+              <goal>integration-test</goal>
+              <goal>verify</goal>
+            </goals>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
+</project>

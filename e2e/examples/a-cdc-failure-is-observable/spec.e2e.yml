@@ -1,0 +1,38 @@
+# A source whose cdc tail dies drives the pipeline to an observable failure, and the harness reads that
+# failure the way a user would: from the two read faces a running product exposes, not from a log. The
+# sibling a-sink-write-failure example witnesses a sink that rejects writes; this one witnesses the read
+# side - a change stream that starts and then dies - which fails differently and is caught differently. The
+# cdc tail runs on its own thread, feeding the ring the data-plane job reads, so a tail that dies leaves the
+# job running over a ring gone quiet: the job's own status never reflects the death. Only the capture
+# reporting its failure up to the runtime turns a dead tail into a FAILED state and an error count.
+#
+# The failure is deliberate: the source connection carries fail_cdc, which makes its change stream start
+# and then throw. The tail reports that failure up through the capture listener's error channel, the
+# coordinator carries it through the same actuator seam a dead engine job uses, and the convergence pass
+# that finds a RUNNING pipeline whose capture died drives it to FAILED - the state this example awaits. The
+# cause rides out to the log; the observable surface is the FAILED state and the error count, not a code.
+#
+# The read mode is cdc_only, so the stream is the pipeline's only source of rows: when it dies at the start,
+# nothing is ever read and nothing crosses. The transform admits the change stream's inserts, so a stream
+# that lived would carry the seeded rows to the target and the count would climb; the count resting at zero
+# is the stream never delivering, which is the failure this example is written around - not a filter that
+# excludes everything.
+#
+# error_count is the point, alongside the state. The runtime derives it from the pipeline's actual state -
+# one while FAILED, zero otherwise - and publishes it on the metrics face. The state says the capture died;
+# the count says nothing leaked past it; the error count says the failure was counted; each fails on its own
+# if its source regresses. Were the capture's failure not surfaced through the actuator seam, the pipeline
+# would sit at RUNNING over a dead tail and this await would time out rather than pass.
+name: a-cdc-failure-is-observable
+setup:
+  connectors: [e2e_file]
+  apply: [src_file.cyn.yml, tgt_file.cyn.yml, pipeline.cyn.yml]
+  discover: [src_file]
+pipeline: pipeline.cyn.yml
+seed:
+  src_file.orders: { rows: 3 }
+steps:
+  - start
+  - await: { state: FAILED }
+  - assert: { error_count: 1 }
+  - assert: { count: { tgt_file.orders: 0 } }

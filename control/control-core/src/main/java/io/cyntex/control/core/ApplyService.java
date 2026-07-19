@@ -40,12 +40,14 @@ public final class ApplyService {
 
     private final Supplier<CyntexCatalog> catalog;
     private final ArtifactStore store;
+    private final AuditGate auditGate;
     private final DslParser parser = new DslParser();
     private final CanonicalWriter writer = new CanonicalWriter();
 
-    public ApplyService(Supplier<CyntexCatalog> catalog, ArtifactStore store) {
+    public ApplyService(Supplier<CyntexCatalog> catalog, ArtifactStore store, AuditGate auditGate) {
         this.catalog = Objects.requireNonNull(catalog, "catalog");
         this.store = Objects.requireNonNull(store, "store");
+        this.auditGate = Objects.requireNonNull(auditGate, "auditGate");
     }
 
     /**
@@ -75,11 +77,18 @@ public final class ApplyService {
      * out of the batch. A validation failure throws the first {@link DslException} before any write, and
      * a store write failure rolls the whole batch back, so nothing is stored on an invalid or a failed
      * batch.
+     *
+     * <p>Apply is an audited write: the changed set passes the audit gate under {@code principal}, one
+     * record per changed artifact attributed by its own id, before any of it is stored. A no-op leaves no
+     * record because it changes nothing, and an audit-write failure refuses the whole apply
+     * ({@code control.audit-blocked}) with the store untouched.
      */
-    public ApplyResult apply(List<ArtifactDraft> drafts) {
+    public ApplyResult apply(String principal, List<ArtifactDraft> drafts) {
+        Objects.requireNonNull(principal, "principal");
         ApplyPlan plan = plan(drafts);
         List<ArtifactOutcome> outcomes = new ArrayList<>();
         List<Resource> toWrite = new ArrayList<>();
+        List<AuditContext> audited = new ArrayList<>();
         for (PreparedArtifact prepared : plan.artifacts()) {
             Optional<Resource> existing = store.get(prepared.id());
             ArtifactOutcome.Change change;
@@ -92,11 +101,17 @@ public final class ApplyService {
                 change = ArtifactOutcome.Change.UPDATED;
                 toWrite.add(prepared.resource());
             }
+            if (change != ArtifactOutcome.Change.UNCHANGED) {
+                audited.add(new AuditContext(principal, prepared.id()));
+            }
             outcomes.add(new ArtifactOutcome(prepared.id(), prepared.kind(), change, prepared.contentHash()));
         }
-        // One atomic batch for the whole changed set: all of it lands or, on a write failure, none does.
-        store.saveAll(toWrite);
-        return new ApplyResult(outcomes);
+        // The changed set is audited per artifact, then written as one atomic batch: all of it lands or,
+        // on a write failure, none does.
+        return auditGate.dispatchAll(ControlOperations.ARTIFACT_APPLY, audited, () -> {
+            store.saveAll(toWrite);
+            return new ApplyResult(outcomes);
+        });
     }
 
     /** The content hash of a stored artifact, recomputed over its canonical form for the no-op check. */

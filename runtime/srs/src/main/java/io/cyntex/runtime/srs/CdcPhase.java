@@ -49,13 +49,15 @@ public final class CdcPhase {
             CaptureConfig config,
             CdcChain chain,
             LongSupplier minConsumerReadSeq,
-            Supplier<Collection<ConsumerOffset>> consumers) {
+            Supplier<Collection<ConsumerOffset>> consumers,
+            CaptureHealth health) {
         Objects.requireNonNull(port, "port");
         Objects.requireNonNull(config, "config");
         Objects.requireNonNull(chain, "chain");
         Objects.requireNonNull(minConsumerReadSeq, "minConsumerReadSeq");
         Objects.requireNonNull(consumers, "consumers");
-        return port.cdc(config, event -> writeChange(chain, event, minConsumerReadSeq, consumers));
+        Objects.requireNonNull(health, "health");
+        return port.cdc(config, health.recording(event -> writeChange(chain, event, minConsumerReadSeq, consumers)));
     }
 
     /**

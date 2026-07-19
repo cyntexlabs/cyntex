@@ -9,7 +9,6 @@ import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.TreeSet;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -391,12 +390,10 @@ class DescCmdTest {
 
     @Test
     void descIsRegisteredAsAnOfflineVerb() {
+        // that the whole table and the whitelist stay in lockstep is asserted once, in CliTest; this
+        // one claims only desc's own place in it
         assertThat(Cli.OFFLINE_VERBS).contains("desc");
         assertThat(Cli.newCommandLine().getSubcommands().keySet()).contains("desc");
-        // the whitelist and the registered offline subcommands stay in lockstep
-        TreeSet<String> registeredOffline = new TreeSet<>(Cli.newCommandLine().getSubcommands().keySet());
-        registeredOffline.removeAll(Cli.CONNECTED_VERBS);
-        assertThat(registeredOffline).containsExactlyInAnyOrderElementsOf(Cli.OFFLINE_VERBS);
     }
 
     @Test

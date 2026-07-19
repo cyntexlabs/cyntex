@@ -62,6 +62,17 @@ class ReplTest {
         return new Harness(new Repl(cl, workdir, controlPlane, prompter), sink);
     }
 
+    /** A harness whose interpolation environment is the given map rather than the real process's. */
+    private static Harness harness(Path workdir, ControlPlaneClient controlPlane, Prompter prompter,
+                                   Map<String, String> env) {
+        CommandLine cl = Cli.newCommandLine();
+        StringWriter sink = new StringWriter();
+        PrintWriter pw = new PrintWriter(sink);
+        cl.setOut(pw);
+        cl.setErr(pw);
+        return new Harness(new Repl(cl, workdir, controlPlane, prompter, env::get), sink);
+    }
+
     /**
      * A network-free stand-in that answers healthy only for the given base URLs and records probes. The
      * connected verbs return their canned outcome when the target base is healthy and {@link
@@ -96,6 +107,8 @@ class ReplTest {
         List<String> watchStates = List.of();
         List<List<RemoteLogLine>> followBatches = List.of();
         final List<String> applyCalls = new ArrayList<>();
+        /** The drafts each apply carried, kept whole: what reaches the wire is the thing under test. */
+        final List<List<LocalDraft>> appliedDrafts = new ArrayList<>();
         final List<String> getCalls = new ArrayList<>();
         final List<String> listCalls = new ArrayList<>();
         final List<String> testCalls = new ArrayList<>();
@@ -137,6 +150,7 @@ class ReplTest {
         @Override
         public ApplyOutcome apply(URI baseUrl, String credential, List<LocalDraft> drafts) {
             applyCalls.add(credential + "@" + baseUrl + " x" + drafts.size());
+            appliedDrafts.add(List.copyOf(drafts));
             return healthy.contains(baseUrl) ? applyOutcome : new ApplyOutcome.Unreachable();
         }
 
@@ -805,6 +819,15 @@ class ReplTest {
         return h;
     }
 
+    /** An authenticated session whose interpolation reads {@code env} instead of the process environment. */
+    private static Harness onlineSession(Path workdir, FakeControlPlane client, Map<String, String> env) {
+        client.loginOutcome = new LoginOutcome.Success("jwt-tok");
+        Harness h = harness(workdir, client, new ScriptedPrompter("pw"), env);
+        h.repl().dispatch("connect node1:7900");
+        h.repl().dispatch("login alice");
+        return h;
+    }
+
     @Test
     void getWhileAuthenticatedFetchesTheArtifactFromTheServer() {
         FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
@@ -1081,7 +1104,7 @@ class ReplTest {
 
         assertThat(h.repl().dispatch("test my-mongo")).isTrue();
 
-        assertThat(h.sink().toString()).contains("requires a connection").contains("test");
+        assertThat(h.sink().toString()).contains("cli.not-connected").contains("test");
     }
 
     // --- connection test result: `test-result <id>` reads back the connection's latest stored result ---
@@ -1184,7 +1207,7 @@ class ReplTest {
 
         assertThat(h.repl().dispatch("test-result my-mongo")).isTrue();
 
-        assertThat(h.sink().toString()).contains("requires a connection").contains("test-result");
+        assertThat(h.sink().toString()).contains("cli.not-connected").contains("test-result");
     }
 
     // --- schema discovery: `discover-schema <id>` discovers a stored connection's source model ---
@@ -1289,7 +1312,7 @@ class ReplTest {
 
         assertThat(h.repl().dispatch("discover-schema my-mongo")).isTrue();
 
-        assertThat(h.sink().toString()).contains("requires a connection").contains("discover-schema");
+        assertThat(h.sink().toString()).contains("cli.not-connected").contains("discover-schema");
     }
 
     // --- register: `register <path>` uploads a local artifact to the server -----------------------
@@ -1630,7 +1653,7 @@ class ReplTest {
 
         assertThat(h.repl().dispatch("register orders.jar")).isTrue();
 
-        assertThat(h.sink().toString()).contains("requires a connection").contains("register");
+        assertThat(h.sink().toString()).contains("cli.not-connected").contains("register");
     }
 
     // --- schema read-back: `schema <id> [table]` reads the stored model without discovering ---
@@ -1804,7 +1827,7 @@ class ReplTest {
 
         assertThat(h.repl().dispatch("schema my-mongo")).isTrue();
 
-        assertThat(h.sink().toString()).contains("requires a connection").contains("schema");
+        assertThat(h.sink().toString()).contains("cli.not-connected").contains("schema");
     }
 
     // --- server-as-truth: a connected read verb sources the server store, never the local workspace ---
@@ -1859,6 +1882,43 @@ class ReplTest {
         // one apply call carrying the three ws-valid drafts to the landing node with the credential
         assertThat(client.applyCalls).hasSize(1);
         assertThat(client.applyCalls.get(0)).startsWith("jwt-tok@http://node1:7900 x3");
+    }
+
+    @Test
+    void applySubstitutesReferencesFromTheEnvironmentBeforeSendingTheDrafts(@TempDir Path base) throws Exception {
+        Files.createDirectory(base.resolve("source"));
+        Files.writeString(base.resolve("source").resolve("tgt.cyn.yml"),
+                "version: cyntex/v1\nkind: source\nid: tgt\nconnector: mongodb\n"
+                        + "config: { uri: \"${MONGO_URI}\" }\n");
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.applyOutcome = new ApplyOutcome.Applied(List.of(new ApplyOutcome.Item("tgt", "source", "CREATED")));
+        Harness h = onlineSession(base, client, Map.of("MONGO_URI", "mongodb://127.0.0.1:27017/demo"));
+
+        assertThat(h.repl().dispatch("apply")).isTrue();
+
+        // the value reaches the wire, not the reference: the server is handed a config it can dial
+        assertThat(client.appliedDrafts).hasSize(1);
+        String sent = client.appliedDrafts.get(0).get(0).content();
+        assertThat(sent).contains("mongodb://127.0.0.1:27017/demo").doesNotContain("${");
+    }
+
+    @Test
+    void applyRefusesAnUndefinedVariableAndSendsNothing(@TempDir Path base) throws Exception {
+        Files.createDirectory(base.resolve("source"));
+        Files.writeString(base.resolve("source").resolve("tgt.cyn.yml"),
+                "version: cyntex/v1\nkind: source\nid: tgt\nconnector: mongodb\n"
+                        + "config: { uri: \"${MONGO_URI}\" }\n");
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        Harness h = onlineSession(base, client, Map.of());
+        int mark = h.sink().toString().length();
+
+        assertThat(h.repl().dispatch("apply")).isTrue();
+
+        String out = h.sink().toString().substring(mark);
+        assertThat(out).contains("dsl.undefined-variable").contains("MONGO_URI").contains("tgt.cyn.yml");
+        // nothing left the client: a reference that cannot be resolved is not the server's problem to
+        // discover, and a literal ${...} on the wire would surface as a connector failure far from here
+        assertThat(client.applyCalls).isEmpty();
     }
 
     @Test
@@ -1933,14 +1993,14 @@ class ReplTest {
     void applyWhileOfflineFallsThroughToTheConnectionRequiredNotice() {
         Harness h = harness();   // offline: apply is a connected verb, so the offline notice fires
         assertThat(h.repl().dispatch("apply")).isTrue();
-        assertThat(h.sink().toString()).contains("requires a connection");
+        assertThat(h.sink().toString()).contains("cli.not-connected");
     }
 
     @Test
     void getWhileOfflineFallsThroughToTheConnectionRequiredNotice() {
         Harness h = harness();   // offline: get is a connected verb, discoverable rather than unknown
         assertThat(h.repl().dispatch("get x")).isTrue();
-        assertThat(h.sink().toString()).contains("requires a connection");
+        assertThat(h.sink().toString()).contains("cli.not-connected");
     }
 
     // --- pipeline lifecycle verbs route online to POST /api/pipelines/{id}:{verb} ------------------
@@ -2013,7 +2073,7 @@ class ReplTest {
     void startWhileOfflineFallsThroughToTheConnectionRequiredNotice() {
         Harness h = harness();   // offline: start is a connected verb, discoverable rather than unknown
         assertThat(h.repl().dispatch("start pl1")).isTrue();
-        assertThat(h.sink().toString()).contains("requires a connection");
+        assertThat(h.sink().toString()).contains("cli.not-connected");
     }
 
     @Test
@@ -2055,6 +2115,31 @@ class ReplTest {
         String out = h.sink().toString().substring(mark);
         assertThat(out).contains("recordCount").contains("42").contains("errorCount");
         assertThat(client.metricsCalls).containsExactly("jwt-tok@http://node1:7900/pl1");
+    }
+
+    @Test
+    void metricsPrintsPerTableOffsetLinesAlongsideTheStats() {
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.metricsOutcome = new MetricsOutcome.Found(
+                "pl1", Map.of("recordCount", 6L), Map.of("orders", "w7"));
+        Harness h = onlineSession(Path.of("cyn-work"), client);
+        int mark = h.sink().toString().length();
+        h.repl().dispatch("metrics pl1");
+        String out = h.sink().toString().substring(mark);
+        assertThat(out).contains("recordCount").contains("perTableOffset.orders").contains("w7");
+    }
+
+    @Test
+    void metricsWithOnlyPerTableOffsetPrintsItRatherThanNoMetrics() {
+        // Positions-only: numeric stats empty but a per-table position is wired, so the offset prints and
+        // "no metrics" must not — it fires only when both sources are empty.
+        FakeControlPlane client = new FakeControlPlane(URI.create("http://node1:7900"));
+        client.metricsOutcome = new MetricsOutcome.Found("pl1", Map.of(), Map.of("orders", "w7"));
+        Harness h = onlineSession(Path.of("cyn-work"), client);
+        int mark = h.sink().toString().length();
+        h.repl().dispatch("metrics pl1");
+        String out = h.sink().toString().substring(mark);
+        assertThat(out).contains("perTableOffset.orders").contains("w7").doesNotContain("no metrics");
     }
 
     @Test
@@ -2202,7 +2287,7 @@ class ReplTest {
         for (String verb : List.of("status pl1", "metrics pl1", "snapshot pl1", "logs pl1")) {
             Harness h = harness();
             assertThat(h.repl().dispatch(verb)).isTrue();
-            assertThat(h.sink().toString()).contains("requires a connection");
+            assertThat(h.sink().toString()).contains("cli.not-connected");
         }
     }
 

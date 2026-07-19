@@ -97,6 +97,15 @@ public enum ConnectorError implements CyntexErrorCode {
     API_LEVEL_INCOMPATIBLE("connector.api-level-incompatible", Set.of("connector", "required", "provided")),
 
     /**
+     * The connector declares a PDK API version the Cyntex-side level registry has no row for, so the
+     * bridge cannot place it on the compatibility axis and refuses it rather than guessing. This is a
+     * Cyntex-side registry gap, not the connector being too new — the fix is to register the version if
+     * it is API-compatible, or to use a build whose version the bridge recognizes. {@code connector} is
+     * the connector id; {@code version} is the unrecognized declared PDK API version.
+     */
+    API_LEVEL_UNKNOWN("connector.api-level-unknown", Set.of("connector", "version")),
+
+    /**
      * A PDK event could not be projected to or from the cyntex envelope. {@code connector} is the
      * connector id; {@code detail} is the projection failure.
      */

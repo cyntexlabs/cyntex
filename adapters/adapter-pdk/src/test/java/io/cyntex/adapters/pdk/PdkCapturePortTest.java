@@ -5,6 +5,7 @@ import io.cyntex.core.event.Envelope;
 import io.cyntex.core.event.Op;
 import io.cyntex.spi.capture.CaptureBatch;
 import io.cyntex.spi.capture.CaptureConfig;
+import io.cyntex.spi.capture.CaptureListener;
 import io.cyntex.spi.capture.ConnectionReport;
 import io.cyntex.spi.capture.DiscoveredSchema;
 import io.cyntex.spi.capture.Subscription;
@@ -18,6 +19,7 @@ import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
@@ -125,6 +127,23 @@ class PdkCapturePortTest {
     }
 
     @Test
+    void snapshotHandsTheConnectorItsDiscoveredTableNotABareName(@TempDir Path dir) throws Exception {
+        // A real connector builds its read from the table's own columns - a mysql SELECT names them - and
+        // handed a bare name with no columns it reads nothing or fails outright. This connector emits one
+        // row per column of the table it is given, and its discovery reports a single column; so a snapshot
+        // that read through a bare name would yield zero, and one through the discovered table yields one.
+        Path jar = Synthetic.tableAwareSource(dir);
+        PdkCapturePort port = new PdkCapturePort(provisioner(jar, "synthetic.TableAware", null));
+        List<Envelope> got = new ArrayList<>();
+        try (CaptureBatch batch = port.snapshot(config("t1"))) {
+            while (batch.hasNext()) {
+                got.add(batch.next());
+            }
+        }
+        assertThat(got).hasSize(1);
+    }
+
+    @Test
     void snapshotWithoutExplicitStreamsInitsTheConnectorExactlyOnce(@TempDir Path dir) throws Exception {
         // Empty streams means "every stream": the drive discovers the stream names and reads them. It
         // must init the connector once, not once for discovery and again for the read — the connector
@@ -176,6 +195,34 @@ class PdkCapturePortTest {
             assertThat(three.await(5, TimeUnit.SECONDS)).as("three change events delivered").isTrue();
         }
         assertThat(got).extracting(Envelope::op).containsExactly(Op.INSERT, Op.UPDATE, Op.DELETE);
+    }
+
+    @Test
+    void cdcThatFailsWhileStreamingReportsItThroughOnError(@TempDir Path dir) throws Exception {
+        // The cdc stream runs on a daemon thread, so a stream that dies cannot throw back to whoever
+        // started it; the failure reaches the caller only through the listener's error channel. Without
+        // that channel a dead tail is invisible above this port.
+        Path jar = Synthetic.throwingStreamSource(dir);
+        PdkCapturePort port = new PdkCapturePort(provisioner(jar, "synthetic.ThrowingStream", null));
+        AtomicReference<Throwable> reported = new AtomicReference<>();
+        CountDownLatch failed = new CountDownLatch(1);
+        CaptureListener listener = new CaptureListener() {
+            @Override
+            public void onEvent(Envelope event) {
+            }
+
+            @Override
+            public void onError(Throwable error) {
+                reported.set(error);
+                failed.countDown();
+            }
+        };
+        try (Subscription sub = port.cdc(config("t1"), listener)) {
+            assertThat(failed.await(5, TimeUnit.SECONDS))
+                    .as("the cdc stream failure was reported through onError")
+                    .isTrue();
+        }
+        assertThat(reported.get()).isNotNull();
     }
 
     @Test

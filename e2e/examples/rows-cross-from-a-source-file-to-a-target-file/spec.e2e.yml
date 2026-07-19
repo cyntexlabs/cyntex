@@ -1,0 +1,35 @@
+# Rows leave a source directory, cross the whole product, and arrive in a target directory: the
+# connector is registered and loaded, the source model is discovered from it, the target model and its
+# key are derived from that discovery, a lifecycle verb drives the job, and the rows travel capture ->
+# ring -> transform -> sink. Only the two ends are directories.
+#
+# The counts are the assertion, and they are the only ones that could be. A pipeline whose connector
+# emits nothing still reaches RUNNING, so awaiting the state would pass over an empty pipeline; the
+# target file does not exist at all until the product creates it, so a count that reaches two is two
+# rows that were read, carried and written.
+#
+# Every number here is below the rows seeded, and that gap is deliberate. The filter admits even ids, so
+# a transform quietly reduced to an identity carries four and then six. The target only grows, and
+# neither number is ever two or three, so such a run fails outright rather than arriving late.
+#
+# Three, not five: this connector's tail has no offset to resume from and replays the four seeded rows
+# on top of the snapshot's, so the sink is handed five rows - two, two again, and one - and keeps three.
+# That is the overlap the snapshot-to-cdc seam leaves, and the upsert absorbing it is what this number
+# asserts. The key it absorbs on comes from the discovered source model, so a run that discovered
+# nothing appends instead and climbs two, four, five - never resting on three.
+#
+# Four seeded, not three: with three, the appending run rests on two at the second await - the number it
+# is asked for - and passes. The constraint is the seed size, not the predicate.
+name: rows-cross-from-a-source-file-to-a-target-file
+setup:
+  connectors: [e2e_file]
+  apply: [src_file.cyn.yml, tgt_file.cyn.yml, pipeline.cyn.yml]
+  discover: [src_file]
+pipeline: pipeline.cyn.yml
+seed:
+  src_file.orders: { rows: 4 }
+steps:
+  - start
+  - await: { count: { tgt_file.orders: 2 } }
+  - cdc: { src_file.orders: insert 2 }
+  - await: { count: { tgt_file.orders: 3 } }

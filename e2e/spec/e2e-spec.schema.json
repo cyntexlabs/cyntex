@@ -1,0 +1,214 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cyntex.io/schema/e2e/spec-v1.json",
+  "title": "Cyntex e2e test specification",
+  "description": "A declarative end-to-end specification. The same document runs on every tier; generated from the executor, so it says what the parser accepts.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "name",
+    "pipeline",
+    "steps"
+  ],
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "What this specification is called."
+    },
+    "setup": {
+      "$ref": "#/$defs/setup",
+      "description": "The bootstrap a real endpoint needs before a pipeline can name it."
+    },
+    "pipeline": {
+      "type": "string",
+      "description": "Path to the product pipeline document, read with the product's own parser."
+    },
+    "seed": {
+      "$ref": "#/$defs/seed",
+      "description": "Initial data laid down before the first step runs."
+    },
+    "steps": {
+      "type": "array",
+      "description": "The scenario, in order. A specification with no steps checks nothing.",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/step"
+      }
+    }
+  },
+  "$defs": {
+    "setup": {
+      "type": "object",
+      "description": "Three real product verbs, in dependency order.",
+      "additionalProperties": false,
+      "properties": {
+        "connectors": {
+          "type": "array",
+          "description": "Connector ids whose runtime jars are registered; idempotent by content hash.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "apply": {
+          "type": "array",
+          "description": "Product resource files, applied as one batch: the product resolves references within the submitted set.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "discover": {
+          "type": "array",
+          "description": "Resource ids whose source model is discovered, feeding target-table creation.",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "seed": {
+      "type": "object",
+      "description": "Rows per table, addressed as <resourceId>.<table>.",
+      "propertyNames": {
+        "pattern": "^[^.]+\\..+$"
+      },
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "rows"
+        ],
+        "properties": {
+          "rows": {
+            "type": "integer",
+            "description": "How many rows to lay down.",
+            "minimum": 0
+          }
+        }
+      }
+    },
+    "step": {
+      "description": "One stage. Steps run in declaration order; the order is the scenario.",
+      "oneOf": [
+        {
+          "type": "string",
+          "description": "A lifecycle verb, spelled as the product spells it. There is no rewind: re-snapshotting is stop then start.",
+          "enum": [
+            "pause",
+            "resume",
+            "start",
+            "stop"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "cdc"
+          ],
+          "properties": {
+            "cdc": {
+              "type": "object",
+              "description": "Exactly one table, addressed as <resourceId>.<table>.",
+              "minProperties": 1,
+              "maxProperties": 1,
+              "propertyNames": {
+                "pattern": "^[^.]+\\..+$"
+              },
+              "additionalProperties": {
+                "type": "string",
+                "description": "A change, written '<operation> <rows>'.",
+                "pattern": "^(delete|insert|update)\\s+\\d+$"
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "await"
+          ],
+          "properties": {
+            "await": {
+              "$ref": "#/$defs/matcher"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "assert"
+          ],
+          "properties": {
+            "assert": {
+              "$ref": "#/$defs/matcher"
+            }
+          }
+        }
+      ]
+    },
+    "matcher": {
+      "description": "A condition over observable state. One vocabulary serves both timings: assert reads once, await polls the same matcher until it holds or the bound expires.",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "count"
+          ],
+          "properties": {
+            "count": {
+              "type": "object",
+              "description": "Expected rows per table, read from the endpoint itself.",
+              "minProperties": 1,
+              "propertyNames": {
+                "pattern": "^[^.]+\\..+$"
+              },
+              "additionalProperties": {
+                "type": "integer",
+                "description": "Rows the table is expected to hold.",
+                "minimum": 0
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "error_count"
+          ],
+          "properties": {
+            "error_count": {
+              "type": "integer",
+              "description": "The published error count the pipeline is expected to show.",
+              "minimum": 0
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "state"
+          ],
+          "properties": {
+            "state": {
+              "type": "string",
+              "description": "The lifecycle state of the pipeline this specification names. A specification names exactly one, so the state is written on its own.",
+              "enum": [
+                "COMPLETED",
+                "FAILED",
+                "NEW",
+                "PAUSED",
+                "RUNNING",
+                "STOPPED"
+              ]
+            }
+          }
+        }
+      ]
+    }
+  }
+}

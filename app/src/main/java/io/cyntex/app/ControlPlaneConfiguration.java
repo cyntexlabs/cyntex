@@ -167,10 +167,11 @@ class ControlPlaneConfiguration {
     }
 
     @Bean
-    ApplyService applyService(StorePort storePort, ConnectorCatalogView connectorCatalogView) {
+    ApplyService applyService(
+            StorePort storePort, ConnectorCatalogView connectorCatalogView, AuditGate auditGate) {
         // The online apply validates against the live catalog view (the bundled snapshot union the
         // connectors registered so far), so a connector registered at runtime is honoured without a restart.
-        return new ApplyService(connectorCatalogView::merged, storePort.artifacts());
+        return new ApplyService(connectorCatalogView::merged, storePort.artifacts(), auditGate);
     }
 
     @Bean
