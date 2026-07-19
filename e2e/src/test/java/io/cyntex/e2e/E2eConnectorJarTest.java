@@ -109,6 +109,7 @@ class E2eConnectorJarTest {
 
         try (JarFile file = new JarFile(jar.toFile())) {
             assertThat(file.stream().map(ZipEntry::getName).filter(name -> name.endsWith(".class")))
+                    .isNotEmpty()
                     .allMatch(name -> name.startsWith("io/cyntex/e2e/connector/CsvConnector"));
         }
     }

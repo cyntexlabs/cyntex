@@ -64,8 +64,9 @@ public final class PipelineConverger {
         if (target == PipelineState.RUNNING && actual == PipelineState.FAILED) {
             // A failed run stays failed: re-driving it toward RUNNING would restart the dead job on
             // every tick. The user recovers by stopping it (a STOPPED target, driven below) then
-            // starting a fresh run.
-            return ConvergeResult.converged(actualDoc.get());
+            // starting a fresh run. actual is FAILED only when the checkpoint was read and parsed, so
+            // the doc is necessarily present; orElseThrow makes that invariant explicit and fail-loud.
+            return ConvergeResult.converged(actualDoc.orElseThrow());
         }
 
         return driveTo(pipelineId, target, true, actualDoc.orElse(null));
