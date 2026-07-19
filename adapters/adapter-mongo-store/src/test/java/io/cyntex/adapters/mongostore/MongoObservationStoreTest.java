@@ -159,4 +159,32 @@ class MongoObservationStoreTest {
         assertThat(thrown).isInstanceOf(CyntexException.class);
         assertThat(((CyntexException) thrown).code()).isEqualTo(IoError.DOCUMENT_UNREADABLE);
     }
+
+    @Test
+    void toObservationOnANonDocumentMetricsFieldIsDocumentUnreadable() {
+        // A metrics field stored as something other than a sub-document is store corruption, surfaced
+        // as a coded io diagnostic rather than a bare cast crash while reconstructing.
+        Document corrupt = new Document("_id", "p1")
+                .append("state", "RUNNING")
+                .append("metrics", "not-a-document");
+
+        Throwable thrown = catchThrowable(() -> MongoObservationStore.toObservation(corrupt));
+
+        assertThat(thrown).isInstanceOf(CyntexException.class);
+        assertThat(((CyntexException) thrown).code()).isEqualTo(IoError.DOCUMENT_UNREADABLE);
+    }
+
+    @Test
+    void toObservationOnANonDocumentSnapshotFieldIsDocumentUnreadable() {
+        // A snapshot field stored as something other than a sub-document is store corruption, surfaced
+        // as a coded io diagnostic rather than a bare cast crash while reconstructing.
+        Document corrupt = new Document("_id", "p1")
+                .append("state", "RUNNING")
+                .append("snapshot", "not-a-document");
+
+        Throwable thrown = catchThrowable(() -> MongoObservationStore.toObservation(corrupt));
+
+        assertThat(thrown).isInstanceOf(CyntexException.class);
+        assertThat(((CyntexException) thrown).code()).isEqualTo(IoError.DOCUMENT_UNREADABLE);
+    }
 }
