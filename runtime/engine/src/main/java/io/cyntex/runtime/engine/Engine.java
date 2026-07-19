@@ -6,10 +6,14 @@ import com.hazelcast.jet.config.JobConfig;
 import com.hazelcast.jet.config.ProcessingGuarantee;
 import com.hazelcast.jet.core.DAG;
 import com.hazelcast.jet.core.JobStatus;
+import com.hazelcast.jet.core.metrics.Measurement;
+import com.hazelcast.jet.core.metrics.MetricNames;
+import com.hazelcast.jet.core.metrics.MetricTags;
 import io.cyntex.core.common.CyntexException;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.OptionalLong;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletionException;
 
@@ -91,6 +95,31 @@ public final class Engine {
             Throwable cause = failed.getCause() != null ? failed.getCause() : failed;
             return cause instanceof CancellationException ? Optional.empty() : Optional.of(cause);
         }
+    }
+
+    /**
+     * The number of records the pipeline's live job has driven to its serve sinks, or empty when it
+     * has no live job. The count is the received count summed over the serve-sink vertices, so a
+     * filter earlier in the chain is reflected in it. It reads the job's last collected metrics, so a
+     * freshly submitted job reports a low or zero count until the first collection; a stopped pipeline
+     * reports empty, matching the live-state projection the rest of the read face carries.
+     */
+    public OptionalLong recordCount(String pipelineId) {
+        Job job = liveJob(pipelineId);
+        if (job == null) {
+            return OptionalLong.empty();
+        }
+        long reached = job.getMetrics().get(MetricNames.RECEIVED_COUNT).stream()
+                .filter(Engine::isServeSink)
+                .mapToLong(Measurement::value)
+                .sum();
+        return OptionalLong.of(reached);
+    }
+
+    /** Whether a measurement belongs to a serve-sink vertex, which the builder names by that prefix. */
+    private static boolean isServeSink(Measurement measurement) {
+        String vertex = measurement.tag(MetricTags.VERTEX);
+        return vertex != null && vertex.startsWith(PipelineDagBuilder.SERVE_VERTEX_PREFIX);
     }
 
     /**

@@ -11,11 +11,14 @@ import com.hazelcast.function.SupplierEx;
 import com.hazelcast.jet.Job;
 import com.hazelcast.jet.core.AbstractProcessor;
 import com.hazelcast.jet.core.DAG;
+import com.hazelcast.jet.core.Edge;
 import com.hazelcast.jet.core.JobStatus;
 import com.hazelcast.jet.core.Processor;
 import com.hazelcast.jet.core.ProcessorMetaSupplier;
 import com.hazelcast.jet.core.ProcessorSupplier;
+import com.hazelcast.jet.core.Vertex;
 import java.time.Duration;
+import java.util.OptionalLong;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -41,6 +44,9 @@ class EngineTest {
         join.getTcpIpConfig().setEnabled(false);
         join.getAutoDetectionConfig().setEnabled(false);
         config.getNetworkConfig().getInterfaces().setEnabled(true).addInterface("127.0.0.1");
+        // Job metrics are read live off the member's last collection, so collect once a second rather
+        // than the multi-second default to keep the record-count assertions prompt.
+        config.getMetricsConfig().setCollectionFrequencySeconds(1);
         member = Hazelcast.newHazelcastInstance(config);
     }
 
@@ -218,6 +224,128 @@ class EngineTest {
                 .isInstanceOf(io.cyntex.core.common.CyntexException.class)
                 .satisfies(e -> assertThat(((io.cyntex.core.common.CyntexException) e).code().code())
                         .isEqualTo("engine.no-such-job"));
+    }
+
+    @Test
+    void recordCount_counts_the_records_that_reached_the_serve_sink() {
+        Engine engine = new Engine(member);
+        engine.submit("orders-pipe", countingDag(3));
+        awaitStatus(member.getJet().getJob("orders-pipe"), JobStatus.RUNNING);
+
+        awaitRecordCount(engine, "orders-pipe", 3);
+    }
+
+    @Test
+    void recordCount_is_empty_for_a_pipeline_with_no_live_job() {
+        Engine engine = new Engine(member);
+        // An unknown pipeline has no job at all.
+        assertThat(engine.recordCount("ghost")).isEmpty();
+
+        // A cancelled job is terminal, so it is retained under its name but is not live.
+        engine.submit("orders-pipe", foreverDag());
+        Job job = member.getJet().getJob("orders-pipe");
+        awaitStatus(job, JobStatus.RUNNING);
+        engine.cancel("orders-pipe");
+        awaitStatus(job, JobStatus.FAILED);
+        assertThat(engine.recordCount("orders-pipe")).isEmpty();
+    }
+
+    /**
+     * A three-vertex streaming DAG: a source that emits {@code total} rows then idles forever (so the
+     * job stays RUNNING and its metrics stay readable), through a passthrough transform, into a
+     * draining serve sink. The transform vertex receives the same rows as the sink, so its presence
+     * makes the serve-sink filter load-bearing: counting every vertex's received rows would double
+     * the total, and only the {@code serve.} prefix the real builder stamps on serve sinks isolates
+     * the records that actually reached a sink.
+     */
+    private static DAG countingDag(int total) {
+        DAG dag = new DAG();
+        Vertex source = dag.newVertex("src", ProcessorMetaSupplier.forceTotalParallelismOne(
+                ProcessorSupplier.of((SupplierEx<Processor>) () -> new EmitThenIdleSource(total))));
+        Vertex transform = dag.newVertex("xform", ProcessorMetaSupplier.forceTotalParallelismOne(
+                ProcessorSupplier.of((SupplierEx<Processor>) Passthrough::new)));
+        Vertex sink = dag.newVertex("serve.out", ProcessorMetaSupplier.forceTotalParallelismOne(
+                ProcessorSupplier.of((SupplierEx<Processor>) DrainingSink::new)));
+        dag.edge(Edge.between(source, transform));
+        dag.edge(Edge.between(transform, sink));
+        return dag;
+    }
+
+    /** Re-emits every row it receives, so the transform vertex also carries a received count. */
+    private static final class Passthrough extends AbstractProcessor {
+        @Override
+        public boolean isCooperative() {
+            return false;
+        }
+
+        @Override
+        protected boolean tryProcess(int ordinal, Object item) {
+            return tryEmit(item);
+        }
+    }
+
+    /** Emits a fixed number of rows once, then idles forever so the streaming job stays RUNNING. */
+    private static final class EmitThenIdleSource extends AbstractProcessor {
+        private final int total;
+        private int emitted;
+
+        private EmitThenIdleSource(int total) {
+            this.total = total;
+        }
+
+        @Override
+        public boolean isCooperative() {
+            return false;
+        }
+
+        @Override
+        public boolean complete() {
+            while (emitted < total) {
+                if (!tryEmit("row-" + emitted)) {
+                    return false;
+                }
+                emitted++;
+            }
+            try {
+                Thread.sleep(20);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return true;
+            }
+            return false;
+        }
+    }
+
+    /** Consumes every row it receives, so the source's rows all reach it and are counted. */
+    private static final class DrainingSink extends AbstractProcessor {
+        @Override
+        public boolean isCooperative() {
+            return false;
+        }
+
+        @Override
+        protected boolean tryProcess(int ordinal, Object item) {
+            return true;
+        }
+    }
+
+    /** Polls record count until it reaches the expected value, failing if it does not within budget. */
+    private static void awaitRecordCount(Engine engine, String pipelineId, long expected) {
+        long deadline = System.nanoTime() + Duration.ofSeconds(20).toNanos();
+        OptionalLong last = OptionalLong.empty();
+        while (System.nanoTime() < deadline) {
+            last = engine.recordCount(pipelineId);
+            if (last.isPresent() && last.getAsLong() == expected) {
+                return;
+            }
+            try {
+                Thread.sleep(50);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                break;
+            }
+        }
+        throw new AssertionError("record count did not reach " + expected + " within budget; last was " + last);
     }
 
     /** A one-vertex streaming DAG whose only processor never completes, so the job stays RUNNING. */

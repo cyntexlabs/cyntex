@@ -28,6 +28,13 @@ import java.util.Map;
  */
 public final class PipelineDagBuilder {
 
+    /**
+     * The name prefix every serve-sink vertex carries. The engine picks serve sinks out of a job's
+     * metrics by this prefix to sum the records that reached them, so the prefix is a shared contract
+     * between the builder that stamps it and the engine that reads it.
+     */
+    static final String SERVE_VERTEX_PREFIX = "serve.";
+
     private PipelineDagBuilder() {
     }
 
@@ -73,7 +80,7 @@ public final class PipelineDagBuilder {
             List<SyncElement> sync = serve.sync();
             for (int i = 0; i < sync.size(); i++) {
                 SyncElement element = sync.get(i);
-                String name = "serve." + (element.id() != null ? element.id() : i);
+                String name = SERVE_VERTEX_PREFIX + (element.id() != null ? element.id() : i);
                 Vertex vertex = dag.newVertex(name, sinkVertex(bindings.sinkWriters().apply(element), sinkAck));
                 connect(dag, upstream, vertex, outboundOrdinal, inboundOrdinal);
             }
