@@ -1,5 +1,6 @@
 package io.cyntex.app;
 
+import io.cyntex.runtime.engine.Engine;
 import io.cyntex.runtime.scheduler.LifecycleActuator;
 import io.cyntex.runtime.scheduler.ObservationPublisher;
 import io.cyntex.runtime.scheduler.PipelineConverger;
@@ -32,8 +33,12 @@ class RuntimeConvergenceConfiguration {
     }
 
     @Bean
-    ObservationPublisher observationPublisher(StorePort storePort) {
-        return new ObservationPublisher(storePort.state(), storePort.observations());
+    ObservationPublisher observationPublisher(StorePort storePort, Engine engine) {
+        // The publisher's two run-statistic sources: recordCount rides from the engine's live Jet job, and the
+        // per-table sink-acked positions from the store. Both are ports, so the scheduler stays clear of the
+        // engine and the store that back them; a stopped pipeline or an unacked table reports absence, not zero.
+        return new ObservationPublisher(storePort.state(), storePort.observations(),
+                engine::recordCount, new StoreBackedSinkPositions(storePort));
     }
 
     @Bean

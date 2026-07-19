@@ -1,6 +1,7 @@
 package io.cyntex.app;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.entry;
 
 import com.hazelcast.config.Config;
 import com.hazelcast.config.InMemoryFormat;
@@ -170,6 +171,11 @@ class CaptureToSinkAckFrontierTest {
             awaitSinkAck(meta, chainId, "w3");
             // w4 is held open by the lag-by-one rule: nothing strictly higher has settled to close it.
             assertThat(ackedPosition(meta, chainId)).isEqualTo("w3");
+
+            // The observation position resolver reads back exactly that durable sink-acked position, keyed by
+            // the source's table, so the read face projects what the real sink advanced -- not a stand-in.
+            assertThat(new StoreBackedSinkPositions(store).apply(PIPELINE))
+                    .containsExactly(entry(TABLE, "w3"));
         } finally {
             actuator.stop(PIPELINE);
         }

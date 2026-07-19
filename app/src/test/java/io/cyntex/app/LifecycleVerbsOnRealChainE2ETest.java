@@ -20,6 +20,7 @@ import io.cyntex.control.core.PipelineStatus;
 import io.cyntex.core.event.Envelope;
 import io.cyntex.core.lifecycle.CheckpointDoc;
 import io.cyntex.core.lifecycle.DesiredState;
+import io.cyntex.core.lifecycle.Observation;
 import io.cyntex.core.lifecycle.PipelineState;
 import io.cyntex.core.lifecycle.StateJson;
 import io.cyntex.core.model.FromClause;
@@ -71,6 +72,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Predicate;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -113,6 +115,8 @@ class LifecycleVerbsOnRealChainE2ETest {
         config.getNetworkConfig().getJoin().getAutoDetectionConfig().setEnabled(false);
         config.getNetworkConfig().getJoin().getMulticastConfig().setEnabled(false);
         config.getJetConfig().setEnabled(true).setCooperativeThreadCount(2);
+        // Collect job metrics once a second so recordCount is observable well within a test budget (default 5s).
+        config.getMetricsConfig().setCollectionFrequencySeconds(1);
         config.addRingBufferConfig(new RingbufferConfig("srs.*")
                 .setCapacity(16)
                 .setInMemoryFormat(InMemoryFormat.OBJECT)
@@ -169,6 +173,34 @@ class LifecycleVerbsOnRealChainE2ETest {
         assertThat(readFaces.status(PIPELINE)).isEqualTo(new PipelineStatus(PIPELINE, STOPPED));
     }
 
+    @Test
+    @DisplayName("the assembly-built publisher surfaces recordCount from the real live job")
+    void theWiredPublisherSurfacesRecordCountFromTheLiveJob() {
+        store = seedPipelineAndSchema();
+        makeMemberCapable(store);
+        FakeSource source = new FakeSource(
+                List.of(read(1), read(2), read(3)),
+                List.of(insert(4), insert(5), insert(6)));
+        wireConvergeChain(source);
+
+        desire(RUNNING);
+        Job job = member.getJet().getJob(PIPELINE);
+        awaitStatus(job, JobStatus.RUNNING);
+        awaitKeys("1", "2", "3", "4", "5", "6");
+
+        // Re-publish until the live job's collected metrics carry the six delivered records, so recordCount is
+        // witnessed riding the real engine through the assembly-built publisher rather than a default. The
+        // position port is witnessed off the store elsewhere (the real sink-ack advance in
+        // CaptureToSinkAckFrontierTest, the publisher's projection in AssemblyObservationPublisherTest); racing a
+        // value into the chain this live sink also writes would be a fragile witness, so it is not done here.
+        Observation observed = awaitObservation(obs -> obs.metrics().getOrDefault("recordCount", -1L) == 6L);
+
+        assertThat(observed.metrics())
+                .as("recordCount is the number of records the live job drove to its serve sink; errorCount stays 0")
+                .containsEntry("recordCount", 6L)
+                .containsEntry("errorCount", 0L);
+    }
+
     // ---- wiring ------------------------------------------------------------------------
 
     private void wireConvergeChain(FakeSource source) {
@@ -180,11 +212,14 @@ class LifecycleVerbsOnRealChainE2ETest {
         StoreBackedDagSource.SinkWriterBinder recordingSink =
                 (connectorId, settings, writeMode, ddl, target) -> (SupplierEx<SinkWriter>) () -> new RecordingSink(target);
         DagSource dagSource = new StoreBackedDagSource(store, recordingSink);
-        EngineLifecycleActuator actuator = new EngineLifecycleActuator(new Engine(member), dagSource, coordinator);
+        Engine engine = new Engine(member);
+        EngineLifecycleActuator actuator = new EngineLifecycleActuator(engine, dagSource, coordinator);
 
         Clock clock = Clock.fixed(T0, ZoneOffset.UTC);
         PipelineConverger converger = new PipelineConverger(store.desired(), store.state(), actuator, clock);
-        ObservationPublisher publisher = new ObservationPublisher(store.state(), store.observations());
+        // Build the publisher through the production assembly factory, so the metric ports it binds
+        // (recordCount from the live job, per-table positions from the store) are the ones under test.
+        ObservationPublisher publisher = new RuntimeConvergenceConfiguration().observationPublisher(store, engine);
         driver = new ConvergenceDriver(converger, store.desired(), publisher);
         readFaces = new PipelineObservationQueryService(store.observations());
     }
@@ -235,6 +270,26 @@ class LifecycleVerbsOnRealChainE2ETest {
         Set<String> expected = Set.of(keys);
         awaitCondition(() -> RecordingSink.keys().containsAll(expected),
                 () -> "timed out waiting for keys " + expected + " at the sink, have " + RecordingSink.keys());
+    }
+
+    /**
+     * Reconciles (republishing the pipeline's latest observation from the live job and the store) until the
+     * saved observation satisfies {@code done}, then returns it. A reconcile is what refreshes the observation
+     * on the driver's tick, so this drives that same tick until the awaited metric values land.
+     */
+    private Observation awaitObservation(Predicate<Observation> done) {
+        long deadline = System.nanoTime() + Duration.ofSeconds(15).toNanos();
+        Observation last = null;
+        while (System.nanoTime() < deadline) {
+            driver.reconcile();
+            last = store.observations().read(PIPELINE).orElse(null);
+            if (last != null && done.test(last)) {
+                return last;
+            }
+            sleep(50);
+        }
+        throw new AssertionError("observation did not satisfy the condition within budget; last was "
+                + (last == null ? "absent" : last.metrics() + " / positions " + last.positions()));
     }
 
     private static void awaitStatus(Job job, JobStatus expected) {
