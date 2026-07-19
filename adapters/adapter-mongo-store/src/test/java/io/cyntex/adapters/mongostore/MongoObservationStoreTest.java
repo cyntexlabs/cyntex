@@ -69,6 +69,34 @@ class MongoObservationStoreTest {
     }
 
     @Test
+    void documentCarriesPerTablePositions() {
+        Observation obs = new Observation("orders_sync", PipelineState.RUNNING,
+                Map.of(), Map.of(), Map.of("orders", "w7"));
+
+        Document document = MongoObservationStore.toDocument(obs);
+
+        assertThat(document.get("positions")).isInstanceOf(Document.class);
+        assertThat(((Document) document.get("positions")).get("orders")).isEqualTo("w7");
+    }
+
+    @Test
+    void roundTripPreservesPerTablePositions() {
+        Observation obs = new Observation("orders_sync", PipelineState.RUNNING,
+                Map.of("recordCount", 5L), Map.of(), Map.of("orders", "w7"));
+
+        assertThat(MongoObservationStore.toObservation(MongoObservationStore.toDocument(obs))).isEqualTo(obs);
+    }
+
+    @Test
+    void toObservationOnADocumentMissingPositionsReadsEmptyPositions() {
+        // An observation written before positions existed has no positions field; it reads back empty
+        // (unavailable), never a crash.
+        Document legacy = new Document("_id", "p1").append("state", "RUNNING");
+
+        assertThat(MongoObservationStore.toObservation(legacy).positions()).isEmpty();
+    }
+
+    @Test
     void toObservationOnADocumentMissingStateIsDocumentUnreadable() {
         Document corrupt = new Document("_id", "p1").append("metrics", new Document());
 
@@ -97,6 +125,34 @@ class MongoObservationStoreTest {
         Document corrupt = new Document("_id", "p1")
                 .append("state", "RUNNING")
                 .append("metrics", new Document("recordCount", "not-a-number"));
+
+        Throwable thrown = catchThrowable(() -> MongoObservationStore.toObservation(corrupt));
+
+        assertThat(thrown).isInstanceOf(CyntexException.class);
+        assertThat(((CyntexException) thrown).code()).isEqualTo(IoError.DOCUMENT_UNREADABLE);
+    }
+
+    @Test
+    void toObservationOnAWrongTypedPositionValueIsDocumentUnreadable() {
+        // A per-table position stored as a non-string is store corruption, surfaced as a coded io
+        // diagnostic rather than a bare crash while reconstructing.
+        Document corrupt = new Document("_id", "p1")
+                .append("state", "RUNNING")
+                .append("positions", new Document("orders", 42));
+
+        Throwable thrown = catchThrowable(() -> MongoObservationStore.toObservation(corrupt));
+
+        assertThat(thrown).isInstanceOf(CyntexException.class);
+        assertThat(((CyntexException) thrown).code()).isEqualTo(IoError.DOCUMENT_UNREADABLE);
+    }
+
+    @Test
+    void toObservationOnANonDocumentPositionsFieldIsDocumentUnreadable() {
+        // A positions field stored as something other than a sub-document is store corruption, surfaced
+        // as a coded io diagnostic rather than a bare cast crash while reconstructing.
+        Document corrupt = new Document("_id", "p1")
+                .append("state", "RUNNING")
+                .append("positions", "not-a-document");
 
         Throwable thrown = catchThrowable(() -> MongoObservationStore.toObservation(corrupt));
 
