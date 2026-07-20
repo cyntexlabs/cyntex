@@ -3,11 +3,13 @@ package io.cyntex.control.core;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 
 import io.cyntex.core.catalog.ConnectorCatalogEntry;
 import io.cyntex.core.catalog.CyntexCatalog;
+import io.cyntex.core.common.CyntexException;
 import io.cyntex.spi.store.ConnectorCatalogStore;
 
 /**
@@ -46,5 +48,20 @@ public final class ConnectorCatalogView {
             summaries.add(ConnectorSummary.of(entry, registeredIds.contains(entry.id()) ? REGISTERED : BUNDLED));
         }
         return summaries;
+    }
+
+    /** One live connector row with the normalized fields a safe dynamic form consumes. */
+    public ConnectorDetail detail(String id) {
+        Objects.requireNonNull(id, "id");
+        List<ConnectorCatalogEntry> registered = store.list();
+        boolean registeredOrigin = registered.stream().anyMatch(entry -> entry.id().equals(id));
+        ConnectorCatalogEntry entry;
+        try {
+            entry = CyntexCatalog.merged(bundled, registered).byId(id);
+        } catch (IllegalArgumentException error) {
+            throw new CyntexException(
+                    ConnectorCatalogError.NOT_FOUND, Map.of("connector", id), error);
+        }
+        return ConnectorDetail.of(entry, registeredOrigin ? REGISTERED : BUNDLED);
     }
 }

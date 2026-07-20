@@ -3,6 +3,7 @@ package io.cyntex.control.restapi;
 import io.cyntex.control.core.ApplyService;
 import io.cyntex.control.core.ArtifactQueryService;
 import io.cyntex.control.core.AuditGate;
+import io.cyntex.control.core.AuditedSourceService;
 import io.cyntex.control.core.BootstrapService;
 import io.cyntex.control.core.ConnectionTestResultQueryService;
 import io.cyntex.control.core.ConnectionTestService;
@@ -20,6 +21,8 @@ import io.cyntex.control.core.PipelineObservationQueryService;
 import io.cyntex.control.core.SchemaDiscoveryService;
 import io.cyntex.control.core.SchemaQueryService;
 import io.cyntex.control.core.Scope;
+import io.cyntex.control.core.SourceRepresentation;
+import io.cyntex.control.core.SourceService;
 import io.cyntex.control.core.TokenSecrets;
 import io.cyntex.control.core.TokenService;
 import io.cyntex.control.core.TokenSigner;
@@ -566,6 +569,17 @@ class PipelineApiTest {
         @Bean
         PipelineLogQueryService pipelineLogQueryService(LogSink sink) {
             return new PipelineLogQueryService(sink);
+        }
+
+        @Bean
+        SourceService sourceService(ArtifactStore store) {
+            CyntexCatalog catalog = CyntexCatalog.load();
+            return new SourceService(catalog, store, new SourceRepresentation(catalog));
+        }
+
+        @Bean
+        AuditedSourceService auditedSourceService(SourceService sourceService, AuditGate auditGate) {
+            return new AuditedSourceService(sourceService, auditGate);
         }
     }
 

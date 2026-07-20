@@ -16,12 +16,18 @@ class ControlOperationsTest {
                         "artifact.apply",
                         "artifact.get",
                         "artifact.list",
+                        "source.create",
+                        "source.list",
+                        "source.get",
+                        "source.update",
+                        "source.delete",
                         "connection.test",
                         "connection.test-result",
                         "connection.discover-schema",
                         "connection.schema",
                         "connector.register",
                         "connector.list",
+                        "connector.get",
                         "cluster.members",
                         "pipeline.start",
                         "pipeline.stop",
@@ -44,6 +50,11 @@ class ControlOperationsTest {
         assertThat(registry.resolve("artifact.apply").scope()).isEqualTo(Scope.WRITE);
         assertThat(registry.resolve("artifact.get").scope()).isEqualTo(Scope.READ);
         assertThat(registry.resolve("artifact.list").scope()).isEqualTo(Scope.READ);
+        assertThat(registry.resolve("source.create").scope()).isEqualTo(Scope.WRITE);
+        assertThat(registry.resolve("source.list").scope()).isEqualTo(Scope.READ);
+        assertThat(registry.resolve("source.get").scope()).isEqualTo(Scope.READ);
+        assertThat(registry.resolve("source.update").scope()).isEqualTo(Scope.WRITE);
+        assertThat(registry.resolve("source.delete").scope()).isEqualTo(Scope.WRITE);
         // connection.test persists its result for later query, so it is a state-mutating write.
         assertThat(registry.resolve("connection.test").scope()).isEqualTo(Scope.WRITE);
         // connection.test-result reads back the latest persisted result; it mutates nothing, so it is read.
@@ -59,6 +70,7 @@ class ControlOperationsTest {
         // connector.list reads the online catalog view (bundled snapshot union registered rows); it
         // mutates nothing, so it is read.
         assertThat(registry.resolve("connector.list").scope()).isEqualTo(Scope.READ);
+        assertThat(registry.resolve("connector.get").scope()).isEqualTo(Scope.READ);
         // cluster.members reads live topology; it is authenticated like every registry operation, but
         // needs no write or admin privilege.
         assertThat(registry.resolve("cluster.members").scope()).isEqualTo(Scope.READ);
@@ -81,6 +93,9 @@ class ControlOperationsTest {
         for (String id :
                 List.of(
                         "artifact.apply",
+                        "source.create",
+                        "source.update",
+                        "source.delete",
                         "connection.test",
                         "connection.discover-schema",
                         "connector.register",
@@ -94,19 +109,32 @@ class ControlOperationsTest {
                         "token.revoke")) {
             assertThat(registry.resolve(id).audited()).as(id).isTrue();
         }
-        for (String id : List.of("artifact.get", "artifact.list", "connection.test-result", "connection.schema",
-                "connector.list", "cluster.members", "pipeline.status", "pipeline.metrics", "pipeline.snapshot",
-                "pipeline.logs", "user.list", "token.list")) {
+        for (String id : List.of(
+                "artifact.get",
+                "artifact.list",
+                "source.list",
+                "source.get",
+                "connection.test-result",
+                "connection.schema",
+                "connector.list",
+                "connector.get",
+                "cluster.members",
+                "user.list",
+                "token.list",
+                "pipeline.status",
+                "pipeline.metrics",
+                "pipeline.snapshot",
+                "pipeline.logs")) {
             assertThat(registry.resolve(id).audited()).as(id).isFalse();
         }
     }
 
     @Test
     void theRegistryOpensEveryL1OperationOnTheCliFaceAtPoc() {
-        // a scope statement about the registry alone: L1 opens all 24 operations on the CLI face and
+        // a scope statement about the registry alone: L1 opens all 30 operations on the CLI face and
         // clips none of them below POC. Whether each one has a verb behind it is not knowable from here
         // — control-core cannot see the CLI — and is gated where both are visible, in arch-tests.
-        assertThat(registry.exposedOn(Frontend.CLI, Maturity.POC)).hasSize(24);
+        assertThat(registry.exposedOn(Frontend.CLI, Maturity.POC)).hasSize(30);
         assertThat(registry.all()).allSatisfy(op ->
                 assertThat(op.exposure()).as(op.id()).containsEntry(Frontend.CLI, Maturity.POC));
     }

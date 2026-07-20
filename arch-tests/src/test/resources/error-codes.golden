@@ -24,6 +24,7 @@ connector.class-not-found
 connector.discover-failed
 connector.load-failed
 connector.no-connector-class
+connector.not-found
 connector.not-registered
 connector.projection-failed
 connector.registration-conflict
@@ -62,6 +63,12 @@ lifecycle.incompatible-revision
 lifecycle.unknown-pipeline
 monitor.no-observation
 role.unsupported
+source.already-exists
+source.id-mismatch
+source.in-use
+source.not-found
+source.precondition-required
+source.version-conflict
 store.invalid-uri
 store.not-replica-set
 store.tls-ca-unreadable

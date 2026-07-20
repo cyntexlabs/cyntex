@@ -221,6 +221,10 @@ class RingDependencyRulesTest {
                         "io.cyntex.messages..",
                         // Spring is permitted in the control ring (rest-api is the HTTP layer)
                         "org.springframework..",
+                        // Jackson annotations and databind are the JSON substrate used only by the HTTP
+                        // projection to enforce request shape and response omission rules.
+                        "com.fasterxml.jackson.annotation..",
+                        "tools.jackson.databind..",
                         // the Servlet API is the substrate the Web MVC servlet stack runs on; the HTTP
                         // layer's interceptor and controllers read the request through it
                         "jakarta.servlet..")

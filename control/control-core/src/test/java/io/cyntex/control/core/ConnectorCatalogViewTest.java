@@ -1,6 +1,7 @@
 package io.cyntex.control.core;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.util.List;
 
@@ -67,5 +68,46 @@ class ConnectorCatalogViewTest {
         String bundledId = BUNDLED.ids().get(0);
         ConnectorSummary bundled = summaries.stream().filter(s -> s.id().equals(bundledId)).findFirst().orElseThrow();
         assertThat(bundled.origin()).isEqualTo("bundled");
+    }
+
+    @Test
+    void detailProjectsTheNormalizedConfigWithoutRawFormilyExpressions() {
+        InMemoryConnectorCatalogStore store = new InMemoryConnectorCatalogStore();
+        ConnectorCatalogView view = new ConnectorCatalogView(BUNDLED, store);
+
+        ConnectorDetail detail = view.detail("mysql");
+
+        assertThat(detail.id()).isEqualTo("mysql");
+        assertThat(detail.origin()).isEqualTo("bundled");
+        assertThat(detail.config()).anySatisfy(field -> {
+            assertThat(field.name()).isEqualTo("password");
+            assertThat(field.type()).isEqualTo("string");
+            assertThat(field.secret()).isTrue();
+        });
+        assertThat(detail.config()).anySatisfy(field -> {
+            assertThat(field.name()).isEqualTo("host");
+            assertThat(field.visibleWhen()).isNotNull();
+            assertThat(field.visibleWhen().controllingField()).isEqualTo("deploymentMode");
+            assertThat(field.visibleWhen().equalsAnyOf()).containsExactly("standalone");
+        });
+    }
+
+    @Test
+    void detailReadsTheLiveRegisteredOverlayAndTagsItsOrigin() {
+        InMemoryConnectorCatalogStore store = new InMemoryConnectorCatalogStore();
+        ConnectorCatalogView view = new ConnectorCatalogView(BUNDLED, store);
+
+        store.upsert(CatalogEntryReader.read(ACME_ROW));
+
+        assertThat(view.detail("acme").origin()).isEqualTo("registered");
+    }
+
+    @Test
+    void detailRejectsAnUnknownConnectorWithACodedError() {
+        ConnectorCatalogView view = new ConnectorCatalogView(BUNDLED, new InMemoryConnectorCatalogStore());
+
+        assertThatThrownBy(() -> view.detail("missing"))
+                .isInstanceOfSatisfying(io.cyntex.core.common.CyntexException.class,
+                        error -> assertThat(error.code().code()).isEqualTo("connector.not-found"));
     }
 }

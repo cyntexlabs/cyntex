@@ -176,7 +176,16 @@ class ConnectorApiTest {
             {
               "id": "orders", "name": "Orders", "displayName": "Orders", "icon": null,
               "group": "database", "modes": ["snapshot"], "discovery": "catalog",
-              "sink": {"capable": false, "writeSemantics": []}, "pushOut": false, "config": [],
+              "sink": {"capable": false, "writeSemantics": []}, "pushOut": false,
+              "config": [
+                {"name": "authType", "type": "string", "label": {"en_US": "Authentication"},
+                  "required": false, "default": "password", "secret": false,
+                  "options": [{"value": "password", "label": {"en_US": "Password"}}],
+                  "visibleWhen": null},
+                {"name": "password", "type": "string", "label": {"en_US": "Password"},
+                  "required": false, "default": null, "secret": true, "options": [],
+                  "visibleWhen": {"controllingField": "authType", "equalsAnyOf": ["password"]}}
+              ],
               "provenance": {"connectorRepoSha": null, "specPath": "spec.json", "specContentHash": "h",
                 "pdkApiVersion": "1.3.5", "requiredLevel": null, "modeSource": {"snapshot": "derived"}}
             }
@@ -202,6 +211,40 @@ class ConnectorApiTest {
                 .exchange((request, response) -> response.getStatusCode());
 
         assertThat(status).isEqualTo(HttpStatus.UNAUTHORIZED);
+    }
+
+    @Test
+    void getsOneConnectorWithItsNormalizedConfig() {
+        context.getBean(SeedableConnectorCatalogStore.class).upsert(CatalogEntryReader.read(ORDERS_ROW));
+
+        Map<?, ?> detail = client().get().uri("/api/connectors/orders")
+                .header("Authorization", "Bearer " + token(Scope.READ))
+                .retrieve().body(Map.class);
+
+        assertThat(detail.get("id")).isEqualTo("orders");
+        assertThat(detail.get("origin")).isEqualTo("registered");
+        List<?> config = (List<?>) detail.get("config");
+        assertThat(config).hasSize(2);
+        Map<?, ?> password = (Map<?, ?>) config.get(1);
+        assertThat(password.get("name")).isEqualTo("password");
+        assertThat(password.get("type")).isEqualTo("string");
+        assertThat(password.get("label")).isEqualTo("Password");
+        assertThat(password.get("secret")).isEqualTo(true);
+        assertThat(password.containsKey("x-component")).isFalse();
+        assertThat(password.containsKey("x-reactions")).isFalse();
+    }
+
+    @Test
+    void gettingAnUnknownConnectorReturnsACodedNotFound() {
+        ApiError body = client().get().uri("/api/connectors/missing")
+                .header("Authorization", "Bearer " + token(Scope.READ))
+                .exchange((request, response) -> {
+                    assertThat(response.getStatusCode()).isEqualTo(HttpStatus.NOT_FOUND);
+                    return response.bodyTo(ApiError.class);
+                });
+
+        assertThat(body.code()).isEqualTo("connector.not-found");
+        assertThat(body.params()).containsEntry("connector", "missing");
     }
 
     // ---- the verb is a write, guarded like every other ----

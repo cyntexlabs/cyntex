@@ -14,6 +14,7 @@ import io.cyntex.control.core.ApplyService;
 import io.cyntex.control.core.ConnectorCatalogView;
 import io.cyntex.control.core.ArtifactQueryService;
 import io.cyntex.control.core.AuditGate;
+import io.cyntex.control.core.AuditedSourceService;
 import io.cyntex.control.core.BootstrapService;
 import io.cyntex.control.core.ConnectionTestResultQueryService;
 import io.cyntex.control.core.ConnectionTestService;
@@ -28,6 +29,8 @@ import io.cyntex.control.core.PipelineLogQueryService;
 import io.cyntex.control.core.PipelineObservationQueryService;
 import io.cyntex.control.core.SchemaDiscoveryService;
 import io.cyntex.control.core.SchemaQueryService;
+import io.cyntex.control.core.SourceRepresentation;
+import io.cyntex.control.core.SourceService;
 import io.cyntex.control.core.TokenSecrets;
 import io.cyntex.control.core.TokenService;
 import io.cyntex.control.core.TokenSigner;
@@ -330,6 +333,22 @@ class ControlPlaneConfiguration {
     @Bean
     PipelineLogQueryService pipelineLogQueryService(LogSink logSink) {
         return new PipelineLogQueryService(logSink);
+    }
+
+    @Bean
+    SourceRepresentation sourceRepresentation(ConnectorCatalogView connectorCatalogView) {
+        return new SourceRepresentation(connectorCatalogView::merged);
+    }
+
+    @Bean
+    SourceService sourceService(
+            ConnectorCatalogView connectorCatalogView, StorePort storePort, SourceRepresentation representation) {
+        return new SourceService(connectorCatalogView::merged, storePort.artifacts(), representation);
+    }
+
+    @Bean
+    AuditedSourceService auditedSourceService(SourceService sourceService, AuditGate auditGate) {
+        return new AuditedSourceService(sourceService, auditGate);
     }
 
     /**

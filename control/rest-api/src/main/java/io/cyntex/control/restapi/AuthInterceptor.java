@@ -57,6 +57,7 @@ final class AuthInterceptor implements HandlerInterceptor {
 
     @Override
     public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) {
+        request.removeAttribute(PRINCIPAL_ATTRIBUTE);
         if (!(handler instanceof HandlerMethod method)) {
             // Not a controller method (e.g. a static-resource handler); there is no operation to authorize.
             return true;
@@ -75,10 +76,11 @@ final class AuthInterceptor implements HandlerInterceptor {
         if (credential.isEmpty()) {
             throw new CyntexException(ControlError.UNAUTHENTICATED, Map.of(), null);
         }
-        Authorization.require(credential.get(), op);
+        VerifiedToken verified = credential.get();
+        Authorization.require(verified, op);
         // The caller is now authenticated and authorized; expose its subject so an audited handler attributes
         // the operation to the session, never to anything the request body could forge.
-        request.setAttribute(PRINCIPAL_ATTRIBUTE, credential.get().subject());
+        request.setAttribute(PRINCIPAL_ATTRIBUTE, verified.subject());
         return true;
     }
 
