@@ -5,10 +5,12 @@ engine. You describe your integration resources — sources, pipelines, transfor
 views and publish surfaces — as small declarative `.cyn.yml` documents, and Cyntex
 takes care of moving and reshaping the data.
 
-This repository currently ships the **offline authoring CLI**: a single native
-binary that lets you create, validate and explore `.cyn.yml` resources on a
-machine with no server, no database, and no network. The runtime that executes
-these resources lands in later releases.
+This repository ships the **offline authoring CLI** — a single native binary that
+lets you create, validate and explore `.cyn.yml` resources on a machine with no
+server, no database, and no network — plus an early **preview runtime**: a server
+that executes those resources as live pipelines. This README covers the offline
+CLI; for the runtime (build → start a server → run a real sync) see
+[docs/quickstart-online.md](docs/quickstart-online.md).
 
 ## Requirements
 
@@ -197,12 +199,14 @@ kind: source
 ## Scope of this release
 
 `cyntex --help` lists every verb. Beyond the five offline verbs above,
-`connect` / `apply` / `run` / `export` / `diff` / `status` / `logs` (and friends)
-require a Cyntex server; the current native build is offline-only and exits with
-code `3` for those. They arrive in later releases. What you can do today is the
-full offline loop: **create (`new`) → edit → browse (`ls` / `desc` / `explain`) →
-validate**, producing `.cyn.yml` resources that later become the input to the
-runtime.
+`connect` / `login` / `register` / `apply` / `discover-schema` / `start` /
+`status` / `metrics` / `logs` (and friends) drive a running Cyntex server — see
+[docs/quickstart-online.md](docs/quickstart-online.md) for the end-to-end runtime
+flow (build → start a server → run a real sync). That runtime is an early
+**preview** (single-node, in-memory; see the doc's limitations); offline, without a
+connection, those verbs exit with code `3`. The offline loop is still the fastest
+way to author: **create (`new`) → edit → browse (`ls` / `desc` / `explain`) →
+validate**, producing `.cyn.yml` resources that the runtime then executes.
 
 ## Contributing
 
